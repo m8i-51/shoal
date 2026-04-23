@@ -20,7 +20,7 @@ export function saveFinding(finding: Finding): void {
 
 export function initRunLog(agentCount: number, repo: string): void {
   runLog = {
-    runId: `run_${Date.now()}`,
+    runId: process.env.SHOAL_RUN_ID ?? `run_${Date.now()}`,
     startedAt: new Date().toISOString(),
     completedAt: null,
     repo,
@@ -40,6 +40,7 @@ export function initRunLog(agentCount: number, repo: string): void {
 }
 
 export function saveRunLog(): void {
+  if (!runLog) return; // initRunLog が呼ばれる前にエラーが起きた場合はスキップ
   const logsDir = path.join(process.cwd(), "logs");
   if (!fs.existsSync(logsDir)) {
     fs.mkdirSync(logsDir, { recursive: true });

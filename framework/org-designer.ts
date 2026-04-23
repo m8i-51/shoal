@@ -14,9 +14,11 @@ export const UNIVERSAL_LENSES = [
   "Business logic: calculation accuracy, status transitions, approval flow correctness / ビジネスロジック観点",
   "Data integrity: UI reflects actual state after actions, silent save failures / データ整合性観点",
   "New user: first-time usability, instruction clarity, error recovery / 新規ユーザー観点",
+  "UI design: visual consistency across screens, spacing and alignment, typography hierarchy, color usage, component coherence — flag anything that looks broken, inconsistent, or visually confusing / UIデザイン観点",
+  "Product/PM: feature discoverability, user journey clarity, obvious next actions, drop-off risk points, call-to-action prominence, whether the app communicates its value clearly / プロダクト・PM観点",
 ];
 
-export async function designOrg(spec: ProductSpec, client: LLMClient, model: string): Promise<OrgDesign> {
+export async function designOrg(spec: ProductSpec, client: LLMClient, model: string, coverageSummary?: string): Promise<OrgDesign> {
   console.log("\n[org-design] starting...");
 
   const response = await createMessageWithRetry(client, {
@@ -39,7 +41,7 @@ ${spec.targetUsers}
 
 [Implemented Features]
 ${spec.features}
-
+${spec.designContext ? `\n[Design Context]\n${spec.designContext}\n` : ""}${coverageSummary ? `\n[Coverage History]\n${coverageSummary}\nUse this to identify underrepresented perspectives and adjust the recruitment policy accordingly.\n` : ""}
 Please output the following:
 
 ## User types for this app

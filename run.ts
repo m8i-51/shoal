@@ -6,7 +6,8 @@
  *   ANTHROPIC_API_KEY=xxx GITHUB_TOKEN=xxx GITHUB_REPO=owner/repo npx tsx run.ts
  */
 
-import "dotenv/config";
+import { config as loadEnv } from "dotenv";
+loadEnv({ override: true }); // .env を常に優先（継承した環境変数を上書き）
 import Anthropic from "@anthropic-ai/sdk";
 import { chromium, type Page } from "playwright";
 import * as fs from "fs";
@@ -16,7 +17,8 @@ import type { Tool } from "./framework/llm-client";
 import { createMessageWithRetry, runAgentLoop, sleep, rateLimitRetries } from "./framework/agent-loop";
 import { collectedFindings, initRunLog, saveRunLog, saveFinding, runLog } from "./framework/findings";
 import { loadAgents, addAgent, retireAgent } from "./framework/agent-store";
-import { postGitHubIssue, fetchClosedIssues } from "./framework/github";
+import { updateCoverage, computeWeightedSummary } from "./framework/coverage";
+import { postGitHubIssue, fetchClosedIssues, fetchOpenIssues } from "./framework/github";
 import {
   setupObservation,
   getRecentConsoleLogs,
@@ -30,7 +32,9 @@ import {
 } from "./framework/observation";
 import { discoverProduct, loadCachedSpec, type ProductSpec } from "./framework/product-discovery";
 import { designOrg, UNIVERSAL_LENSES } from "./framework/org-designer";
+import { designScenarios, type Scenario, type ScenarioOutcome } from "./framework/scenario-designer";
 import { runTriageAgent } from "./framework/triage";
+import { generateReport } from "./framework/report";
 import type { AgentLog, Finding, RegressionCheck } from "./framework/types";
 import { loadTarget } from "./targets";
 
@@ -40,7 +44,27 @@ const GITHUB_REPO = process.env.GITHUB_REPO ?? "";
 const githubOptions = { token: GITHUB_TOKEN, repo: GITHUB_REPO };
 
 const TARGET = process.env.TARGET ?? "none";
-const targetConfig = loadTarget(TARGET);
+let targetConfig = loadTarget(TARGET);
+
+// Load shoal.config.ts / .js / .mjs from the working directory if present
+for (const name of ["shoal.config.ts", "shoal.config.js", "shoal.config.mjs"]) {
+  const cfgPath = path.join(process.cwd(), name);
+  if (fs.existsSync(cfgPath)) {
+    try {
+      const mod = await import(cfgPath);
+      const t = mod.target ?? mod.default?.target;
+      if (t?.appTools && typeof t?.execute === "function") {
+        targetConfig = t;
+        console.log(`[config] loaded: ${name}`);
+      } else {
+        console.warn(`[config] ${name} found but does not export a valid target`);
+      }
+    } catch (e) {
+      console.warn(`[config] failed to load ${name}:`, e);
+    }
+    break;
+  }
+}
 
 // skip exploration when no API tools are configured
 const MAX_EXPLORERS = targetConfig.appTools.length > 0
@@ -120,15 +144,51 @@ const MARK_VERIFIED_TOOL: Tool = {
   },
 };
 
-const EXPLORER_TOOLS: Tool[] = [...targetConfig.appTools, POST_FEEDBACK_TOOL];
+const POST_OUTCOME_TOOL: Tool = {
+  name: "post_outcome",
+  description: "Record whether you achieved your scenario goal. Call this at the end of your run if you were given a [Your Task for This Run] section. / [Your Task for This Run] セクションがある場合のみ、run の最後にゴール達成可否を記録する",
+  input_schema: {
+    type: "object",
+    properties: {
+      achieved: {
+        type: "boolean",
+        description: "true if you successfully completed the goal, false if you could not",
+      },
+      reason: {
+        type: "string",
+        description: "Brief explanation (1-2 sentences) of why the goal was or was not achieved",
+      },
+    },
+    required: ["achieved", "reason"],
+  },
+};
+
+const EXPLORER_TOOLS: Tool[] = [...targetConfig.appTools, POST_FEEDBACK_TOOL, POST_OUTCOME_TOOL];
 const REGRESSION_TOOLS: Tool[] = [...targetConfig.appTools, REPORT_REGRESSION_TOOL, MARK_VERIFIED_TOOL];
 
-function makeExecutor(agentLog: AgentLog) {
+function makeExecutor(agentLog: AgentLog, scenarioOutcomes: ScenarioOutcome[], scenario?: Scenario) {
   return async (toolName: string, input: Record<string, unknown>): Promise<string> => {
     const startedAt = Date.now();
     let result: unknown;
     try {
       switch (toolName) {
+        case "post_outcome": {
+          const { achieved, reason } = input as { achieved: boolean; reason: string };
+          if (scenario) {
+            const outcome: ScenarioOutcome = {
+              scenarioId: scenario.id,
+              scenarioTitle: scenario.title,
+              agentId: agentLog.agentId,
+              agentName: agentLog.agentName,
+              achieved: Boolean(achieved),
+              reason: String(reason),
+            };
+            scenarioOutcomes.push(outcome);
+            console.log(`  ${achieved ? "✓" : "✗"} [outcome] "${scenario.title}": ${achieved ? "achieved" : "NOT achieved"} — ${reason}`);
+          }
+          result = { recorded: true };
+          break;
+        }
         case "post_feedback": {
           const { title, body, category } = input as { title: string; body: string; category: string };
           const safeCategory = VALID_CATEGORIES.includes(String(category)) ? String(category) : "ux";
@@ -213,9 +273,15 @@ function makeExecutor(agentLog: AgentLog) {
 async function runExplorer(
   agent: { id: string; name: string; persona: string; role: string },
   productSpec: ProductSpec,
-  lens?: string
+  assignment: { scenario?: Scenario; lens?: string } = {},
+  scenarioOutcomes: ScenarioOutcome[] = [],
 ) {
-  console.log(`\n[explorer] ${agent.name} start${lens ? ` [lens: ${lens.slice(0, 30)}...]` : ""}`);
+  const assignmentLabel = assignment.scenario
+    ? `[scenario: ${assignment.scenario.title.slice(0, 35)}]`
+    : assignment.lens
+    ? `[lens: ${assignment.lens.slice(0, 30)}...]`
+    : "[free exploration]";
+  console.log(`\n[explorer] ${agent.name} start ${assignmentLabel}`);
   const agentLog: AgentLog = {
     agentType: "explorer",
     agentId: agent.id,
@@ -246,10 +312,14 @@ report it with the post_feedback tool.
 
 [Implemented Features]
 ${productSpec.features}
-${lens ? `\n[Focus Area for This Run]\n${lens}\nKeep this perspective in mind and prioritize reporting related issues.\n` : ""}
+${productSpec.uiFeatures ? `\n[UI-Only Features]\nThese features exist in the UI but may not be reflected in API responses. Keep them in mind when interpreting API results.\n${productSpec.uiFeatures}\n` : ""}${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${assignment.scenario
+    ? `\n[Your Task for This Run]\nTitle: ${assignment.scenario.title}\nYou are: ${assignment.scenario.context}\nGoal: ${assignment.scenario.goal}\nConstraints: ${assignment.scenario.constraints}\n\nFocus on completing this task naturally. Report any issues you encounter along the way.\nWhen done (or if you cannot complete the goal), call post_outcome with achieved=true/false and a brief reason.\n`
+    : assignment.lens
+    ? `\n[Focus Area for This Run]\n${assignment.lens}\nKeep this perspective in mind and prioritize reporting related issues.\n`
+    : ""}
 Take 3–5 actions, then finish.`;
 
-  await runAgentLoop(agentLog, systemPrompt, EXPLORER_TOOLS, client, defaultModel, makeExecutor(agentLog));
+  await runAgentLoop(agentLog, systemPrompt, EXPLORER_TOOLS, client, defaultModel, makeExecutor(agentLog, scenarioOutcomes, assignment.scenario));
   console.log(`[explorer] ${agent.name} done`);
 }
 
@@ -293,9 +363,10 @@ ${issueList}
 4. Finish after checking all items
 
 [Reference: Implemented Features]
-${productSpec.features}`;
+${productSpec.features}
+${productSpec.uiFeatures ? `\n[UI-Only Features]\nThese features exist in the UI but may not be reflected in API responses.\n${productSpec.uiFeatures}\n` : ""}${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}` : ""}`;
 
-  await runAgentLoop(agentLog, systemPrompt, REGRESSION_TOOLS, client, defaultModel, makeExecutor(agentLog));
+  await runAgentLoop(agentLog, systemPrompt, REGRESSION_TOOLS, client, defaultModel, makeExecutor(agentLog, []));
   const checked = agentLog.regressionChecks.length;
   const failed = agentLog.regressionChecks.filter((c) => c.status === "regressed").length;
   console.log(`[regression] ${agent.name} done (checked: ${checked} / regressed: ${failed})`);
@@ -309,6 +380,21 @@ const HR_TOOLS: Anthropic.Tool[] = [
   {
     name: "get_agents",
     description: "Get the current list of registered agents. / 現在登録されているエージェント一覧を取得する",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "get_coverage",
+    description: "Get a weighted summary of what has been explored across past runs. Use this to identify underrepresented lenses and perspectives before deciding whom to hire. / 過去のrunで何がどれだけ探索されたかの重み付きサマリーを取得する。採用方針の決定前に確認すること",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "get_open_issues",
+    description: "Get the titles and labels of currently open GitHub Issues (known problems). Use this to understand what is already known and recruit agents who are likely to explore DIFFERENT areas. / 現在オープンなGitHub Issueのタイトルとラベルを取得する。既知の問題を把握し、未探索領域を掘れるペルソナを採用するために使う",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "get_scenarios",
+    description: "Get the user test scenarios generated for this run. About 70% of agents will be assigned one of these scenarios — recruit personas whose background and role naturally fit the scenario contexts. / 今回のrunで生成されたユーザーシナリオ一覧を取得する。エージェントの約70%にシナリオが割り当てられるため、シナリオの文脈に自然にフィットするペルソナを採用すること",
     input_schema: { type: "object", properties: {}, required: [] },
   },
   {
@@ -338,7 +424,12 @@ const HR_TOOLS: Anthropic.Tool[] = [
   },
 ];
 
-async function runHRAgent(productSpec: ProductSpec, orgGuidance: string): Promise<void> {
+async function runHRAgent(
+  productSpec: ProductSpec,
+  orgGuidance: string,
+  openIssues: { number: number; title: string; labels: string[] }[],
+  scenarios: Scenario[],
+): Promise<void> {
   console.log("\n[hr] starting...");
   const messages: Anthropic.MessageParam[] = [
     { role: "user", content: "Manage agent hiring and retirement." },
@@ -350,9 +441,12 @@ You recruit and manage agents that simulate real users of the app.
 ${orgGuidance}
 
 [Steps]
-1. Call get_agents to check the current agent roster
-2. Based on the guidelines, add 2–3 agents with add_agent for underrepresented user types
-3. If there are agents with old createdAt dates (oldest 1–2), retire them with retire_agent`;
+1. Call get_coverage to review which lenses and categories are underrepresented in past runs
+2. Call get_open_issues to understand what problems are already known — recruit agents likely to find DIFFERENT issues in unexplored areas
+3. Call get_scenarios to see the user test scenarios generated for this run — about 70% of agents will be assigned a scenario, so recruit personas whose background fits those scenarios
+4. Call get_agents to check the current agent roster
+5. Add 2–3 agents with add_agent — balance between scenario-fit personas (step 3), underrepresented lenses (step 1), and unexplored areas (step 2)
+6. If there are agents with old createdAt dates (oldest 1–2), retire them with retire_agent`;
 
   try {
     let iterations = 0;
@@ -373,7 +467,26 @@ ${orgGuidance}
       const toolResults: Anthropic.ToolResultBlockParam[] = [];
       for (const toolUse of toolUses) {
         let result: unknown;
-        if (toolUse.name === "get_agents") {
+        if (toolUse.name === "get_coverage") {
+          result = computeWeightedSummary().formatted;
+          console.log("  [hr] coverage summary fetched");
+        } else if (toolUse.name === "get_open_issues") {
+          if (openIssues.length === 0) {
+            result = "(no open issues — either GitHub is not configured or there are no known issues yet)";
+          } else {
+            result = openIssues.map((i) => `- #${i.number}: ${i.title} [${i.labels.join(", ")}]`).join("\n");
+          }
+          console.log(`  [hr] open issues fetched (${openIssues.length})`);
+        } else if (toolUse.name === "get_scenarios") {
+          if (scenarios.length === 0) {
+            result = "(no scenarios generated — all agents will use free-exploration mode)";
+          } else {
+            result = scenarios.map((s) =>
+              `[${s.id}] ${s.title}\n  Context: ${s.context}\n  Goal: ${s.goal}\n  Constraints: ${s.constraints}`
+            ).join("\n\n");
+          }
+          console.log(`  [hr] scenarios fetched (${scenarios.length})`);
+        } else if (toolUse.name === "get_agents") {
           const agents = loadAgents();
           result = agents.map((a) => ({ id: a.id, name: a.name, role: a.role, createdAt: a.createdAt }));
           console.log(`  [hr] current agents: ${agents.length}`);
@@ -511,6 +624,18 @@ const BROWSER_TOOLS: Anthropic.Tool[] = [
       required: ["title", "body", "category"],
     },
   },
+  {
+    name: "post_outcome",
+    description: "Record whether you achieved your scenario goal. Call this at the end of your run if you were given a [Your Task for This Run] section. / [Your Task for This Run] セクションがある場合のみ、run の最後にゴール達成可否を記録する",
+    input_schema: {
+      type: "object",
+      properties: {
+        achieved: { type: "boolean", description: "true if you successfully completed the goal, false if you could not" },
+        reason: { type: "string", description: "Brief explanation (1-2 sentences)" },
+      },
+      required: ["achieved", "reason"],
+    },
+  },
 ];
 
 async function executeBrowserTool(
@@ -519,7 +644,9 @@ async function executeBrowserTool(
   page: Page,
   agentLog: BrowserAgentLog,
   observation: ObservationState,
-  agentId: string
+  agentId: string,
+  scenarioOutcomes: ScenarioOutcome[],
+  scenario?: Scenario,
 ): Promise<{ text: string; screenshot: { base64: string; filePath: string } | null; sendToClaude: boolean }> {
   const startedAt = Date.now();
   let resultText = "";
@@ -632,6 +759,23 @@ async function executeBrowserTool(
         resultText = errors.length > 0 ? JSON.stringify(errors) : "(no network errors)";
         break;
       }
+      case "post_outcome": {
+        const { achieved, reason } = input as { achieved: boolean; reason: string };
+        if (scenario) {
+          const outcome: ScenarioOutcome = {
+            scenarioId: scenario.id,
+            scenarioTitle: scenario.title,
+            agentId,
+            agentName: agentLog.agentName,
+            achieved: Boolean(achieved),
+            reason: String(reason),
+          };
+          scenarioOutcomes.push(outcome);
+          console.log(`  ${achieved ? "✓" : "✗"} [outcome] "${scenario.title}": ${achieved ? "achieved" : "NOT achieved"} — ${reason}`);
+        }
+        resultText = "Outcome recorded.";
+        break;
+      }
       case "post_feedback": {
         const { title, body, category } = input as { title: string; body: string; category: string };
         const safeCategory = VALID_CATEGORIES.includes(String(category)) ? String(category) : "ux";
@@ -684,9 +828,15 @@ async function runBrowserAgent(
   agent: { id: string; name: string; persona: string; role: string },
   page: Page,
   productSpec: ProductSpec,
-  lens?: string
+  assignment: { scenario?: Scenario; lens?: string } = {},
+  scenarioOutcomes: ScenarioOutcome[] = [],
 ): Promise<BrowserAgentLog> {
-  console.log(`\n[browser] ${agent.name} start${lens ? ` [lens: ${lens.slice(0, 30)}...]` : ""}`);
+  const assignmentLabel = assignment.scenario
+    ? `[scenario: ${assignment.scenario.title.slice(0, 35)}]`
+    : assignment.lens
+    ? `[lens: ${assignment.lens.slice(0, 30)}...]`
+    : "[free exploration]";
+  console.log(`\n[browser] ${agent.name} start ${assignmentLabel}`);
 
   const agentLog: BrowserAgentLog = {
     agentName: agent.name,
@@ -735,7 +885,11 @@ ${productSpec.appDescription}
 
 [Reference: Implemented Features]
 ${productSpec.features}
-${lens ? `\n[Focus Area for This Run]\n${lens}\nKeep this perspective in mind and prioritize reporting related issues.` : ""}`;
+${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${assignment.scenario
+    ? `\n[Your Task for This Run]\nTitle: ${assignment.scenario.title}\nYou are: ${assignment.scenario.context}\nGoal: ${assignment.scenario.goal}\nConstraints: ${assignment.scenario.constraints}\n\nFocus on completing this task naturally as this user. Report any issues you encounter along the way.\nWhen done (or if you cannot complete the goal), call post_outcome with achieved=true/false and a brief reason.`
+    : assignment.lens
+    ? `\n[Focus Area for This Run]\n${assignment.lens}\nKeep this perspective in mind and prioritize reporting related issues.`
+    : ""}`;
 
   await page.goto(BASE_URL, { waitUntil: "networkidle" });
   await page.waitForTimeout(1000);
@@ -787,7 +941,9 @@ ${lens ? `\n[Focus Area for This Run]\n${lens}\nKeep this perspective in mind an
           page,
           agentLog,
           observation,
-          agent.id
+          agent.id,
+          scenarioOutcomes,
+          assignment.scenario,
         );
 
         const content: Anthropic.ToolResultBlockParam["content"] =
@@ -853,12 +1009,23 @@ function pickAgents<T>(agents: T[], count: number): T[] {
   return [...agents].sort(() => Math.random() - 0.5).slice(0, count);
 }
 
+// 7:3 ratio: indices where (idx % 10) < 7 get a scenario, rest get a lens
+function pickAssignment(idx: number, scenarios: Scenario[]): { scenario?: Scenario; lens?: string } {
+  if (scenarios.length > 0 && idx % 10 < 7) {
+    return { scenario: scenarios[idx % scenarios.length] };
+  }
+  return { lens: UNIVERSAL_LENSES[idx % UNIVERSAL_LENSES.length] };
+}
+
 async function main() {
   initDirs();
+  // run log を最初期化しておくことで、どの段階でエラーが起きても finally で saveRunLog() が動く
+  initRunLog(0, GITHUB_REPO);
 
   // 1. product discovery (cache or live)
   const browser = await chromium.launch({ headless: true });
   let productSpec: ProductSpec;
+  const scenarioOutcomes: ScenarioOutcome[] = [];
   try {
     const cached = loadCachedSpec(BASE_URL);
     if (cached) {
@@ -867,17 +1034,23 @@ async function main() {
     } else {
       const discoveryContext = await browser.newContext({ viewport: { width: 1024, height: 640 } });
       const discoveryPage = await discoveryContext.newPage();
-      productSpec = await discoverProduct(BASE_URL, discoveryPage, client, defaultModel);
+      productSpec = await discoverProduct(BASE_URL, discoveryPage, client, defaultModel, targetConfig.projectPath);
       await discoveryContext.close();
     }
 
-    // 2. org design
-    const orgDesign = await designOrg(productSpec, client, defaultModel);
+    // 2. org design (coverage-aware)
+    const coverageSummary = computeWeightedSummary();
+    console.log(`\n[coverage] ${coverageSummary.formatted.split("\n")[0]}`);
+    const orgDesign = await designOrg(productSpec, client, defaultModel, coverageSummary.formatted);
 
-    // 3. HR agent
-    await runHRAgent(productSpec, orgDesign.hrGuidance);
+    // 3. open issues + scenario design (both feed into HR)
+    const openIssues = await fetchOpenIssues(githubOptions);
+    const scenarios = await designScenarios(productSpec, openIssues, client, defaultModel, 5);
 
-    // 4. load agents + closed issues
+    // 4. HR agent
+    await runHRAgent(productSpec, orgDesign.hrGuidance, openIssues, scenarios);
+
+    // 5. load agents + closed issues
     const allAgents = loadAgents();
     if (allAgents.length === 0) {
       console.error("No agents found. Check agents.json.");
@@ -885,8 +1058,8 @@ async function main() {
     }
     const closedIssues = await fetchClosedIssues(githubOptions);
 
-    // 5. init run log
-    initRunLog(allAgents.length, GITHUB_REPO);
+    // 5. エージェント数が確定したので totalAgents を更新
+    runLog.summary.totalAgents = allAgents.length;
 
     // 6. API agents (exploration + regression)
     const allExplorers = allAgents.slice(0, -1);
@@ -894,12 +1067,19 @@ async function main() {
     const regressionAgent = allAgents[allAgents.length - 1];
     console.log(`\nexplorers: ${explorerAgents.length} (max: ${MAX_EXPLORERS}) / regression: 1`);
 
+    // agentId → assignment（coverage 計算・レポート生成に使う）
+    const agentAssignments = new Map<string, { scenario?: Scenario; lens?: string }>();
+
+    // シナリオ/レンズ割り当てのグローバルカウンタ（7:3 比率）
+    let dispatchIdx = 0;
+
     const CONCURRENCY = 2;
     for (let i = 0; i < explorerAgents.length; i += CONCURRENCY) {
       const batch = explorerAgents.slice(i, i + CONCURRENCY);
-      await Promise.all(batch.map((agent, j) => {
-        const lens = UNIVERSAL_LENSES[(i + j) % UNIVERSAL_LENSES.length];
-        return runExplorer(agent, productSpec, lens);
+      await Promise.all(batch.map((agent) => {
+        const assignment = pickAssignment(dispatchIdx++, scenarios);
+        agentAssignments.set(agent.id, assignment);
+        return runExplorer(agent, productSpec, assignment, scenarioOutcomes);
       }));
       if (i + CONCURRENCY < explorerAgents.length) {
         console.log("\n[batch done] waiting 5s before next batch...");
@@ -914,7 +1094,9 @@ async function main() {
       await runRegressionAgent(regressionAgent, closedIssues, productSpec);
     } else {
       console.log("\n[regression] no closed issues — running as explorer");
-      await runExplorer(regressionAgent, productSpec, UNIVERSAL_LENSES[explorerAgents.length % UNIVERSAL_LENSES.length]);
+      const assignment = pickAssignment(dispatchIdx++, scenarios);
+      agentAssignments.set(regressionAgent.id, assignment);
+      await runExplorer(regressionAgent, productSpec, assignment, scenarioOutcomes);
     }
 
     // 7. browser agents
@@ -924,12 +1106,13 @@ async function main() {
 
     await sleep(2000);
     await Promise.all(
-      browserAgents.map(async (agent, i) => {
-        const lens = UNIVERSAL_LENSES[(explorerAgents.length + i) % UNIVERSAL_LENSES.length];
+      browserAgents.map(async (agent) => {
+        const assignment = pickAssignment(dispatchIdx++, scenarios);
+        agentAssignments.set(agent.id, assignment);
         const context = await browser.newContext({ viewport: { width: 1024, height: 640 } });
         const page = await context.newPage();
         try {
-          return await runBrowserAgent(agent, page, productSpec, lens);
+          return await runBrowserAgent(agent, page, productSpec, assignment, scenarioOutcomes);
         } finally {
           await context.close();
         }
@@ -939,27 +1122,44 @@ async function main() {
     // 8. triage (API + browser findings)
     await sleep(2000);
     console.log(`\n[triage] collected findings: ${collectedFindings.length}`);
+    let triageResult = { issued: [] as string[], skipped: [] as string[], unprocessed: [] as string[], issuesCreated: 0 };
     try {
-      const triageResult = await runTriageAgent(collectedFindings, client, defaultModel, githubOptions);
+      triageResult = await runTriageAgent(collectedFindings, client, defaultModel, githubOptions);
       runLog.summary.totalIssuesPosted += triageResult.issuesCreated;
     } catch (e) {
       console.error("[triage] error:", e);
     }
 
+    // 9. generate HTML report
+    const reportPath = generateReport(runLog, collectedFindings, triageResult, productSpec, scenarios, agentAssignments, scenarioOutcomes);
+    console.log(`\n[report] ${reportPath}`);
+
+    // 10. update coverage
+    updateCoverage(runLog.runId, collectedFindings, agentAssignments);
+
   } finally {
     await browser.close();
+    // エラー終了時も必ずログを保存する
+    runLog.completedAt = new Date().toISOString();
+    runLog.summary.rateLimitRetries = rateLimitRetries;
+    saveRunLog();
   }
-
-  // 9. done
-  runLog.completedAt = new Date().toISOString();
-  runLog.summary.rateLimitRetries = rateLimitRetries;
-  saveRunLog();
 
   console.log("\nAll agents done.");
   console.log(`  findings collected: ${collectedFindings.length}`);
   console.log(`  GitHub issues created: ${runLog.summary.totalIssuesPosted}`);
   console.log(`  regression checks: ${runLog.summary.regressionChecked} (regressed: ${runLog.summary.regressionFailed})`);
   console.log(`  screenshots: ${screenshotDir}`);
+
+  if (scenarioOutcomes.length > 0) {
+    const failed = scenarioOutcomes.filter((o) => !o.achieved);
+    console.log(`  scenarios: ${scenarioOutcomes.length - failed.length}/${scenarioOutcomes.length} achieved`);
+    if (failed.length > 0) {
+      console.log(`  ⚠ failed scenarios:`);
+      failed.forEach((o) => console.log(`    ✗ ${o.scenarioTitle} — ${o.reason}`));
+      process.exitCode = 1;
+    }
+  }
 }
 
 main().catch(console.error);
