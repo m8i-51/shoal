@@ -1,0 +1,51 @@
+{
+  "header": {
+    "title": "shoal"
+  },
+  "dashboard": {
+    "title": "Run History",
+    "startRun": "Start Run",
+    "noRuns": "No runs yet",
+    "noRunsHint": "Start a run to explore your app with AI agents."
+  },
+  "table": {
+    "status": "Status",
+    "started": "Started",
+    "duration": "Duration",
+    "findings": "Findings",
+    "agents": "Agents",
+    "actions": ""
+  },
+  "status": {
+    "completed": "Completed",
+    "running": "Running"
+  },
+  "detail": {
+    "back": "← Back",
+    "noReport": "No report found for this run.",
+    "noLog": "No log available.",
+    "tabLog": "Log",
+    "tabReport": "Report"
+  },
+  "startModal": {
+    "title": "Start Run",
+    "baseUrl": "App URL",
+    "baseUrlPlaceholder": "http://localhost:3000",
+    "maxBrowsers": "Browser agents",
+    "maxExplorers": "API agents",
+    "start": "Start",
+    "cancel": "Cancel",
+    "running": "Running…",
+    "liveLog": "Live log",
+    "close": "Close",
+    "advanced": "Advanced",
+    "llmBaseUrl": "LLM Base URL",
+    "llmModel": "Model",
+    "llmApiKey": "API Key"
+  },
+  "duration": {
+    "seconds": "{{count}}s",
+    "minutes": "{{m}}m {{s}}s",
+    "inProgress": "In progress"
+  }
+}

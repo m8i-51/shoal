@@ -1,0 +1,51 @@
+{
+  "header": {
+    "title": "shoal"
+  },
+  "dashboard": {
+    "title": "実行一覧",
+    "startRun": "実行を開始",
+    "noRuns": "実行履歴がありません",
+    "noRunsHint": "実行を開始して AI エージェントにアプリを探索させましょう。"
+  },
+  "table": {
+    "status": "ステータス",
+    "started": "開始日時",
+    "duration": "所要時間",
+    "findings": "Findings",
+    "agents": "エージェント",
+    "actions": ""
+  },
+  "status": {
+    "completed": "完了",
+    "running": "実行中"
+  },
+  "detail": {
+    "back": "← 一覧に戻る",
+    "noReport": "このレポートは見つかりませんでした。",
+    "noLog": "ログがありません。",
+    "tabLog": "ログ",
+    "tabReport": "レポート"
+  },
+  "startModal": {
+    "title": "実行を開始",
+    "baseUrl": "アプリの URL",
+    "baseUrlPlaceholder": "http://localhost:3000",
+    "maxBrowsers": "ブラウザエージェント数",
+    "maxExplorers": "API エージェント数",
+    "start": "開始",
+    "cancel": "キャンセル",
+    "running": "実行中…",
+    "liveLog": "ライブログ",
+    "close": "閉じる",
+    "advanced": "詳細設定",
+    "llmBaseUrl": "LLM Base URL",
+    "llmModel": "モデル",
+    "llmApiKey": "API キー"
+  },
+  "duration": {
+    "seconds": "{{count}}s",
+    "minutes": "{{m}}m {{s}}s",
+    "inProgress": "実行中"
+  }
+}

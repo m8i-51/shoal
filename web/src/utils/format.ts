@@ -1,0 +1,24 @@
+import type { TFunction } from "i18next";
+
+export function formatDuration(startedAt: string, completedAt: string | null, t: TFunction): string {
+  if (!completedAt) return t("duration.inProgress");
+  const ms = new Date(completedAt).getTime() - new Date(startedAt).getTime();
+  const s = Math.round(ms / 1000);
+  if (s < 60) return t("duration.seconds", { count: s });
+  return t("duration.minutes", { m: Math.floor(s / 60), s: s % 60 });
+}
+
+export function formatDate(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+export const CATEGORY_COLOR: Record<string, string> = {
+  bug: "#ef4444",
+  ux: "#f97316",
+  "feature-request": "#3b82f6",
+};
