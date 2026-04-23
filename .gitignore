@@ -1,6 +1,10 @@
 node_modules/
 dist/
+web/dist/
 .env
 logs/
 findings/
 agents.json
+product-specs/
+coverage/
+.claude/

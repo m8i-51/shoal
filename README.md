@@ -47,7 +47,7 @@ git clone https://github.com/m8i-51/shoal
 cd shoal
 npm install && npx playwright install chromium
 cp .env.example .env   # set ANTHROPIC_API_KEY and BASE_URL
-npm run run
+npm start
 ```
 
 ---
@@ -68,15 +68,54 @@ npm run run
 
 ## Adding a target
 
-Copy `targets/example.ts`, implement two things: a tool list and an API executor. Register it in `targets/index.ts`, then set `TARGET=my-app`.
+shoal loads `shoal.config.ts` from the **current working directory** at startup. Two common setups:
+
+**Option A — config inside the shoal repo** (simplest)
+
+```bash
+cp shoal.config.example.ts shoal.config.ts
+# edit shoal.config.ts, then:
+npm start
+```
+
+**Option B — config in your project directory** (keeps shoal untouched)
+
+```bash
+cp /path/to/shoal/shoal.config.example.ts ./shoal.config.ts
+# edit shoal.config.ts, then run shoal from your project root:
+BASE_URL=http://localhost:3000 npm start --prefix /path/to/shoal
+```
+
+`shoal.config.ts` must export a `target` object with two fields:
 
 ```typescript
-export const myAppConfig: TargetConfig = {
+// shoal.config.ts
+export const target = {
   appTools: [
-    { name: "get_items", description: "Get items from the app.", input_schema: { ... } },
+    { name: "list_items", description: "Get all items.", input_schema: { type: "object", properties: {}, required: [] } },
   ],
-  async execute(toolName, input, agentId) {
-    // call your app's API
+  async execute(toolName: string, input: Record<string, unknown>) {
+    if (toolName === "list_items") {
+      return fetch(`${process.env.BASE_URL}/api/items`).then(r => r.json());
+    }
   },
 };
 ```
+
+Alternatively, copy `targets/example.ts`, register it in `targets/index.ts`, and set `TARGET=my-app`.
+
+---
+
+## LLM providers
+
+shoal defaults to Anthropic Claude. To use a different provider, set these variables in `.env`:
+
+| Provider | Variables |
+|---|---|
+| Anthropic (default) | `ANTHROPIC_API_KEY` |
+| OpenAI | `LLM_PROVIDER=openai`, `LLM_API_KEY`, `LLM_MODEL` |
+| Codex (ChatGPT subscription) | run `npm run auth:codex` once, then `LLM_PROVIDER=codex` |
+| Ollama | `LLM_BASE_URL=http://localhost:11434/v1`, `LLM_MODEL` |
+| LM Studio | `LLM_BASE_URL=http://localhost:1234/v1`, `LLM_MODEL` |
+
+See `.env.example` for full examples.

@@ -47,7 +47,7 @@ git clone https://github.com/m8i-51/shoal
 cd shoal
 npm install && npx playwright install chromium
 cp .env.example .env   # ANTHROPIC_API_KEY と BASE_URL を設定
-npm run run
+npm start
 ```
 
 ---
@@ -68,15 +68,54 @@ npm run run
 
 ## ターゲットの追加
 
-`targets/example.ts` をコピーして、ツール定義とAPIの実行ハンドラを書く。`targets/index.ts` に登録して `TARGET=my-app` で起動。
+shoalは起動時に**カレントディレクトリ**から `shoal.config.ts` を読み込む。2通りの使い方がある:
+
+**パターンA — shoalリポジトリ内に置く**（シンプル）
+
+```bash
+cp shoal.config.example.ts shoal.config.ts
+# shoal.config.ts を編集して npm start
+npm start
+```
+
+**パターンB — 自分のプロジェクトに置く**（shoalを触らずに済む）
+
+```bash
+cp /path/to/shoal/shoal.config.example.ts ./shoal.config.ts
+# shoal.config.ts を編集し、プロジェクトのルートから実行:
+BASE_URL=http://localhost:3000 npm start --prefix /path/to/shoal
+```
+
+`shoal.config.ts` は `target` オブジェクトをエクスポートする:
 
 ```typescript
-export const myAppConfig: TargetConfig = {
+// shoal.config.ts
+export const target = {
   appTools: [
-    { name: "get_items", description: "アイテム一覧を取得する。 / Get items.", input_schema: { ... } },
+    { name: "list_items", description: "アイテム一覧を取得する。 / Get all items.", input_schema: { type: "object", properties: {}, required: [] } },
   ],
-  async execute(toolName, input, agentId) {
-    // アプリのAPIを呼ぶ
+  async execute(toolName: string, input: Record<string, unknown>) {
+    if (toolName === "list_items") {
+      return fetch(`${process.env.BASE_URL}/api/items`).then(r => r.json());
+    }
   },
 };
 ```
+
+あるいは、`targets/example.ts` をコピーして `targets/index.ts` に登録し、`TARGET=my-app` で起動する方法もある。
+
+---
+
+## LLMプロバイダ
+
+デフォルトはAnthropic Claude。別のプロバイダを使う場合は `.env` に設定する:
+
+| プロバイダ | 変数 |
+|---|---|
+| Anthropic（デフォルト） | `ANTHROPIC_API_KEY` |
+| OpenAI | `LLM_PROVIDER=openai`, `LLM_API_KEY`, `LLM_MODEL` |
+| Codex（ChatGPTサブスク） | `npm run auth:codex` を一度実行後、`LLM_PROVIDER=codex` |
+| Ollama | `LLM_BASE_URL=http://localhost:11434/v1`, `LLM_MODEL` |
+| LM Studio | `LLM_BASE_URL=http://localhost:1234/v1`, `LLM_MODEL` |
+
+詳細は `.env.example` を参照。
