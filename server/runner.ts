@@ -1,4 +1,4 @@
-import { spawn } from "child_process";
+import { spawn, type ChildProcess } from "child_process";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { existsSync, mkdirSync, writeFileSync, appendFileSync, unlinkSync } from "fs";
@@ -15,6 +15,7 @@ export interface Session {
   lines: string[];
   listeners: ((line: string) => void)[];
   doneListeners: (() => void)[];
+  child: ChildProcess | null;
 }
 
 export const activeSessions = new Map<string, Session>();
@@ -38,6 +39,7 @@ export function spawnRun(opts: {
     lines: [],
     listeners: [],
     doneListeners: [],
+    child: null,
   };
   activeSessions.set(sessionId, session);
 
@@ -72,6 +74,7 @@ export function spawnRun(opts: {
     cwd: process.cwd(),
     stdio: ["ignore", "pipe", "pipe"],
   });
+  session.child = child;
 
   const emit = (line: string) => {
     session.lines.push(line);
@@ -103,4 +106,20 @@ export function spawnRun(opts: {
   });
 
   return sessionId;
+}
+
+export function cancelSession(sessionId: string): boolean {
+  const session = activeSessions.get(sessionId);
+  if (!session || session.done || !session.child) return false;
+  try {
+    session.child.kill("SIGTERM");
+    setTimeout(() => {
+      if (!session.done) {
+        try { session.child?.kill("SIGKILL"); } catch { /* ignore */ }
+      }
+    }, 4000);
+    return true;
+  } catch {
+    return false;
+  }
 }

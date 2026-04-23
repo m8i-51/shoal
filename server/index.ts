@@ -4,7 +4,7 @@ import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { existsSync, readFileSync } from "fs";
 import { listRuns, getReportPath } from "./runs.js";
-import { activeSessions, spawnRun } from "./runner.js";
+import { activeSessions, spawnRun, cancelSession } from "./runner.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -54,6 +54,14 @@ app.post("/api/runs/start", (req, res) => {
   };
   const sessionId = spawnRun({ baseUrl, maxBrowsers, maxExplorers, llmBaseUrl, llmApiKey, llmModel });
   res.json({ sessionId });
+});
+
+// ----------------------------------------------------------------
+// API: cancel a running run
+// ----------------------------------------------------------------
+app.post("/api/runs/:runId/cancel", (req, res) => {
+  const ok = cancelSession(req.params.runId);
+  res.json({ ok });
 });
 
 // ----------------------------------------------------------------

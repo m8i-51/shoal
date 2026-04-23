@@ -25,7 +25,8 @@
     "noReport": "No report found for this run.",
     "noLog": "No log available.",
     "tabLog": "Log",
-    "tabReport": "Report"
+    "tabReport": "Report",
+    "cancel": "Cancel run"
   },
   "startModal": {
     "title": "Start Run",

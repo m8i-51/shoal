@@ -14,7 +14,14 @@ export function RunDetail() {
   const [isLive, setIsLive] = useState(false);
   const [done, setDone] = useState(false);
   const [hasReport, setHasReport] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
+
+  const handleCancel = async () => {
+    if (!confirm("実行を中止しますか？")) return;
+    setCancelling(true);
+    await fetch(`/api/runs/${runId}/cancel`, { method: "POST" }).catch(() => {});
+  };
 
   // 初回: バッファ済みログを取得
   useEffect(() => {
@@ -115,6 +122,11 @@ export function RunDetail() {
         </button>
         <span style={styles.runId}>{runId}</span>
         {isLive && <span style={styles.liveBadge}>● LIVE</span>}
+        {isLive && (
+          <button onClick={handleCancel} style={styles.cancelBtn} disabled={cancelling}>
+            {cancelling ? "…" : t("detail.cancel")}
+          </button>
+        )}
       </div>
 
       {/* タブ */}
@@ -194,6 +206,17 @@ const styles = {
     fontWeight: 700,
     color: "#22c55e",
     letterSpacing: "0.05em",
+  },
+  cancelBtn: {
+    background: "transparent",
+    border: "1px solid #ef4444",
+    color: "#ef4444",
+    borderRadius: "6px",
+    padding: "3px 10px",
+    fontSize: "0.75rem",
+    fontWeight: 600,
+    cursor: "pointer",
+    marginLeft: "auto",
   },
   tabs: {
     display: "flex",

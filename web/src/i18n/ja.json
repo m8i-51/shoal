@@ -25,7 +25,8 @@
     "noReport": "このレポートは見つかりませんでした。",
     "noLog": "ログがありません。",
     "tabLog": "ログ",
-    "tabReport": "レポート"
+    "tabReport": "レポート",
+    "cancel": "中止"
   },
   "startModal": {
     "title": "実行を開始",
