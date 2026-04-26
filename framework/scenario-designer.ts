@@ -63,11 +63,16 @@ export async function designScenarios(
   client: LLMClient,
   model: string,
   count: number = 5,
+  coverageSummary?: string,
 ): Promise<Scenario[]> {
   console.log("\n[scenario-designer] generating scenarios...");
 
   const issueHints = openIssues.length > 0
     ? `\n[Known Open Issues — risky areas to naturally route scenarios through]\n${openIssues.slice(0, 15).map((i) => `- ${i.title} [${i.labels.join(", ")}]`).join("\n")}`
+    : "";
+
+  const coverageHints = coverageSummary
+    ? `\n[Coverage History — adjust scenarios to explore underrepresented areas]\n${coverageSummary}`
     : "";
 
   const response = await createMessageWithRetry(client, {
@@ -89,7 +94,7 @@ ${spec.appDescription}
 ${spec.targetUsers}
 
 [Implemented Features]
-${spec.features}${spec.uiFeatures ? `\n\n[UI-Only Features]\n${spec.uiFeatures}` : ""}${issueHints}
+${spec.features}${spec.uiFeatures ? `\n\n[UI-Only Features]\n${spec.uiFeatures}` : ""}${issueHints}${coverageHints}
 
 Guidelines:
 - Each scenario should be a realistic user task (not "find the bug")
@@ -97,6 +102,7 @@ Guidelines:
 - Cover different app areas and user journeys
 - Make goals specific and actionable (not vague like "use the app")
 - If open issues hint at risky areas, design natural scenarios that pass through those areas
+- If coverage history shows underrepresented areas or lenses, bias scenarios toward those gaps
 - Constraints should reflect realistic user states (first time, in a hurry, confused, etc.)
 
 Call output_scenarios with exactly ${count} scenarios.`,

@@ -1045,7 +1045,7 @@ async function main() {
 
     // 3. open issues + scenario design (both feed into HR)
     const openIssues = await fetchOpenIssues(githubOptions);
-    const scenarios = await designScenarios(productSpec, openIssues, client, defaultModel, 5);
+    const scenarios = await designScenarios(productSpec, openIssues, client, defaultModel, 5, coverageSummary.formatted);
 
     // 4. HR agent
     await runHRAgent(productSpec, orgDesign.hrGuidance, openIssues, scenarios);

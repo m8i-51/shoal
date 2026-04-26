@@ -26,7 +26,10 @@
     "noLog": "ログがありません。",
     "tabLog": "ログ",
     "tabReport": "レポート",
-    "cancel": "中止"
+    "cancel": "中止",
+    "cancelConfirmLabel": "中止しますか？",
+    "cancelConfirmYes": "中止する",
+    "cancelConfirmNo": "やめる"
   },
   "startModal": {
     "title": "実行を開始",

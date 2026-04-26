@@ -26,7 +26,10 @@
     "noLog": "No log available.",
     "tabLog": "Log",
     "tabReport": "Report",
-    "cancel": "Cancel run"
+    "cancel": "Cancel run",
+    "cancelConfirmLabel": "Stop this run?",
+    "cancelConfirmYes": "Stop",
+    "cancelConfirmNo": "Keep going"
   },
   "startModal": {
     "title": "Start Run",

@@ -15,11 +15,12 @@ export function RunDetail() {
   const [done, setDone] = useState(false);
   const [hasReport, setHasReport] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
 
-  const handleCancel = async () => {
-    if (!confirm("実行を中止しますか？")) return;
+  const handleCancelConfirm = async () => {
     setCancelling(true);
+    setConfirmingCancel(false);
     await fetch(`/api/runs/${runId}/cancel`, { method: "POST" }).catch(() => {});
   };
 
@@ -122,10 +123,21 @@ export function RunDetail() {
         </button>
         <span style={styles.runId}>{runId}</span>
         {isLive && <span style={styles.liveBadge}>● LIVE</span>}
-        {isLive && (
-          <button onClick={handleCancel} style={styles.cancelBtn} disabled={cancelling}>
+        {isLive && !confirmingCancel && (
+          <button onClick={() => setConfirmingCancel(true)} style={styles.cancelBtn} disabled={cancelling}>
             {cancelling ? "…" : t("detail.cancel")}
           </button>
+        )}
+        {isLive && confirmingCancel && (
+          <div style={styles.cancelConfirm}>
+            <span style={styles.cancelConfirmLabel}>{t("detail.cancelConfirmLabel")}</span>
+            <button onClick={handleCancelConfirm} style={styles.cancelConfirmYes}>
+              {t("detail.cancelConfirmYes")}
+            </button>
+            <button onClick={() => setConfirmingCancel(false)} style={styles.cancelConfirmNo}>
+              {t("detail.cancelConfirmNo")}
+            </button>
+          </div>
         )}
       </div>
 
@@ -217,6 +229,37 @@ const styles = {
     fontWeight: 600,
     cursor: "pointer",
     marginLeft: "auto",
+  },
+  cancelConfirm: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem",
+    marginLeft: "auto",
+  },
+  cancelConfirmLabel: {
+    fontSize: "0.75rem",
+    color: "#64748b",
+    fontWeight: 600,
+  },
+  cancelConfirmYes: {
+    background: "#ef4444",
+    border: "none",
+    color: "#fff",
+    borderRadius: "6px",
+    padding: "3px 10px",
+    fontSize: "0.75rem",
+    fontWeight: 600,
+    cursor: "pointer",
+  },
+  cancelConfirmNo: {
+    background: "transparent",
+    border: "1px solid #e2e8f0",
+    color: "#64748b",
+    borderRadius: "6px",
+    padding: "3px 10px",
+    fontSize: "0.75rem",
+    fontWeight: 600,
+    cursor: "pointer",
   },
   tabs: {
     display: "flex",
