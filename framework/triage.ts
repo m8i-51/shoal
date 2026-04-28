@@ -20,7 +20,7 @@ const TRIAGE_TOOLS: Anthropic.Tool[] = [
       properties: {
         title: { type: "string", description: "Issue title (concise)" },
         body: { type: "string", description: "Issue body with details from multiple perspectives" },
-        category: { type: "string", enum: ["ux", "feature-request", "bug"] },
+        category: { type: "string", enum: ["ux", "feature-request", "bug", "goal-gap"] },
         merged_finding_ids: {
           type: "array",
           items: { type: "string" },
@@ -84,6 +84,12 @@ Organize feedback collected by multiple agents and post it as GitHub Issues.
 3. Skip feedback that duplicates an existing open Issue using skip_finding
 4. Post the rest with create_issue (no duplicates, only valuable findings)
 5. Finish after processing all items${openIssueList}
+
+[Category Guide]
+- bug: incorrect or broken behavior
+- ux: usability, interaction, or visual design issue
+- feature-request: missing capability users would expect
+- goal-gap: the app fails to meet one of its stated goals — use only when a finding directly undermines a specific app goal
 
 [Merging Guidelines]
 - Multiple reports about the same screen/feature can be merged into one Issue

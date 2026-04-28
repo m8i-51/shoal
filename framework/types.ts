@@ -64,6 +64,11 @@ export interface RunLog {
     regressionChecked: number;
     regressionFailed: number;
     rateLimitRetries: number;
+    cost: {
+      inputTokens: number;
+      outputTokens: number;
+      estimatedUSD: number | null;
+    };
   };
 }
 

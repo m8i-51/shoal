@@ -2,15 +2,63 @@ import "dotenv/config";
 import express from "express";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import { listRuns, getReportPath } from "./runs.js";
 import { activeSessions, spawnRun, cancelSession } from "./runner.js";
+
+function specFilePath(baseUrl: string): string {
+  try {
+    const host = new URL(baseUrl).host.replace(/[^a-zA-Z0-9]/g, "-");
+    return join(process.cwd(), "product-specs", `${host}.json`);
+  } catch {
+    return "";
+  }
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = parseInt(process.env.PORT ?? "4000", 10);
 
 app.use(express.json());
+
+// ----------------------------------------------------------------
+// API: product spec (goals)
+// ----------------------------------------------------------------
+app.get("/api/spec", (_req, res) => {
+  const baseUrl = process.env.BASE_URL ?? "http://localhost:3000";
+  const filePath = specFilePath(baseUrl);
+  if (!filePath || !existsSync(filePath)) {
+    res.status(404).json({ error: "spec not found" });
+    return;
+  }
+  try {
+    res.json(JSON.parse(readFileSync(filePath, "utf-8")));
+  } catch {
+    res.status(500).json({ error: "failed to read spec" });
+  }
+});
+
+app.patch("/api/spec/goals", (req, res) => {
+  const baseUrl = process.env.BASE_URL ?? "http://localhost:3000";
+  const filePath = specFilePath(baseUrl);
+  if (!filePath || !existsSync(filePath)) {
+    res.status(404).json({ error: "spec not found" });
+    return;
+  }
+  const { goals } = req.body as { goals?: unknown };
+  if (!Array.isArray(goals) || !goals.every((g) => typeof g === "string")) {
+    res.status(400).json({ error: "goals must be an array of strings" });
+    return;
+  }
+  try {
+    const spec = JSON.parse(readFileSync(filePath, "utf-8")) as Record<string, unknown>;
+    spec.appGoals = goals;
+    writeFileSync(filePath, JSON.stringify(spec, null, 2), "utf-8");
+    res.json({ ok: true });
+  } catch {
+    res.status(500).json({ error: "failed to update spec" });
+  }
+});
 
 // ----------------------------------------------------------------
 // API: list runs（アクティブなセッション情報で補完）

@@ -1,5 +1,5 @@
 {
-  "name": "shoal",
+  "name": "@m8i-51/shoal",
   "version": "0.1.0",
   "type": "module",
   "description": "Multi-agent web exploration framework — finds bugs, UX issues, and missing features by running AI agents against your app",
@@ -16,6 +16,7 @@
     "triage-only.ts"
   ],
   "scripts": {
+    "prepublishOnly": "npm run build:web",
     "start": "tsx run.ts",
     "triage": "tsx triage-only.ts",
     "serve": "tsx server/index.ts",

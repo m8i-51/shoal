@@ -14,6 +14,7 @@
     "duration": "所要時間",
     "findings": "Findings",
     "agents": "エージェント",
+    "cost": "コスト",
     "actions": ""
   },
   "status": {
@@ -51,5 +52,17 @@
     "seconds": "{{count}}s",
     "minutes": "{{m}}m {{s}}s",
     "inProgress": "実行中"
+  },
+  "goals": {
+    "title": "App Goals",
+    "noSpec": "プロダクト仕様がまだありません。実行を開始するとゴールが自動推論されます。",
+    "noGoals": "ゴールが未設定です。",
+    "edit": "編集",
+    "save": "保存",
+    "cancel": "キャンセル",
+    "add": "+ ゴールを追加",
+    "placeholder": "例: ユーザーがサポートなしでオンボーディングを完了できる",
+    "hint": "プロダクト理解エージェントが推論したゴールです。誤りがあれば修正してください。",
+    "goalGapHint": "エージェントはこれらのゴール達成を妨げる問題を \"goal-gap\" として報告します。"
   }
 }

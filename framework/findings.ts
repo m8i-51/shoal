@@ -35,6 +35,7 @@ export function initRunLog(agentCount: number, repo: string): void {
       regressionChecked: 0,
       regressionFailed: 0,
       rateLimitRetries: 0,
+      cost: { inputTokens: 0, outputTokens: 0, estimatedUSD: null },
     },
   };
 }

@@ -38,6 +38,7 @@ import { generateReport } from "./framework/report";
 import type { AgentLog, Finding, RegressionCheck } from "./framework/types";
 import { loadTarget } from "./targets";
 import { runAccountManager, loadTestAccounts, type TestAccount } from "./framework/account-manager";
+import { estimateCost, formatCostUSD } from "./framework/cost";
 
 const BASE_URL = process.env.BASE_URL ?? "http://localhost:3000";
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN ?? "";
@@ -73,7 +74,7 @@ const MAX_EXPLORERS = targetConfig.appTools.length > 0
   : 0;
 const MAX_BROWSERS = parseInt(process.env.MAX_BROWSERS ?? "2", 10);
 
-const { client, defaultModel } = createLLMClient();
+const { client, defaultModel, provider: llmProvider } = createLLMClient();
 
 // ================================================================
 // Screenshots
@@ -100,7 +101,7 @@ async function takeScreenshot(page: Page, label: string): Promise<{ base64: stri
 // API agent tools
 // ================================================================
 
-const VALID_CATEGORIES = ["ux", "feature-request", "bug"];
+const VALID_CATEGORIES = ["ux", "feature-request", "bug", "goal-gap"];
 
 const POST_FEEDBACK_TOOL: Tool = {
   name: "post_feedback",
@@ -110,7 +111,7 @@ const POST_FEEDBACK_TOOL: Tool = {
     properties: {
       title: { type: "string" },
       body: { type: "string" },
-      category: { type: "string", enum: ["ux", "feature-request", "bug"] },
+      category: { type: "string", enum: ["ux", "feature-request", "bug", "goal-gap"] },
     },
     required: ["title", "body", "category"],
   },
@@ -165,6 +166,11 @@ const POST_OUTCOME_TOOL: Tool = {
 };
 
 const EXPLORER_TOOLS: Tool[] = [...targetConfig.appTools, POST_FEEDBACK_TOOL, POST_OUTCOME_TOOL];
+
+function goalsSection(spec: ProductSpec): string {
+  if (!spec.appGoals?.length) return "";
+  return `\n[App Goals]\nThis app is designed to achieve the following goals. If you find anything that prevents these goals from being met, use category "goal-gap" when posting feedback.\n${spec.appGoals.map((g) => `- ${g}`).join("\n")}\n`;
+}
 const REGRESSION_TOOLS: Tool[] = [...targetConfig.appTools, REPORT_REGRESSION_TOOL, MARK_VERIFIED_TOOL];
 
 function makeExecutor(agentLog: AgentLog, scenarioOutcomes: ScenarioOutcome[], scenario?: Scenario) {
@@ -313,7 +319,7 @@ report it with the post_feedback tool.
 
 [Implemented Features]
 ${productSpec.features}
-${productSpec.uiFeatures ? `\n[UI-Only Features]\nThese features exist in the UI but may not be reflected in API responses. Keep them in mind when interpreting API results.\n${productSpec.uiFeatures}\n` : ""}${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${assignment.scenario
+${productSpec.uiFeatures ? `\n[UI-Only Features]\nThese features exist in the UI but may not be reflected in API responses. Keep them in mind when interpreting API results.\n${productSpec.uiFeatures}\n` : ""}${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${goalsSection(productSpec)}${assignment.scenario
     ? `\n[Your Task for This Run]\nTitle: ${assignment.scenario.title}\nYou are: ${assignment.scenario.context}\nGoal: ${assignment.scenario.goal}\nConstraints: ${assignment.scenario.constraints}\n\nFocus on completing this task naturally. Report any issues you encounter along the way.\nWhen done (or if you cannot complete the goal), call post_outcome with achieved=true/false and a brief reason.\n`
     : assignment.lens
     ? `\n[Focus Area for This Run]\n${assignment.lens}\nKeep this perspective in mind and prioritize reporting related issues.\n`
@@ -365,7 +371,7 @@ ${issueList}
 
 [Reference: Implemented Features]
 ${productSpec.features}
-${productSpec.uiFeatures ? `\n[UI-Only Features]\nThese features exist in the UI but may not be reflected in API responses.\n${productSpec.uiFeatures}\n` : ""}${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}` : ""}`;
+${productSpec.uiFeatures ? `\n[UI-Only Features]\nThese features exist in the UI but may not be reflected in API responses.\n${productSpec.uiFeatures}\n` : ""}${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${goalsSection(productSpec)}`;
 
   await runAgentLoop(agentLog, systemPrompt, REGRESSION_TOOLS, client, defaultModel, makeExecutor(agentLog, []));
   const checked = agentLog.regressionChecks.length;
@@ -626,7 +632,7 @@ const BROWSER_TOOLS: Anthropic.Tool[] = [
       properties: {
         title: { type: "string" },
         body: { type: "string" },
-        category: { type: "string", enum: ["ux", "feature-request", "bug"] },
+        category: { type: "string", enum: ["ux", "feature-request", "bug", "goal-gap"] },
       },
       required: ["title", "body", "category"],
     },
@@ -892,7 +898,7 @@ ${productSpec.appDescription}
 
 [Reference: Implemented Features]
 ${productSpec.features}
-${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${assignment.scenario
+${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${goalsSection(productSpec)}${assignment.scenario
     ? `\n[Your Task for This Run]\nTitle: ${assignment.scenario.title}\nYou are: ${assignment.scenario.context}\nGoal: ${assignment.scenario.goal}\nConstraints: ${assignment.scenario.constraints}\n\nFocus on completing this task naturally as this user. Report any issues you encounter along the way.\nWhen done (or if you cannot complete the goal), call post_outcome with achieved=true/false and a brief reason.`
     : assignment.lens
     ? `\n[Focus Area for This Run]\n${assignment.lens}\nKeep this perspective in mind and prioritize reporting related issues.`
@@ -1178,11 +1184,17 @@ async function main() {
     // エラー終了時も必ずログを保存する
     runLog.completedAt = new Date().toISOString();
     runLog.summary.rateLimitRetries = rateLimitRetries;
+    runLog.summary.cost.estimatedUSD = await estimateCost(
+      defaultModel, llmProvider,
+      runLog.summary.cost.inputTokens,
+      runLog.summary.cost.outputTokens,
+    );
     saveRunLog();
   }
 
   console.log("\nAll agents done.");
   console.log(`  findings collected: ${collectedFindings.length}`);
+  console.log(`  tokens: ${runLog.summary.cost.inputTokens} in / ${runLog.summary.cost.outputTokens} out — estimated cost: ${formatCostUSD(runLog.summary.cost.estimatedUSD)}`);
   console.log(`  GitHub issues created: ${runLog.summary.totalIssuesPosted}`);
   console.log(`  regression checks: ${runLog.summary.regressionChecked} (regressed: ${runLog.summary.regressionFailed})`);
   console.log(`  screenshots: ${screenshotDir}`);

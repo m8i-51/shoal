@@ -16,7 +16,12 @@ export async function createMessageWithRetry(
 ): Promise<Anthropic.Message> {
   for (let i = 0; i < retries; i++) {
     try {
-      return await client.createMessage(params);
+      const response = await client.createMessage(params);
+      if (runLog?.summary?.cost) {
+        runLog.summary.cost.inputTokens += response.usage?.input_tokens ?? 0;
+        runLog.summary.cost.outputTokens += response.usage?.output_tokens ?? 0;
+      }
+      return response;
     } catch (e: unknown) {
       const err = e as { status?: number; headers?: { get?: (key: string) => string | null } };
       if (err?.status === 429 && i < retries - 1) {

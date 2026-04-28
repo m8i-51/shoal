@@ -84,6 +84,7 @@ export interface ProductSpec {
   features: string;
   designContext: string;
   uiFeatures: string;
+  appGoals: string[];
   confidence: "high" | "medium" | "low";
   sources: string[];
   discoveredAt?: string;
@@ -169,6 +170,11 @@ const DISCOVERY_TOOLS: Anthropic.Tool[] = [
           type: "string",
           description: "UI-only interactions and features that are NOT visible from API responses alone — things only discoverable by looking at the actual screen. List per screen. Examples: client-side filters, view mode toggles (card/compact), warning modals, inline validation messages, hover states, keyboard shortcuts, drag-and-drop, collapsible panels, tabs that switch without navigation, tooltips, empty-state messages, loading skeletons. Format: 'Screen: feature 1 · feature 2 · feature 3'",
         },
+        appGoals: {
+          type: "array",
+          items: { type: "string" },
+          description: "3–6 concrete, measurable goals this app is designed to achieve — from the perspective of its users and the business. Each goal should be a complete sentence describing a success condition. Examples: 'New employees can submit a purchase request without any training', 'Approvers can review and act on a request within 60 seconds', 'Managers can see the status of all open requests at a glance'. Infer from the app's purpose, target users, and key workflows.",
+        },
         confidence: {
           type: "string",
           enum: ["high", "medium", "low"],
@@ -180,7 +186,7 @@ const DISCOVERY_TOOLS: Anthropic.Tool[] = [
           description: "Sources used (e.g. ['/ (top page)', '/tasks (UI)', 'README'])",
         },
       },
-      required: ["appName", "appDescription", "targetUsers", "features", "designContext", "uiFeatures", "confidence", "sources"],
+      required: ["appName", "appDescription", "targetUsers", "features", "designContext", "uiFeatures", "appGoals", "confidence", "sources"],
     },
   },
 ];
@@ -209,7 +215,8 @@ Guidelines for output_spec:
 - features: list per screen as "Screen name: feature 1 · feature 2 · feature 3"
 - designContext: note the UI framework (look for class names like "tw-", "MuiButton", "btn btn-"), visual style, and what design conventions apply for this app type
 - uiFeatures: list UI-only features per screen that are invisible from API responses (filters, toggles, modals, validation messages, empty states, etc.)
-- confidence: high if README/official docs obtained, low if UI observation only`;
+- confidence: high if README/official docs obtained, low if UI observation only
+- appGoals: 3–6 concrete goals this app is designed to achieve (user + business perspective)`;
 
   const docs = await gatherDocumentation(projectPath);
   const initialContent = docs
@@ -280,6 +287,7 @@ Guidelines for output_spec:
           features: String(input.features),
           designContext: String(input.designContext ?? ""),
           uiFeatures: String(input.uiFeatures ?? ""),
+          appGoals: Array.isArray(input.appGoals) ? input.appGoals.map(String) : [],
           confidence: input.confidence,
           sources: Array.isArray(input.sources) ? input.sources.map(String) : [],
         };
@@ -305,6 +313,7 @@ Guidelines for output_spec:
       features: "(auto-discovery failed)",
       designContext: "(unknown)",
       uiFeatures: "(unknown)",
+      appGoals: [],
       confidence: "low",
       sources: [],
     };

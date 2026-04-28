@@ -14,6 +14,7 @@ export interface RunSummary {
   findingsByCategory: Record<string, number>;
   hasReport: boolean;
   isLive?: boolean;
+  estimatedCostUSD: number | null;
 }
 
 function countFindings(runId: string): { total: number; byCategory: Record<string, number> } {
@@ -61,6 +62,7 @@ export function listRuns(): RunSummary[] {
             findingsByCategory: {},
             hasReport: false,
             isLive: true,
+            estimatedCostUSD: null,
           });
         }
       } catch { /* skip */ }
@@ -87,6 +89,7 @@ export function listRuns(): RunSummary[] {
         findingCount: total,
         findingsByCategory: byCategory,
         hasReport: fs.existsSync(reportPath),
+        estimatedCostUSD: log.summary?.cost?.estimatedUSD ?? null,
       });
     } catch { /* skip */ }
   }

@@ -35,6 +35,7 @@ function makeRunLog(overrides: Partial<RunLog> = {}): RunLog {
       regressionChecked: 0,
       regressionFailed: 0,
       rateLimitRetries: 0,
+      cost: { inputTokens: 0, outputTokens: 0, estimatedUSD: null },
     },
     ...overrides,
   };
@@ -48,6 +49,7 @@ function makeProductSpec(overrides: Partial<ProductSpec> = {}): ProductSpec {
     features: "Login, Dashboard",
     designContext: "",
     uiFeatures: "",
+    appGoals: [],
     confidence: "high",
     sources: [],
     ...overrides,

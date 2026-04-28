@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { StartModal } from "../components/StartModal";
-import { formatDuration, formatDate, CATEGORY_COLOR } from "../utils/format";
+import { GoalsPanel } from "../components/GoalsPanel";
+import { formatDuration, formatDate, formatCostUSD, CATEGORY_COLOR } from "../utils/format";
 import type { RunSummary } from "../types";
 import i18n from "../i18n/index";
 
@@ -71,6 +72,8 @@ export function Dashboard() {
         </button>
       </div>
 
+      <GoalsPanel />
+
       {runs.length === 0 ? (
         <div style={styles.empty}>
           <p style={styles.emptyTitle}>{t("dashboard.noRuns")}</p>
@@ -81,8 +84,8 @@ export function Dashboard() {
           <table style={styles.table}>
             <thead>
               <tr>
-                {(["status", "started", "duration", "findings", "agents", "actions"] as const).map((col) => (
-                  <th key={col} style={{ ...styles.th, ...(col === "agents" || col === "findings" ? { textAlign: "center" } : {}) }}>
+                {(["status", "started", "duration", "findings", "agents", "cost", "actions"] as const).map((col) => (
+                  <th key={col} style={{ ...styles.th, ...(col === "agents" || col === "findings" || col === "cost" ? { textAlign: "center" } : {}) }}>
                     {t(`table.${col}`)}
                   </th>
                 ))}
@@ -144,6 +147,9 @@ function RunRow({ run, onView }: { run: RunSummary; onView: () => void }) {
       </td>
       <td style={{ ...styles.td, textAlign: "center", ...styles.muted }}>
         {run.completedAgents}/{run.agentCount}
+      </td>
+      <td style={{ ...styles.td, textAlign: "center", ...styles.muted }}>
+        {formatCostUSD(run.estimatedCostUSD)}
       </td>
       <td style={styles.td}>
         <button onClick={onView} style={styles.viewBtn}>
