@@ -37,6 +37,7 @@ import { runTriageAgent } from "./framework/triage";
 import { generateReport } from "./framework/report";
 import type { AgentLog, Finding, RegressionCheck } from "./framework/types";
 import { loadTarget } from "./targets";
+import { runAccountManager, loadTestAccounts, type TestAccount } from "./framework/account-manager";
 
 const BASE_URL = process.env.BASE_URL ?? "http://localhost:3000";
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN ?? "";
@@ -429,23 +430,29 @@ async function runHRAgent(
   orgGuidance: string,
   openIssues: { number: number; title: string; labels: string[] }[],
   scenarios: Scenario[],
+  testAccounts: TestAccount[] = [],
 ): Promise<void> {
   console.log("\n[hr] starting...");
   const messages: Anthropic.MessageParam[] = [
     { role: "user", content: "Manage agent hiring and retirement." },
   ];
+
+  const accountContext = testAccounts.length > 0
+    ? `\n[Available Test Accounts (one per role)]\n${testAccounts.map((a) => `- ${a.role}: ${a.email}`).join("\n")}\nWhen recruiting agents, match each persona's role to one of these accounts so they can operate with appropriate permissions.`
+    : "";
+
   const systemPrompt = `You are the test agent manager for "${productSpec.appName}".
 You recruit and manage agents that simulate real users of the app.
 
 [Organization Design Guidelines]
-${orgGuidance}
+${orgGuidance}${accountContext}
 
 [Steps]
 1. Call get_coverage to review which lenses and categories are underrepresented in past runs
 2. Call get_open_issues to understand what problems are already known — recruit agents likely to find DIFFERENT issues in unexplored areas
 3. Call get_scenarios to see the user test scenarios generated for this run — about 70% of agents will be assigned a scenario, so recruit personas whose background fits those scenarios
 4. Call get_agents to check the current agent roster
-5. Add 2–3 agents with add_agent — balance between scenario-fit personas (step 3), underrepresented lenses (step 1), and unexplored areas (step 2)
+5. Add 2–3 agents with add_agent — balance between scenario-fit personas (step 3), underrepresented lenses (step 1), and unexplored areas (step 2)${testAccounts.length > 0 ? "\n   — assign each agent a role that matches one of the available test accounts" : ""}
 6. If there are agents with old createdAt dates (oldest 1–2), retire them with retire_agent`;
 
   try {
@@ -1047,8 +1054,27 @@ async function main() {
     const openIssues = await fetchOpenIssues(githubOptions);
     const scenarios = await designScenarios(productSpec, openIssues, client, defaultModel, 5, coverageSummary.formatted);
 
+    // 3.5. Account Manager（credentials が設定されている場合のみ）
+    let testAccounts: TestAccount[] = [];
+    if (targetConfig.credentials) {
+      const accountContext = await browser.newContext({ viewport: { width: 1024, height: 640 } });
+      try {
+        testAccounts = await runAccountManager(
+          BASE_URL,
+          targetConfig.credentials,
+          productSpec,
+          accountContext,
+          client,
+          defaultModel,
+          runLog.runId,
+        );
+      } finally {
+        await accountContext.close();
+      }
+    }
+
     // 4. HR agent
-    await runHRAgent(productSpec, orgDesign.hrGuidance, openIssues, scenarios);
+    await runHRAgent(productSpec, orgDesign.hrGuidance, openIssues, scenarios, testAccounts);
 
     // 5. load agents + closed issues
     const allAgents = loadAgents();
@@ -1109,7 +1135,17 @@ async function main() {
       browserAgents.map(async (agent) => {
         const assignment = pickAssignment(dispatchIdx++, scenarios);
         agentAssignments.set(agent.id, assignment);
-        const context = await browser.newContext({ viewport: { width: 1024, height: 640 } });
+
+        // ロールが一致する storageState があれば使う
+        const matchedAccount = testAccounts.find((a) => a.role === agent.role && a.storageStatePath);
+        const contextOptions: Parameters<typeof browser.newContext>[0] = {
+          viewport: { width: 1024, height: 640 },
+        };
+        if (matchedAccount?.storageStatePath) {
+          contextOptions.storageState = matchedAccount.storageStatePath;
+        }
+
+        const context = await browser.newContext(contextOptions);
         const page = await context.newPage();
         try {
           return await runBrowserAgent(agent, page, productSpec, assignment, scenarioOutcomes);

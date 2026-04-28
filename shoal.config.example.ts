@@ -23,6 +23,22 @@ export const target = {
    */
 
   /**
+   * Optional: seed credentials for the Account Manager agent.
+   *
+   * If set, shoal will:
+   *   1. Log in as this account
+   *   2. Explore user management to discover roles
+   *   3. Create one test account per role found
+   *   4. Run each browser agent in an authenticated session matching their role
+   *
+   * UX difficulties encountered during user management are recorded as findings.
+   * If omitted, shoal runs without authentication.
+   *
+   * Example:
+   *   credentials: { email: "admin@example.com", password: "yourpassword" },
+   */
+
+  /**
    * Tools the API explorer agents can call.
    * Each tool maps to one API call in execute() below.
    */
