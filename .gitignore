@@ -8,3 +8,5 @@ agents.json
 product-specs/
 coverage/
 .claude/
+shoal.config.ts
+test-accounts/
