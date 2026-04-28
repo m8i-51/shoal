@@ -14,6 +14,7 @@
     "duration": "Duration",
     "findings": "Findings",
     "agents": "Agents",
+    "cost": "Cost",
     "actions": ""
   },
   "status": {
@@ -51,5 +52,17 @@
     "seconds": "{{count}}s",
     "minutes": "{{m}}m {{s}}s",
     "inProgress": "In progress"
+  },
+  "goals": {
+    "title": "App Goals",
+    "noSpec": "No product spec yet. Start a run to discover app goals.",
+    "noGoals": "No goals defined.",
+    "edit": "Edit",
+    "save": "Save",
+    "cancel": "Cancel",
+    "add": "+ Add goal",
+    "placeholder": "e.g. Users can complete onboarding without assistance",
+    "hint": "Goals inferred by product discovery. Edit to correct or add missing ones.",
+    "goalGapHint": "Agents will flag issues that prevent these goals as \"goal-gap\"."
   }
 }
