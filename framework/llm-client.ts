@@ -465,7 +465,7 @@ const COMPAT_PROVIDERS: Record<string, { baseURL: string; defaultModel: string }
   openrouter:   { baseURL: "https://openrouter.ai/api/v1",                           defaultModel: "google/gemini-flash-1.5" },
 };
 
-export function createLLMClient(): { client: LLMClient; defaultModel: string } {
+export function createLLMClient(): { client: LLMClient; defaultModel: string; provider: string } {
   const provider = process.env.LLM_PROVIDER ?? "anthropic";
   const baseURL = process.env.LLM_BASE_URL;
   const model = process.env.LLM_MODEL;
@@ -477,6 +477,7 @@ export function createLLMClient(): { client: LLMClient; defaultModel: string } {
     return {
       client: new CodexClient(effectiveModel),
       defaultModel: effectiveModel,
+      provider: "codex",
     };
   }
 
@@ -490,6 +491,7 @@ export function createLLMClient(): { client: LLMClient; defaultModel: string } {
     return {
       client: new OpenAICompatClient(apiKey, effectiveBaseURL, effectiveModel),
       defaultModel: effectiveModel,
+      provider,
     };
   }
 
@@ -500,5 +502,6 @@ export function createLLMClient(): { client: LLMClient; defaultModel: string } {
   return {
     client: new AnthropicClient(apiKey),
     defaultModel: effectiveModel,
+    provider: "anthropic",
   };
 }

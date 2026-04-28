@@ -21,4 +21,13 @@ export const CATEGORY_COLOR: Record<string, string> = {
   bug: "#ef4444",
   ux: "#f97316",
   "feature-request": "#3b82f6",
+  "goal-gap": "#8b5cf6",
 };
+
+export function formatCostUSD(usd: number | null | undefined): string {
+  if (usd == null) return "—";
+  if (usd < 0.0001) return "< $0.0001";
+  if (usd < 0.01) return `$${usd.toFixed(4)}`;
+  if (usd < 1) return `$${usd.toFixed(3)}`;
+  return `$${usd.toFixed(2)}`;
+}

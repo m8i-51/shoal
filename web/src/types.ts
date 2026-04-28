@@ -10,4 +10,5 @@ export interface RunSummary {
   findingsByCategory: Record<string, number>;
   hasReport: boolean;
   isLive?: boolean;
+  estimatedCostUSD: number | null;
 }
