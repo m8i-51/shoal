@@ -98,6 +98,7 @@ export function listRuns(): RunSummary[] {
 }
 
 export function getReportPath(runId: string): string | null {
+  if (!/^run_\d+$/.test(runId)) return null;
   const p = path.join(process.cwd(), "logs", `report_${runId}.html`);
   return fs.existsSync(p) ? p : null;
 }

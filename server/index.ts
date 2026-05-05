@@ -15,6 +15,31 @@ function specFilePath(baseUrl: string): string {
   }
 }
 
+const RUN_ID_RE = /^run_\d+$/;
+function isValidRunId(id: string): boolean {
+  return RUN_ID_RE.test(id);
+}
+
+// Simple in-memory rate limiter: max requests per window per IP
+function makeRateLimit(maxRequests: number, windowMs: number) {
+  const counts = new Map<string, { n: number; resetAt: number }>();
+  return (_req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const now = Date.now();
+    const key = _req.ip ?? "unknown";
+    const entry = counts.get(key);
+    if (!entry || now > entry.resetAt) {
+      counts.set(key, { n: 1, resetAt: now + windowMs });
+      return next();
+    }
+    if (entry.n < maxRequests) {
+      entry.n++;
+      return next();
+    }
+    res.status(429).json({ error: "too many requests" });
+  };
+}
+const apiRateLimit = makeRateLimit(120, 60_000);
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = parseInt(process.env.PORT ?? "4000", 10);
@@ -24,7 +49,7 @@ app.use(express.json());
 // ----------------------------------------------------------------
 // API: product spec (goals)
 // ----------------------------------------------------------------
-app.get("/api/spec", (_req, res) => {
+app.get("/api/spec", apiRateLimit, (_req, res) => {
   const baseUrl = process.env.BASE_URL ?? "http://localhost:3000";
   const filePath = specFilePath(baseUrl);
   if (!filePath || !existsSync(filePath)) {
@@ -38,7 +63,7 @@ app.get("/api/spec", (_req, res) => {
   }
 });
 
-app.patch("/api/spec/goals", (req, res) => {
+app.patch("/api/spec/goals", apiRateLimit, (req, res) => {
   const baseUrl = process.env.BASE_URL ?? "http://localhost:3000";
   const filePath = specFilePath(baseUrl);
   if (!filePath || !existsSync(filePath)) {
@@ -79,8 +104,13 @@ app.get("/api/runs", (_req, res) => {
 // ----------------------------------------------------------------
 // API: serve HTML report for a run
 // ----------------------------------------------------------------
-app.get("/api/runs/:runId/report", (req, res) => {
-  const reportPath = getReportPath(req.params.runId);
+app.get("/api/runs/:runId/report", apiRateLimit, (req, res) => {
+  const { runId } = req.params;
+  if (!isValidRunId(runId)) {
+    res.status(400).json({ error: "invalid run id" });
+    return;
+  }
+  const reportPath = getReportPath(runId);
   if (!reportPath) {
     res.status(404).json({ error: "report not found" });
     return;
@@ -157,21 +187,29 @@ function sseStream(req: express.Request, res: express.Response, sessionId: strin
 // API: SSE — /api/sessions/:sessionId/events（後方互換）
 // ----------------------------------------------------------------
 app.get("/api/sessions/:sessionId/events", (req, res) => {
-  sseStream(req, res, req.params.sessionId);
+  const { sessionId } = req.params;
+  if (!isValidRunId(sessionId)) { res.status(400).json({ error: "invalid session id" }); return; }
+  sseStream(req, res, sessionId);
 });
 
 // ----------------------------------------------------------------
 // API: SSE — /api/runs/:runId/events（詳細ページ用）
 // ----------------------------------------------------------------
 app.get("/api/runs/:runId/events", (req, res) => {
-  sseStream(req, res, req.params.runId);
+  const { runId } = req.params;
+  if (!isValidRunId(runId)) { res.status(400).json({ error: "invalid run id" }); return; }
+  sseStream(req, res, runId);
 });
 
 // ----------------------------------------------------------------
 // API: ログ行をまとめて返す（完了後・再起動後もファイルから参照可能）
 // ----------------------------------------------------------------
-app.get("/api/runs/:runId/log", (req, res) => {
+app.get("/api/runs/:runId/log", apiRateLimit, (req, res) => {
   const { runId } = req.params;
+  if (!isValidRunId(runId)) {
+    res.status(400).json({ error: "invalid run id" });
+    return;
+  }
 
   // 1. アクティブセッション（インメモリ）を優先
   const session = activeSessions.get(runId);
@@ -197,7 +235,7 @@ app.get("/api/runs/:runId/log", (req, res) => {
 const distPath = join(__dirname, "..", "web", "dist");
 if (existsSync(distPath)) {
   app.use(express.static(distPath));
-  app.get("/{*splat}", (_req, res) => {
+  app.get("/{*splat}", apiRateLimit, (_req, res) => {
     res.sendFile(join(distPath, "index.html"));
   });
 } else {
