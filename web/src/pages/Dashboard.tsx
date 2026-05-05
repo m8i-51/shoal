@@ -76,6 +76,7 @@ export function Dashboard() {
 
       {runs.length === 0 ? (
         <div style={styles.empty}>
+          <img src="/mascot.svg" alt="shoal" style={styles.emptyMascot} />
           <p style={styles.emptyTitle}>{t("dashboard.noRuns")}</p>
           <p style={styles.emptyHint}>{t("dashboard.noRunsHint")}</p>
         </div>
@@ -194,6 +195,12 @@ const styles = {
     textAlign: "center" as const,
     padding: "4rem 2rem",
     color: "#94a3b8",
+  },
+  emptyMascot: {
+    width: "100px",
+    height: "100px",
+    opacity: 0.55,
+    marginBottom: "1rem",
   },
   emptyTitle: {
     fontSize: "1rem",

@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100" fill="#0ea5e9">
+  <!-- S-shaped fish school mascot, 12 fish, leader (F1) has one white eye dot -->
+
+  <!-- F1: leader, top of S, has eye -->
+  <g transform="translate(50,11) rotate(5)">
+    <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z"/>
+    <circle cx="3" cy="-1.5" r="1.8" fill="white"/>
+  </g>
+
+  <!-- F2: upper arc, going right -->
+  <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z"
+        transform="translate(63,13) rotate(12) scale(0.9)"/>
+
+  <!-- F3: upper arc, rightward -->
+  <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z"
+        transform="translate(71,21) rotate(18) scale(0.9)"/>
+
+  <!-- F4: rightmost point of upper arc -->
+  <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z"
+        transform="translate(73,32) rotate(15) scale(0.88)"/>
+
+  <!-- F5: upper arc returning left -->
+  <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z"
+        transform="translate(66,41) rotate(10) scale(0.85)"/>
+
+  <!-- F6: inflection zone -->
+  <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z"
+        transform="translate(54,46) rotate(8) scale(0.83)"/>
+
+  <!-- F7: passing inflection, moving left -->
+  <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z"
+        transform="translate(44,51) rotate(12) scale(0.80)"/>
+
+  <!-- F8: lower arc, going left -->
+  <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z"
+        transform="translate(32,60) rotate(15) scale(0.78)"/>
+
+  <!-- F9: leftmost point of lower arc -->
+  <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z"
+        transform="translate(28,72) rotate(12) scale(0.75)"/>
+
+  <!-- F10: lower arc returning right -->
+  <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z"
+        transform="translate(34,82) rotate(10) scale(0.73)"/>
+
+  <!-- F11: near bottom of S -->
+  <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z"
+        transform="translate(46,89) rotate(8) scale(0.70)"/>
+
+  <!-- F12: tail of S -->
+  <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z"
+        transform="translate(59,87) rotate(5) scale(0.68)" opacity="0.75"/>
+</svg>

@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640">
+  <!-- GitHub Social Preview: 1280x640, dark background -->
+  <rect width="1280" height="640" fill="#0f172a"/>
+
+  <!-- Subtle background fish for ambiance -->
+  <g fill="#0ea5e9" opacity="0.06">
+    <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z" transform="translate(920,80) rotate(10) scale(3)"/>
+    <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z" transform="translate(1100,180) rotate(-15) scale(2.5)"/>
+    <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z" transform="translate(1160,420) rotate(8) scale(2)"/>
+    <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z" transform="translate(960,540) rotate(-20) scale(3.5)"/>
+    <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z" transform="translate(80,520) rotate(5) scale(2)"/>
+    <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z" transform="translate(140,90) rotate(-12) scale(2.5)"/>
+  </g>
+
+  <!-- S-shaped mascot, centered at (290,320), scale 3.8 -->
+  <g transform="translate(290,320) scale(3.8) translate(-50,-50)" fill="#0ea5e9">
+    <!-- F1: leader, has eye -->
+    <g transform="translate(50,11) rotate(5)">
+      <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z"/>
+      <circle cx="3" cy="-1.5" r="1.8" fill="white"/>
+    </g>
+    <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z" transform="translate(63,13) rotate(12) scale(0.9)"/>
+    <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z" transform="translate(71,21) rotate(18) scale(0.9)"/>
+    <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z" transform="translate(73,32) rotate(15) scale(0.88)"/>
+    <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z" transform="translate(66,41) rotate(10) scale(0.85)"/>
+    <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z" transform="translate(54,46) rotate(8) scale(0.83)"/>
+    <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z" transform="translate(44,51) rotate(12) scale(0.80)"/>
+    <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z" transform="translate(32,60) rotate(15) scale(0.78)"/>
+    <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z" transform="translate(28,72) rotate(12) scale(0.75)"/>
+    <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z" transform="translate(34,82) rotate(10) scale(0.73)"/>
+    <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z" transform="translate(46,89) rotate(8) scale(0.70)"/>
+    <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z" transform="translate(59,87) rotate(5) scale(0.68)" opacity="0.75"/>
+  </g>
+
+  <!-- Right side: wordmark + tagline -->
+  <text x="590" y="278"
+    font-family="'Inter', 'Helvetica Neue', -apple-system, BlinkMacSystemFont, Arial, sans-serif"
+    font-size="112" font-weight="700" letter-spacing="-2"
+    fill="#0ea5e9">shoal</text>
+  <text x="592" y="344"
+    font-family="'Inter', 'Helvetica Neue', -apple-system, BlinkMacSystemFont, Arial, sans-serif"
+    font-size="28" font-weight="400"
+    fill="#7dd3fc">Point it at any web app.</text>
+  <text x="592" y="388"
+    font-family="'Inter', 'Helvetica Neue', -apple-system, BlinkMacSystemFont, Arial, sans-serif"
+    font-size="28" font-weight="400"
+    fill="#7dd3fc">Agents explore it and file GitHub Issues.</text>
+
+  <!-- Divider line -->
+  <line x1="558" y1="200" x2="558" y2="440" stroke="#1e3a5f" stroke-width="1.5"/>
+</svg>

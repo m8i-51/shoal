@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 252 80">
+  <!-- Fish school symbol: same school placed at (36,40) scaled to fit 72px height -->
+  <g transform="translate(36,40) scale(0.72)" fill="#0ea5e9">
+    <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z"
+          transform="rotate(5)"/>
+    <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z"
+          transform="translate(17,-13) rotate(-15) scale(0.85)"/>
+    <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z"
+          transform="translate(16,14) rotate(18) scale(0.85)"/>
+    <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z"
+          transform="translate(-18,-5) rotate(-8) scale(0.75)"/>
+    <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z"
+          transform="translate(-14,12) rotate(13) scale(0.70)"/>
+    <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z"
+          transform="translate(3,-24) rotate(-27) scale(0.65)"/>
+    <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z"
+          transform="translate(2,23) rotate(28) scale(0.65)"/>
+    <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z"
+          transform="translate(-33,3) scale(0.52)" opacity="0.6"/>
+    <path d="M9,0 C5,-3.5 -4,-3.5 -7,0 L-12,-5.5 L-9.5,0 L-12,5.5 L-7,0 C-4,3.5 5,3.5 9,0Z"
+          transform="translate(31,-1) rotate(8) scale(0.52)" opacity="0.6"/>
+  </g>
+
+  <!-- Wordmark "shoal" -->
+  <text
+    x="82" y="53"
+    font-family="'Inter', 'Helvetica Neue', -apple-system, BlinkMacSystemFont, Arial, sans-serif"
+    font-size="36"
+    font-weight="700"
+    letter-spacing="0.5"
+    fill="#0ea5e9">shoal</text>
+</svg>
