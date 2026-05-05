@@ -52,20 +52,25 @@ npm install -g @m8i-51/shoal
 npx playwright install chromium
 ```
 
-Create a `.env` in your working directory:
+Move to the project you want to test, then run:
+
+```bash
+cd your-project
+shoal init     # creates .env with all available options
+```
+
+Open `.env` and set at minimum:
 
 ```env
 ANTHROPIC_API_KEY=sk-ant-...
-BASE_URL=http://localhost:3000
-# GITHUB_TOKEN=...   # optional: enables Issue creation
-# GITHUB_REPO=owner/repo
+BASE_URL=http://localhost:3000   # URL of the app to test
 ```
 
 Then run:
 
 ```bash
-shoal          # run agents against BASE_URL
 shoal serve    # open web dashboard at http://localhost:4000
+shoal          # or run agents directly from the terminal
 ```
 
 **Or clone and develop locally:**

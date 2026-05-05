@@ -52,20 +52,25 @@ npm install -g @m8i-51/shoal
 npx playwright install chromium
 ```
 
-作業ディレクトリに `.env` を作成:
+テストしたいプロジェクトのディレクトリに移動して実行:
+
+```bash
+cd your-project
+shoal init     # 利用可能なオプションをすべて含む .env を生成
+```
+
+`.env` を開いて最低限これを設定:
 
 ```env
 ANTHROPIC_API_KEY=sk-ant-...
-BASE_URL=http://localhost:3000
-# GITHUB_TOKEN=...   # 任意: Issue作成に使用
-# GITHUB_REPO=owner/repo
+BASE_URL=http://localhost:3000   # テスト対象アプリのURL
 ```
 
 実行:
 
 ```bash
-shoal          # BASE_URL に対してエージェントを実行
 shoal serve    # Webダッシュボードを http://localhost:4000 で起動
+shoal          # またはターミナルから直接実行
 ```
 
 **リポジトリをクローンして開発する場合:**
