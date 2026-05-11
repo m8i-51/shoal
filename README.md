@@ -11,13 +11,11 @@
   <a href="https://www.anthropic.com/"><img src="https://img.shields.io/badge/Anthropic-Claude-blueviolet?logo=anthropic&logoColor=white" alt="Anthropic"></a>
 </p>
 
-Point it at any web app. Agents explore it and file GitHub Issues.
+**AI agents that experience your app — and help it grow.**
 
-shoal drops a swarm of agents onto a web app. Each agent has a distinct persona and evaluation lens — accessibility, security, business logic, data integrity, new user experience, and goal alignment. They explore independently via API and real browser, then a triage agent deduplicates findings and files GitHub Issues.
+shoal drops a swarm of AI agents onto a web app. Each agent has a distinct persona and explores the app as a real user would — navigating pages, taking actions, noticing friction. They surface bugs, usability issues, missing features, and gaps between what the app does and what it's meant to achieve.
 
-A **web dashboard** lets you start runs, monitor live progress, review findings by category, and track estimated LLM cost per run.
-
-No test scripts. No test data. No prior knowledge of the app required.
+No test scripts. No test data. No prior knowledge of the app required. Just a URL.
 
 ---
 
@@ -45,6 +43,21 @@ Target App (any URL)
                  Triage Agent
 ```
 
+Each agent carries a distinct perspective — accessibility, security, business logic, UI design, new user experience, and more. They operate on a shared understanding of the app's purpose and goals. Coverage is tracked across runs, so each session naturally focuses on areas that haven't been explored yet.
+
+---
+
+## What it finds
+
+At the end of each run:
+
+- **Bugs** — broken flows, errors, inconsistent data
+- **UX issues** — confusing interactions, dead ends, unclear states
+- **Feature suggestions** — things that would add real value
+- **Goal gaps** — where the app falls short of what it's trying to achieve
+
+Findings are filed as GitHub Issues or saved as a self-contained HTML report. A **web dashboard** lets you start runs, watch live progress, review findings by category, and track estimated LLM cost per run.
+
 ---
 
 ## Quick Start
@@ -56,7 +69,7 @@ npm install -g @m8i-51/shoal
 npx playwright install chromium
 ```
 
-Move to the project you want to test, then run:
+Move to the project you want to explore, then run:
 
 ```bash
 cd your-project
@@ -67,7 +80,7 @@ Open `.env` and set at minimum:
 
 ```env
 ANTHROPIC_API_KEY=sk-ant-...
-BASE_URL=http://localhost:3000   # URL of the app to test
+BASE_URL=http://localhost:3000   # URL of the app to explore
 ```
 
 Then run:
@@ -117,6 +130,7 @@ Opens at `http://localhost:4000`. From there you can:
 | `ANTHROPIC_API_KEY` | — | Required |
 | `GITHUB_TOKEN` | — | Optional — enables Issue creation |
 | `GITHUB_REPO` | — | `owner/repo` format |
+| `REFRESH_SPEC` | — | Set to `1` to re-run product discovery |
 
 ---
 
@@ -159,6 +173,23 @@ export const target = {
 ```
 
 Alternatively, copy `targets/example.ts`, register it in `targets/index.ts`, and set `TARGET=my-app`.
+
+---
+
+## Scheduled runs
+
+To run shoal weekly against a staging environment, add a GitHub Actions workflow to your repo.
+
+Run `shoal init` — it will offer to generate `.github/workflows/shoal-weekly.yml` automatically. Or copy the example from this repo:
+
+```bash
+curl -O https://raw.githubusercontent.com/m8i-51/shoal/main/.github/workflows/shoal-weekly.example.yml
+mv shoal-weekly.example.yml .github/workflows/shoal-weekly.yml
+```
+
+Then add `ANTHROPIC_API_KEY` to your repo's **Actions secrets** (`Settings → Secrets and variables → Actions`).
+
+The workflow runs every Monday at 09:00 UTC and can also be triggered manually from the Actions tab. Findings are filed as GitHub Issues using the built-in `GITHUB_TOKEN`.
 
 ---
 

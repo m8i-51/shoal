@@ -11,13 +11,13 @@
   <a href="https://www.anthropic.com/"><img src="https://img.shields.io/badge/Anthropic-Claude-blueviolet?logo=anthropic&logoColor=white" alt="Anthropic"></a>
 </p>
 
-URLを渡すだけで、エージェントがアプリを探索してGitHub Issueを起票する。
+**AI が、そのアプリケーションを育てる。**
 
-shoalは複数のエージェントをWebアプリに送り込む。各エージェントは固有のペルソナと評価観点（アクセシビリティ・セキュリティ・ビジネスロジック・データ整合性・新規ユーザー体験・ゴール整合性）を持ち、APIとブラウザの両方から独立して探索する。その後、トリアージエージェントが重複を除去してGitHub Issueを作成する。
+shoal は、AI エージェントが実際のユーザーとしてアプリを体験し、バグ・使いにくさ・欲しい機能を報告するフレームワーク。
 
-**Webダッシュボード**でランの開始・進行状況のリアルタイム監視・Findingのカテゴリ別確認・LLMコスト推計が行える。
+エージェントはスクリプトを実行するのではなく、アプリを使う。ページを開き、操作し、迷い、気づく。そして使ってみてわかったことを伝える。繰り返すたびに探索の幅が広がり、アプリへの理解が深まっていく。
 
-テストスクリプト不要。テストデータ不要。アプリの事前知識も不要。
+テストスクリプト不要。テストデータ不要。アプリの事前知識も不要。URL を渡すだけで動く。
 
 ---
 
@@ -45,6 +45,21 @@ shoalは複数のエージェントをWebアプリに送り込む。各エージ
                  トリアージ
 ```
 
+各エージェントは異なるペルソナと評価観点（アクセシビリティ・セキュリティ・ビジネスロジック・UI デザイン・新規ユーザー体験など）を持ち、アプリの目的・ユーザー像・ゴールを把握した上で動く。探索のたびに「どのエリアをどれだけ見たか」が記録され、次の run では手薄な部分に自然と焦点が当たる。
+
+---
+
+## 何が見つかるか
+
+各 run の終わりに以下が届く。
+
+- **バグ** — 動作しない・エラーが出る・データがおかしい
+- **UX の問題** — 分かりにくい・操作できない・迷子になる
+- **機能の提案** — あったら価値が上がりそうな機能
+- **ゴールとのギャップ** — アプリが目指していることに対して足りていること
+
+GitHub Issue として起票するか、手元の HTML レポートで確認するかを選べる。**Web ダッシュボード**でランの開始・進行状況のリアルタイム監視・Finding のカテゴリ別確認・LLM コスト推計が行える。
+
 ---
 
 ## クイックスタート
@@ -67,13 +82,13 @@ shoal init     # 利用可能なオプションをすべて含む .env を生成
 
 ```env
 ANTHROPIC_API_KEY=sk-ant-...
-BASE_URL=http://localhost:3000   # テスト対象アプリのURL
+BASE_URL=http://localhost:3000   # 対象アプリの URL
 ```
 
 実行:
 
 ```bash
-shoal serve    # Webダッシュボードを http://localhost:4000 で起動
+shoal serve    # Web ダッシュボードを http://localhost:4000 で起動
 shoal          # またはターミナルから直接実行
 ```
 
@@ -89,7 +104,7 @@ npm start
 
 ---
 
-## Webダッシュボード
+## Web ダッシュボード
 
 ```bash
 shoal serve        # グローバルインストール時
@@ -99,9 +114,9 @@ npm run serve      # クローンしたリポジトリから
 
 `http://localhost:4000` で起動する。以下の操作が可能:
 
-- **ランを開始** — エージェント数・対象URL・カスタム指示を設定して実行
-- **リアルタイム監視** — エージェントの探索とFinding登録をライブで確認
-- **過去のラン確認** — カテゴリ別Finding・エージェント数・所要時間・コスト推計
+- **ランを開始** — エージェント数・対象 URL・カスタム指示を設定して実行
+- **リアルタイム監視** — エージェントの探索と Finding 登録をライブで確認
+- **過去のラン確認** — カテゴリ別 Finding・エージェント数・所要時間・コスト推計
 - **アプリゴールの編集** — アプリが達成すべきゴールを定義してゴールギャップ検出を強化
 
 ---
@@ -111,20 +126,21 @@ npm run serve      # クローンしたリポジトリから
 | 変数 | デフォルト | 説明 |
 |---|---|---|
 | `TARGET` | `none` | ターゲット設定名（`example` \| `none` \| カスタム名） |
-| `BASE_URL` | `http://localhost:3000` | 対象アプリのURL |
-| `MAX_EXPLORERS` | `4` | APIエージェントの最大数（0で無効化） |
+| `BASE_URL` | `http://localhost:3000` | 対象アプリの URL |
+| `MAX_EXPLORERS` | `4` | API エージェントの最大数（0 で無効化） |
 | `MAX_BROWSERS` | `2` | ブラウザエージェントの最大数 |
 | `ANTHROPIC_API_KEY` | — | 必須 |
-| `GITHUB_TOKEN` | — | 任意（Issue作成に使用） |
+| `GITHUB_TOKEN` | — | 任意（Issue 作成に使用） |
 | `GITHUB_REPO` | — | `owner/repo` 形式 |
+| `REFRESH_SPEC` | — | `1` を設定するとプロダクト仕様を再探索する |
 
 ---
 
 ## ターゲットの追加
 
-shoalは起動時に**カレントディレクトリ**から `shoal.config.ts` を読み込む。2通りの使い方がある:
+shoal は起動時に**カレントディレクトリ**から `shoal.config.ts` を読み込む。2 通りの使い方がある:
 
-**パターンA — 自分のプロジェクトに置く**（推奨）
+**パターン A — 自分のプロジェクトに置く**（推奨）
 
 ```bash
 # リポジトリからサンプルを取得（またはゼロから作成）
@@ -134,7 +150,7 @@ mv shoal.config.example.ts shoal.config.ts
 shoal
 ```
 
-**パターンB — shoalリポジトリ内に置く**（開発時はシンプル）
+**パターン B — shoal リポジトリ内に置く**（開発時はシンプル）
 
 ```bash
 cp shoal.config.example.ts shoal.config.ts
@@ -162,9 +178,26 @@ export const target = {
 
 ---
 
+## 定期実行
+
+staging 環境に週次で shoal を当てるには、GitHub Actions workflow をリポジトリに追加する。
+
+`shoal init` を実行すると `.github/workflows/shoal-weekly.yml` を自動生成するか聞かれる。またはこのリポジトリの例をコピーする方法もある:
+
+```bash
+curl -O https://raw.githubusercontent.com/m8i-51/shoal/main/.github/workflows/shoal-weekly.example.yml
+mv shoal-weekly.example.yml .github/workflows/shoal-weekly.yml
+```
+
+その後、リポジトリの **Actions secrets** (`Settings → Secrets and variables → Actions`) に `ANTHROPIC_API_KEY` を追加する。
+
+workflow は毎週月曜 09:00 UTC に自動実行され、Actions タブから手動実行もできる。発見した問題は組み込みの `GITHUB_TOKEN` を使って GitHub Issues として起票される。
+
+---
+
 ## アカウントマネージャー
 
-ログインが必要なアプリには、Account Managerエージェントが認証を自律的に発見・テストする。ログインページを探し、`test-accounts/`（gitignore済み）の認証情報をテストし、セッション状態をエクスプローラーエージェントに渡すことで認証後のルートにもアクセスできる。
+ログインが必要なアプリには、Account Manager エージェントが認証を自律的に発見・テストする。ログインページを探し、`test-accounts/`（gitignore 済み）の認証情報をテストし、セッション状態をエクスプローラーエージェントに渡すことで認証後のルートにもアクセスできる。
 
 テスト用認証情報は `test-accounts/accounts.json` に記述:
 
@@ -177,16 +210,16 @@ export const target = {
 
 ---
 
-## LLMプロバイダ
+## LLM プロバイダ
 
-デフォルトはAnthropic Claude。別のプロバイダを使う場合は `.env` に設定する:
+デフォルトは Anthropic Claude。別のプロバイダを使う場合は `.env` に設定する:
 
 | プロバイダ | 変数 |
 |---|---|
 | Anthropic（デフォルト） | `ANTHROPIC_API_KEY` |
 | OpenAI | `LLM_PROVIDER=openai`, `LLM_API_KEY`, `LLM_MODEL` |
 | OpenRouter | `LLM_PROVIDER=openrouter`, `LLM_API_KEY`, `LLM_MODEL` |
-| Codex（ChatGPTサブスク） | `npm run auth:codex` を一度実行後、`LLM_PROVIDER=codex` |
+| Codex（ChatGPT サブスク） | `npm run auth:codex` を一度実行後、`LLM_PROVIDER=codex` |
 | Ollama | `LLM_BASE_URL=http://localhost:11434/v1`, `LLM_MODEL` |
 | LM Studio | `LLM_BASE_URL=http://localhost:1234/v1`, `LLM_MODEL` |
 

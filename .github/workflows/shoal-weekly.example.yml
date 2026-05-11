@@ -1,0 +1,41 @@
+# shoal weekly run — copy this to your own repo's .github/workflows/
+#
+# Required secrets:  ANTHROPIC_API_KEY
+# Required variables: STAGING_URL (e.g. https://staging.example.com)
+#
+# GitHub Issues are filed automatically using the built-in GITHUB_TOKEN.
+
+name: shoal weekly run
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'   # every Monday at 09:00 UTC
+  workflow_dispatch:        # also allow manual trigger from the Actions tab
+
+jobs:
+  shoal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install shoal
+        run: npm install -g @m8i-51/shoal
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+
+      - name: Run shoal
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          BASE_URL: ${{ vars.STAGING_URL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPO: ${{ github.repository }}
+          MAX_BROWSERS: '2'
+          MAX_EXPLORERS: '0'   # set to 4 if you have a shoal.config.ts with appTools
+        run: shoal

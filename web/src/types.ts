@@ -11,4 +11,6 @@ export interface RunSummary {
   hasReport: boolean;
   isLive?: boolean;
   estimatedCostUSD: number | null;
+  regressionChecked: number;
+  regressionFailed: number;
 }

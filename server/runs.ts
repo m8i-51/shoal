@@ -15,6 +15,8 @@ export interface RunSummary {
   hasReport: boolean;
   isLive?: boolean;
   estimatedCostUSD: number | null;
+  regressionChecked: number;
+  regressionFailed: number;
 }
 
 function countFindings(runId: string): { total: number; byCategory: Record<string, number> } {
@@ -63,6 +65,8 @@ export function listRuns(): RunSummary[] {
             hasReport: false,
             isLive: true,
             estimatedCostUSD: null,
+            regressionChecked: 0,
+            regressionFailed: 0,
           });
         }
       } catch { /* skip */ }
@@ -90,6 +94,8 @@ export function listRuns(): RunSummary[] {
         findingsByCategory: byCategory,
         hasReport: fs.existsSync(reportPath),
         estimatedCostUSD: log.summary?.cost?.estimatedUSD ?? null,
+        regressionChecked: log.summary?.regressionChecked ?? 0,
+        regressionFailed: log.summary?.regressionFailed ?? 0,
       });
     } catch { /* skip */ }
   }

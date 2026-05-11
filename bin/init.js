@@ -1,5 +1,5 @@
-import { intro, outro, select, text, isCancel, cancel } from "@clack/prompts";
-import { writeFileSync, existsSync } from "fs";
+import { intro, outro, select, text, confirm, isCancel, cancel } from "@clack/prompts";
+import { writeFileSync, existsSync, mkdirSync } from "fs";
 import { join } from "path";
 
 const PROVIDERS = [
@@ -101,6 +101,69 @@ export async function runInit(cwd) {
   // ── Write .env ────────────────────────────────────────────────────
   const lines = Object.entries(env).map(([k, v]) => `${k}=${v}`);
   writeFileSync(envPath, lines.join("\n") + "\n", "utf-8");
+
+  // ── GitHub Actions workflow (optional) ────────────────────────────
+  const wantsWorkflow = guard(await confirm({
+    message: "Generate a GitHub Actions workflow for weekly scheduled runs?",
+    initialValue: false,
+  }));
+
+  if (wantsWorkflow) {
+    const stagingUrl = guard(await text({
+      message: "Staging URL (used as BASE_URL in the workflow)",
+      placeholder: "https://staging.example.com",
+      validate: (v) => v?.trim() ? undefined : "Required",
+    }));
+
+    const workflowDir = join(cwd, ".github", "workflows");
+    const workflowPath = join(workflowDir, "shoal-weekly.yml");
+    mkdirSync(workflowDir, { recursive: true });
+    writeFileSync(workflowPath, `# shoal weekly run
+#
+# Required secrets:  ANTHROPIC_API_KEY
+# Required variables: STAGING_URL is hardcoded below — update as needed
+#
+# GitHub Issues are filed automatically using the built-in GITHUB_TOKEN.
+
+name: shoal weekly run
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'   # every Monday at 09:00 UTC
+  workflow_dispatch:        # also allow manual trigger from the Actions tab
+
+jobs:
+  shoal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install shoal
+        run: npm install -g @m8i-51/shoal
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+
+      - name: Run shoal
+        env:
+          ANTHROPIC_API_KEY: \${{ secrets.ANTHROPIC_API_KEY }}
+          BASE_URL: ${stagingUrl.trim()}
+          GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPO: \${{ github.repository }}
+          MAX_BROWSERS: '2'
+          MAX_EXPLORERS: '0'
+        run: shoal
+`, "utf-8");
+
+    console.log(`\n  Created ${workflowPath}`);
+    console.log("  Next: add ANTHROPIC_API_KEY to your repo's Actions secrets");
+  }
 
   outro("Created .env\n\n  shoal serve   — open the dashboard at http://localhost:4000\n  shoal         — run agents from the terminal");
 }

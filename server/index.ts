@@ -6,6 +6,7 @@ import { dirname, join, resolve } from "path";
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { listRuns, getReportPath } from "./runs.js";
 import { activeSessions, spawnRun, cancelSession } from "./runner.js";
+import { loadSchedule, saveSchedule, startScheduler, type ScheduleConfig } from "./scheduler.js";
 
 function specFilePath(baseUrl: string): string {
   try {
@@ -248,6 +249,28 @@ process.on("unhandledRejection", (reason) => {
   console.error("[server] unhandledRejection:", reason);
 });
 
+// ----------------------------------------------------------------
+// API: schedule config
+// ----------------------------------------------------------------
+app.get("/api/schedule", (_req, res) => {
+  res.json(loadSchedule());
+});
+
+app.patch("/api/schedule", (req, res) => {
+  const current = loadSchedule();
+  const { enabled, dayOfWeek, hour, minute } = req.body as Partial<ScheduleConfig>;
+  const updated: ScheduleConfig = {
+    ...current,
+    ...(enabled != null ? { enabled: Boolean(enabled) } : {}),
+    ...(dayOfWeek != null && Number.isInteger(dayOfWeek) && dayOfWeek >= 0 && dayOfWeek <= 6 ? { dayOfWeek } : {}),
+    ...(hour != null && Number.isInteger(hour) && hour >= 0 && hour <= 23 ? { hour } : {}),
+    ...(minute != null && Number.isInteger(minute) && minute >= 0 && minute <= 59 ? { minute } : {}),
+  };
+  saveSchedule(updated);
+  res.json(updated);
+});
+
 app.listen(PORT, () => {
   console.log(`\nshoal dashboard → http://localhost:${PORT}\n`);
+  startScheduler();
 });

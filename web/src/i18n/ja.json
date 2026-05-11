@@ -53,6 +53,16 @@
     "minutes": "{{m}}m {{s}}s",
     "inProgress": "実行中"
   },
+  "schedule": {
+    "title": "定期実行",
+    "enabled": "自動実行：オン",
+    "disabled": "自動実行：オフ",
+    "dayLabel": "曜日",
+    "timeLabel": "時刻（サーバーのローカル時刻）",
+    "days": ["日", "月", "火", "水", "木", "金", "土"],
+    "nextRun": "次回実行",
+    "saved": "保存しました"
+  },
   "goals": {
     "title": "App Goals",
     "noSpec": "プロダクト仕様がまだありません。実行を開始するとゴールが自動推論されます。",

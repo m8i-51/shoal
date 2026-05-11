@@ -43,6 +43,7 @@ import { estimateCost, formatCostUSD } from "./framework/cost";
 const BASE_URL = process.env.BASE_URL ?? "http://localhost:3000";
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN ?? "";
 const GITHUB_REPO = process.env.GITHUB_REPO ?? "";
+const REFRESH_SPEC = process.env.REFRESH_SPEC === "1";
 const githubOptions = { token: GITHUB_TOKEN, repo: GITHUB_REPO };
 
 const TARGET = process.env.TARGET ?? "none";
@@ -110,7 +111,14 @@ const POST_FEEDBACK_TOOL: Tool = {
     type: "object",
     properties: {
       title: { type: "string" },
-      body: { type: "string" },
+      body: {
+        type: "string",
+        description: `Describe the finding. Tone varies by category:
+- bug: technical — state what happened, what was expected, and steps to reproduce.
+- ux: experiential — write from the user's perspective ("I tried to...", "It was hard to find...", "I got confused when...").
+- feature-request: aspirational — describe what you wished you could do ("It would have been helpful if...", "I wanted to...").
+- goal-gap: goal-oriented — explain which goal was blocked and why ("I was trying to achieve X, but couldn't because...").`,
+      },
       category: { type: "string", enum: ["ux", "feature-request", "bug", "goal-gap"] },
     },
     required: ["title", "body", "category"],
@@ -316,6 +324,12 @@ ${productSpec.appDescription}
 
 If you notice anything inconvenient, a missing feature, or bug-like behavior,
 report it with the post_feedback tool.
+
+When writing the body, match the tone to the category:
+- bug: technical ("The endpoint returned 500 when...", "Expected X but got Y")
+- ux: experiential ("I tried to find the button but...", "It was unclear what would happen if...")
+- feature-request: aspirational ("It would have been useful if...", "I wished I could...")
+- goal-gap: goal-oriented ("I was trying to X, but couldn't because...")
 
 [Implemented Features]
 ${productSpec.features}
@@ -882,6 +896,12 @@ ${productSpec.appDescription}
 4. Move to another page and repeat
 5. Finish after 8–10 actions
 
+When writing the body, match the tone to the category:
+- bug: technical ("The endpoint returned 500 when...", "Expected X but got Y")
+- ux: experiential ("I tried to find the button but...", "It was unclear what would happen if...")
+- feature-request: aspirational ("It would have been useful if...", "I wished I could...")
+- goal-gap: goal-oriented ("I was trying to X, but couldn't because...")
+
 [Using Observation Tools]
 - To verify an action was actually applied, call diff_since_last_action
 - If data isn't reflected or errors appear, call read_network_errors
@@ -1041,8 +1061,13 @@ async function main() {
   const scenarioOutcomes: ScenarioOutcome[] = [];
   try {
     const cached = loadCachedSpec(BASE_URL);
-    if (cached) {
-      console.log(`\n[product-discovery] using cache (date: ${cached.discoveredAt?.slice(0, 10) ?? "unknown"}, confidence: ${cached.confidence})`);
+    if (cached && !REFRESH_SPEC) {
+      const ageDays = cached.discoveredAt
+        ? Math.floor((Date.now() - new Date(cached.discoveredAt).getTime()) / 86_400_000)
+        : null;
+      const ageStr = ageDays != null ? `${ageDays} day${ageDays !== 1 ? "s" : ""} old` : "unknown date";
+      const staleHint = ageDays != null && ageDays >= 7 ? " — set REFRESH_SPEC=1 to re-run discovery" : "";
+      console.log(`\n[product-discovery] using cache (${ageStr}, confidence: ${cached.confidence})${staleHint}`);
       productSpec = cached;
     } else {
       const discoveryContext = await browser.newContext({ viewport: { width: 1024, height: 640 } });

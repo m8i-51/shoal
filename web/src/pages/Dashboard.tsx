@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { StartModal } from "../components/StartModal";
 import { GoalsPanel } from "../components/GoalsPanel";
+import { SchedulePanel } from "../components/SchedulePanel";
 import { formatDuration, formatDate, formatCostUSD, CATEGORY_COLOR } from "../utils/format";
 import type { RunSummary } from "../types";
 import i18n from "../i18n/index";
@@ -73,6 +74,7 @@ export function Dashboard() {
       </div>
 
       <GoalsPanel />
+      <SchedulePanel />
 
       {runs.length === 0 ? (
         <div style={styles.empty}>
@@ -144,6 +146,11 @@ function RunRow({ run, onView }: { run: RunSummary; onView: () => void }) {
           </span>
         ) : (
           <span style={styles.muted}>—</span>
+        )}
+        {run.regressionChecked > 0 && (
+          <span style={{ display: "block", fontSize: "0.7rem", marginTop: "0.25rem", color: run.regressionFailed > 0 ? "#ef4444" : "#22c55e" }}>
+            {run.regressionFailed > 0 ? `⚠ ${run.regressionFailed} regressed` : `✓ ${run.regressionChecked} still fixed`}
+          </span>
         )}
       </td>
       <td style={{ ...styles.td, textAlign: "center", ...styles.muted }}>

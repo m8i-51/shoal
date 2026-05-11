@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
-import type { Finding, RunLog } from "./types";
+import type { Finding, RunLog, RegressionCheck } from "./types";
 import type { ProductSpec } from "./product-discovery";
 import type { TriageResult } from "./triage";
 import type { Scenario, ScenarioOutcome } from "./scenario-designer";
@@ -50,6 +50,10 @@ export function generateReport(
   scenarioOutcomes: ScenarioOutcome[] = [],
 ): string {
   const reportPath = path.join(process.cwd(), "logs", `report_${runLog.runId}.html`);
+
+  const allRegressionChecks: RegressionCheck[] = runLog.agents.flatMap((a) => a.regressionChecks ?? []);
+  const fixedChecks = allRegressionChecks.filter((c) => c.status === "fixed");
+  const regressedChecks = allRegressionChecks.filter((c) => c.status === "regressed");
 
   const issuedSet = new Set(triageResult.issued);
   const skippedSet = new Set(triageResult.skipped);
@@ -242,9 +246,27 @@ export function generateReport(
       <div class="stat-card"><div class="number">${triageResult.skipped.length}</div><div class="label">skipped</div></div>
       <div class="stat-card"><div class="number">${triageResult.unprocessed.length}</div><div class="label">pending</div></div>
       <div class="stat-card"><div class="number">${runLog.agents.length}</div><div class="label">agents</div></div>
+      ${allRegressionChecks.length > 0 ? `<div class="stat-card"><div class="number" style="color:#22c55e">${fixedChecks.length}</div><div class="label">still fixed</div></div><div class="stat-card"><div class="number" style="color:${regressedChecks.length > 0 ? "#ef4444" : "#94a3b8"}">${regressedChecks.length}</div><div class="label">regressed</div></div>` : ""}
     </div>
     <div class="category-bar">${categoryBar || '<div style="width:100%;display:flex;align-items:center;padding:0 .75rem;font-size:.75rem;color:#94a3b8">no findings</div>'}</div>
   </section>
+
+  ${allRegressionChecks.length > 0 ? `
+  <section>
+    <h2>Progress (${allRegressionChecks.length} issues checked)</h2>
+    ${regressedChecks.length > 0 ? `<p style="color:#ef4444;font-size:.875rem;margin-bottom:.75rem">⚠ ${regressedChecks.length} regression${regressedChecks.length !== 1 ? "s" : ""} detected</p>` : `<p style="color:#22c55e;font-size:.875rem;margin-bottom:.75rem">✓ All previously fixed issues remain resolved</p>`}
+    <table>
+      <thead><tr><th>#</th><th>Issue</th><th style="text-align:center">Status</th></tr></thead>
+      <tbody>
+        ${allRegressionChecks.map((c) => `
+        <tr>
+          <td style="color:#94a3b8">#${c.issueNumber}</td>
+          <td>${esc(c.issueTitle)}</td>
+          <td style="text-align:center">${c.status === "fixed" ? '<span class="badge" style="background:#22c55e">✓ fixed</span>' : '<span class="badge" style="background:#ef4444">⚠ regressed</span>'}</td>
+        </tr>`).join("")}
+      </tbody>
+    </table>
+  </section>` : ""}
 
   <section>
     <h2>Findings (${findings.length})</h2>

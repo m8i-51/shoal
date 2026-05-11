@@ -53,6 +53,16 @@
     "minutes": "{{m}}m {{s}}s",
     "inProgress": "In progress"
   },
+  "schedule": {
+    "title": "Scheduled Runs",
+    "enabled": "Auto-run enabled",
+    "disabled": "Auto-run disabled",
+    "dayLabel": "Day",
+    "timeLabel": "Time (server local)",
+    "days": ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+    "nextRun": "Next run",
+    "saved": "Saved"
+  },
   "goals": {
     "title": "App Goals",
     "noSpec": "No product spec yet. Start a run to discover app goals.",
