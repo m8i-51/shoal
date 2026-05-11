@@ -4,6 +4,7 @@ import { join } from "path";
 
 const PROVIDERS = [
   { value: "anthropic",   label: "Anthropic (Claude)",  hint: "recommended",        defaultModel: "claude-haiku-4-5-20251001" },
+  { value: "bedrock",     label: "Amazon Bedrock",      hint: "AWS credentials",    defaultModel: "anthropic.claude-3-5-haiku-20241022-v1:0" },
   { value: "openai",      label: "OpenAI",                                           defaultModel: "gpt-4o-mini" },
   { value: "groq",        label: "Groq",                hint: "free tier available", defaultModel: "llama-3.3-70b-versatile" },
   { value: "gemini",      label: "Gemini",              hint: "free tier available", defaultModel: "gemini-2.0-flash" },
@@ -46,6 +47,22 @@ export async function runInit(cwd) {
       message: "ANTHROPIC_API_KEY",
       placeholder: "sk-ant-...",
       validate: (v) => v?.trim() ? undefined : "Required",
+    }));
+  } else if (provider === "bedrock") {
+    env.LLM_PROVIDER = "bedrock";
+    env.AWS_ACCESS_KEY_ID = guard(await text({
+      message: "AWS_ACCESS_KEY_ID",
+      placeholder: "AKIA...",
+      validate: (v) => v?.trim() ? undefined : "Required",
+    }));
+    env.AWS_SECRET_ACCESS_KEY = guard(await text({
+      message: "AWS_SECRET_ACCESS_KEY",
+      placeholder: "...",
+      validate: (v) => v?.trim() ? undefined : "Required",
+    }));
+    env.AWS_REGION = guard(await text({
+      message: "AWS region",
+      defaultValue: "us-east-1",
     }));
   } else if (provider === "ollama") {
     env.LLM_PROVIDER = "ollama";

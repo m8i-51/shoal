@@ -10,6 +10,7 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
+import AnthropicBedrock from "@anthropic-ai/bedrock-sdk";
 import OpenAI from "openai";
 import * as fs from "fs";
 import * as os from "os";
@@ -39,6 +40,21 @@ class AnthropicClient {
 
   constructor(apiKey: string) {
     this.client = new Anthropic({ apiKey });
+  }
+
+  async createMessage(params: CreateMessageParams): Promise<Message> {
+    return this.client.messages.create(params) as Promise<Message>;
+  }
+}
+
+// ---- Amazon Bedrock クライアント ----
+
+class BedrockClient {
+  private client: AnthropicBedrock;
+
+  constructor() {
+    // AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_REGION を自動読み取り
+    this.client = new AnthropicBedrock();
   }
 
   async createMessage(params: CreateMessageParams): Promise<Message> {
@@ -452,7 +468,7 @@ class CodexClient {
 
 // ---- Factory ----
 
-export type LLMClient = AnthropicClient | OpenAICompatClient | CodexClient;
+export type LLMClient = AnthropicClient | BedrockClient | OpenAICompatClient | CodexClient;
 
 // OpenAI-compat プロバイダのデフォルト設定
 // LLM_BASE_URL / LLM_MODEL で個別上書き可能
@@ -469,6 +485,17 @@ export function createLLMClient(): { client: LLMClient; defaultModel: string; pr
   const provider = process.env.LLM_PROVIDER ?? "anthropic";
   const baseURL = process.env.LLM_BASE_URL;
   const model = process.env.LLM_MODEL;
+
+  // Bedrock
+  if (provider === "bedrock") {
+    const effectiveModel = model ?? "anthropic.claude-3-5-haiku-20241022-v1:0";
+    console.log(`[LLM] provider: Amazon Bedrock (region: ${process.env.AWS_REGION ?? "us-east-1"}), model: ${effectiveModel}`);
+    return {
+      client: new BedrockClient(),
+      defaultModel: effectiveModel,
+      provider: "bedrock",
+    };
+  }
 
   // Codex は独自クライアント
   if (provider === "codex") {

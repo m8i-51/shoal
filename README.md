@@ -215,11 +215,14 @@ shoal defaults to Anthropic Claude. To use a different provider, set these varia
 | Provider | Variables |
 |---|---|
 | Anthropic (default) | `ANTHROPIC_API_KEY` |
+| Amazon Bedrock | `LLM_PROVIDER=bedrock`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` |
 | OpenAI | `LLM_PROVIDER=openai`, `LLM_API_KEY`, `LLM_MODEL` |
 | OpenRouter | `LLM_PROVIDER=openrouter`, `LLM_API_KEY`, `LLM_MODEL` |
 | Codex (ChatGPT subscription) | run `npm run auth:codex` once, then `LLM_PROVIDER=codex` |
 | Ollama | `LLM_BASE_URL=http://localhost:11434/v1`, `LLM_MODEL` |
 | LM Studio | `LLM_BASE_URL=http://localhost:1234/v1`, `LLM_MODEL` |
+
+For Bedrock, set `LLM_MODEL` to a Bedrock model ID such as `anthropic.claude-3-5-sonnet-20241022-v2:0`. Cross-region inference profiles (e.g. `us.anthropic.claude-3-5-sonnet-20241022-v2:0`) are also supported.
 
 See `.env.example` for full examples.
 

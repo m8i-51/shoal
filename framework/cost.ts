@@ -9,6 +9,14 @@ const ANTHROPIC_PRICING: Record<string, { input: number; output: number }> = {
   "claude-3-opus-20240229":     { input: 15 / 1e6,  output: 75 / 1e6  },
 };
 
+// Bedrock on-demand pricing (us-east-1, as of 2026-04)
+const BEDROCK_PRICING: Record<string, { input: number; output: number }> = {
+  "anthropic.claude-3-5-sonnet-20241022-v2:0": { input: 3 / 1e6,   output: 15 / 1e6  },
+  "anthropic.claude-3-5-haiku-20241022-v1:0":  { input: 0.8 / 1e6, output: 4 / 1e6   },
+  "anthropic.claude-3-opus-20240229-v1:0":     { input: 15 / 1e6,  output: 75 / 1e6  },
+  "anthropic.claude-3-haiku-20240307-v1:0":    { input: 0.25 / 1e6, output: 1.25 / 1e6 },
+};
+
 const OPENAI_PRICING: Record<string, { input: number; output: number }> = {
   "gpt-4o":           { input: 5 / 1e6,    output: 15 / 1e6  },
   "gpt-4o-mini":      { input: 0.15 / 1e6, output: 0.6 / 1e6 },
@@ -70,6 +78,13 @@ export async function estimateCost(
       // prefix match (e.g. "claude-haiku-4-5-20251001" → matches "claude-haiku-4-5")
       const key = Object.keys(ANTHROPIC_PRICING).find((k) => model.startsWith(k));
       if (key) pricing = ANTHROPIC_PRICING[key];
+    }
+  } else if (provider === "bedrock") {
+    pricing = BEDROCK_PRICING[model];
+    if (!pricing) {
+      // cross-region prefix (e.g. "us.anthropic.claude-..." → strip prefix)
+      const stripped = model.replace(/^[a-z]{2}\./, "");
+      pricing = BEDROCK_PRICING[stripped];
     }
   } else if (provider === "openai") {
     pricing = OPENAI_PRICING[model];
