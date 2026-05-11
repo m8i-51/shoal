@@ -1,6 +1,6 @@
 {
   "name": "@m8i-51/shoal",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "type": "module",
   "description": "Multi-agent web exploration framework — finds bugs, UX issues, and missing features by running AI agents against your app",
   "repository": {
