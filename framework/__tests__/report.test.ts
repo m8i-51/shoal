@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
+import type { AgentLog, RegressionCheck } from "../types";
+import type { ScenarioOutcome } from "../scenario-designer";
 
 vi.mock("fs");
 vi.mock("path", async (importOriginal) => {
@@ -37,6 +39,22 @@ function makeRunLog(overrides: Partial<RunLog> = {}): RunLog {
       rateLimitRetries: 0,
       cost: { inputTokens: 0, outputTokens: 0, estimatedUSD: null },
     },
+    ...overrides,
+  };
+}
+
+function makeAgentLog(overrides: Partial<AgentLog> = {}): AgentLog {
+  return {
+    agentId: "a1",
+    agentName: "Alice",
+    agentType: "browser",
+    role: "tester",
+    status: "completed",
+    iterations: 3,
+    issuesPosted: [],
+    regressionChecks: [],
+    startedAt: "2026-04-27T00:01:00.000Z",
+    completedAt: "2026-04-27T00:03:00.000Z",
     ...overrides,
   };
 }
@@ -136,6 +154,76 @@ describe("generateReport", () => {
     const html = getSavedHtml();
     expect(html).toContain("Accessibility");
     expect(html).toContain("lens");
+  });
+
+  it("エージェントテーブルにエージェント名と status が含まれる", () => {
+    const agent = makeAgentLog({ agentName: "Bob", status: "completed" });
+    generateReport(makeRunLog({ agents: [agent] }), [], emptyTriage, makeProductSpec(), [], new Map());
+    const html = getSavedHtml();
+    expect(html).toContain("Bob");
+    expect(html).toContain("completed");
+  });
+
+  it("regression エージェントに regression バッジが付く", () => {
+    const agent = makeAgentLog({ agentType: "regression" });
+    generateReport(makeRunLog({ agents: [agent] }), [], emptyTriage, makeProductSpec(), [], new Map());
+    expect(getSavedHtml()).toContain("regression");
+  });
+
+  it("regression checks がある場合 Progress セクションが表示される", () => {
+    const checks: RegressionCheck[] = [
+      { issueNumber: 42, issueTitle: "Login button broken", status: "fixed" },
+    ];
+    const agent = makeAgentLog({ agentType: "regression", regressionChecks: checks });
+    generateReport(makeRunLog({ agents: [agent] }), [], emptyTriage, makeProductSpec(), [], new Map());
+    const html = getSavedHtml();
+    expect(html).toContain("Progress");
+    expect(html).toContain("#42");
+    expect(html).toContain("Login button broken");
+    expect(html).toContain("✓ fixed");
+  });
+
+  it("regression が再発した場合 regressed バッジが表示される", () => {
+    const checks: RegressionCheck[] = [
+      { issueNumber: 7, issueTitle: "Crash on submit", status: "regressed" },
+    ];
+    const agent = makeAgentLog({ agentType: "regression", regressionChecks: checks });
+    generateReport(makeRunLog({ agents: [agent] }), [], emptyTriage, makeProductSpec(), [], new Map());
+    expect(getSavedHtml()).toContain("⚠ regressed");
+  });
+
+  it("regression checks がない場合 Progress セクションは表示されない", () => {
+    generateReport(makeRunLog(), [], emptyTriage, makeProductSpec(), [], new Map());
+    expect(getSavedHtml()).not.toContain("Progress (");
+  });
+
+  it("ScenarioOutcomes が achieved の場合 achieved バッジが表示される", () => {
+    const outcomes: ScenarioOutcome[] = [{
+      scenarioId: "s1",
+      scenarioTitle: "New employee task",
+      agentId: "a1",
+      agentName: "Alice",
+      achieved: true,
+      reason: "Completed successfully",
+    }];
+    generateReport(makeRunLog(), [], emptyTriage, makeProductSpec(), [], new Map(), outcomes);
+    const html = getSavedHtml();
+    expect(html).toContain("Scenario Outcomes");
+    expect(html).toContain("achieved");
+    expect(html).toContain("New employee task");
+  });
+
+  it("ScenarioOutcomes が failed の場合 failed バッジが表示される", () => {
+    const outcomes: ScenarioOutcome[] = [{
+      scenarioId: "s1",
+      scenarioTitle: "Purchase flow",
+      agentId: "a1",
+      agentName: "Bob",
+      achieved: false,
+      reason: "Could not find the button",
+    }];
+    generateReport(makeRunLog(), [], emptyTriage, makeProductSpec(), [], new Map(), outcomes);
+    expect(getSavedHtml()).toContain("failed");
   });
 
   it("finding が issued → unprocessed → skipped の順に並ぶ", () => {
