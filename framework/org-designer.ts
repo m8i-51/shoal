@@ -14,7 +14,7 @@ export const UNIVERSAL_LENSES = [
   "Business logic: calculation accuracy, status transitions, approval flow correctness, edge case handling in forms / ビジネスロジック観点",
   "Data integrity: UI reflects actual state after actions, silent save failures, optimistic update inconsistencies / データ整合性観点",
   "New user: first-time usability, onboarding clarity, instruction completeness, error recovery, empty state messaging / 新規ユーザー観点",
-  "UX design: interaction feedback (loading states, success/error messages), form usability, modal and dialog behavior, navigation consistency, micro-interactions — evaluate against established patterns from Apple HIG and Material Design (clear affordances, immediate feedback, forgiving interactions) / UXデザイン観点",
+  "UX design: interaction feedback (loading states, success/error messages), form usability, modal and dialog behavior, navigation consistency, micro-interactions — evaluate against established HCI principles: Fitts's Law (are touch/click targets large and close enough?), Hick's Law (are choices overwhelming?), Miller's Law (is the amount of information shown at once within cognitive limits?), Jakob's Law (does the app behave like similar apps users already know?), Nielsen's heuristics (visibility of system status, error prevention, recognition over recall) / UXデザイン観点",
   "Visual design: spacing and alignment consistency, typography hierarchy, color usage and contrast, component coherence across screens, mobile responsiveness — flag anything that looks broken, cramped, or visually inconsistent / ビジュアルデザイン観点",
   "Product/PM: feature discoverability, user journey clarity, obvious next actions, drop-off risk points, call-to-action prominence, whether the app communicates its value clearly, missing features that users of this type would expect / プロダクト・PM観点",
   "Power user: keyboard shortcuts availability, bulk operations, filtering/sorting depth, export options, API access, customization options / パワーユーザー観点",
@@ -78,7 +78,13 @@ ${UNIVERSAL_LENSES.map((l) => `- ${l}`).join("\n")}
 When recruiting UX/design-oriented agents, give them awareness of these standards:
 - Apple HIG: clear visual hierarchy, immediate feedback, forgiveness (undo/cancel), consistent navigation, minimal cognitive load
 - Material Design: meaningful motion, bold clear typography, responsive layout, accessible color contrast (WCAG AA minimum)
-- General web conventions: F-pattern reading, above-the-fold CTAs, error prevention over error recovery, progressive disclosure for complex forms`;
+- General web conventions: F-pattern reading, above-the-fold CTAs, error prevention over error recovery, progressive disclosure for complex forms
+- HCI principles to apply when exploring:
+  - Fitts's Law: notice when important buttons are small, far from natural cursor/thumb position, or hard to tap on mobile
+  - Hick's Law: flag screens with too many choices that slow down decision-making
+  - Miller's Law: flag when more than ~7 items are shown without grouping or progressive disclosure
+  - Jakob's Law: flag interactions that contradict conventions users expect from similar apps (e.g., swipe to delete, pull to refresh, hamburger menus)
+  - Nielsen's heuristics: check for missing system status feedback, unclear error messages, lack of undo, and forcing users to recall rather than recognize`;
 
   console.log("[org-design] done");
   return { hrGuidance };
