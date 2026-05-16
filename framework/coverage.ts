@@ -27,6 +27,9 @@ export interface WeightedSummary {
 const COVERAGE_PATH = path.join(process.cwd(), "coverage", "coverage.json");
 const MAX_ENTRIES = 30;
 const HALF_LIFE_DAYS = 7;
+const REPETITION_WINDOW_DAYS = 14;
+const REPETITION_BONUS = 0.005;
+const REPETITION_EXPONENT = 3;
 
 export function loadCoverage(): Coverage {
   try {
@@ -98,6 +101,20 @@ export function computeWeightedSummary(): WeightedSummary {
 
   const now = Date.now();
   const halfLifeMs = HALF_LIFE_DAYS * 24 * 60 * 60 * 1000;
+  const windowMs = REPETITION_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+
+  // 14日以内の run で各 lens/scenario が何回登場したかを数える
+  const lensRepeat: Record<string, number> = {};
+  const scenarioRepeat: Record<string, number> = {};
+  for (const entry of coverage.entries) {
+    if (now - new Date(entry.timestamp).getTime() > windowMs) continue;
+    for (const lens of Object.keys(entry.byLens)) {
+      lensRepeat[lens] = (lensRepeat[lens] ?? 0) + 1;
+    }
+    for (const title of Object.keys(entry.byScenario ?? {})) {
+      scenarioRepeat[title] = (scenarioRepeat[title] ?? 0) + 1;
+    }
+  }
 
   const byCategory: Record<string, number> = {};
   const byLens: Record<string, number> = {};
@@ -106,18 +123,21 @@ export function computeWeightedSummary(): WeightedSummary {
 
   for (const entry of coverage.entries) {
     const age = now - new Date(entry.timestamp).getTime();
-    const weight = Math.pow(0.5, age / halfLifeMs);
+    const decay = Math.pow(0.5, age / halfLifeMs);
 
     for (const [cat, count] of Object.entries(entry.byCategory)) {
-      byCategory[cat] = (byCategory[cat] ?? 0) + count * weight;
+      byCategory[cat] = (byCategory[cat] ?? 0) + count * decay;
     }
     for (const [lens, count] of Object.entries(entry.byLens)) {
-      byLens[lens] = (byLens[lens] ?? 0) + count * weight;
+      // 繰り返し呼ばれるほど「必要」とみなしてボーナスを加算
+      const bonus = 1 + Math.pow((lensRepeat[lens] ?? 1) - 1, REPETITION_EXPONENT) * REPETITION_BONUS;
+      byLens[lens] = (byLens[lens] ?? 0) + count * decay * bonus;
     }
     for (const [title, count] of Object.entries(entry.byScenario ?? {})) {
-      byScenario[title] = (byScenario[title] ?? 0) + count * weight;
+      const bonus = 1 + Math.pow((scenarioRepeat[title] ?? 1) - 1, REPETITION_EXPONENT) * REPETITION_BONUS;
+      byScenario[title] = (byScenario[title] ?? 0) + count * decay * bonus;
     }
-    totalWeighted += entry.findingsCount * weight;
+    totalWeighted += entry.findingsCount * decay;
   }
 
   // 小数点1桁に丸める
@@ -142,12 +162,27 @@ export function computeWeightedSummary(): WeightedSummary {
     ? `By scenario: ${sortedScenario.map(([t, c]) => `"${t}" (${c})`).join(", ")}`
     : null;
 
+  const repeatedLenses = Object.entries(lensRepeat)
+    .filter(([, n]) => n > 1)
+    .sort((a, b) => b[1] - a[1])
+    .map(([l, n]) => `${l} (×${n})`);
+  const repeatedScenarios = Object.entries(scenarioRepeat)
+    .filter(([, n]) => n > 1)
+    .sort((a, b) => b[1] - a[1])
+    .map(([t, n]) => `"${t}" (×${n})`);
+
   const formatted = [
-    `Coverage summary (half-life: ${HALF_LIFE_DAYS} days, ${coverage.entries.length} run(s) tracked):`,
+    `Coverage summary (half-life: ${HALF_LIFE_DAYS} days, repetition window: ${REPETITION_WINDOW_DAYS} days, ${coverage.entries.length} run(s) tracked):`,
     `Total weighted findings: ${totalWeighted}`,
     `By lens: ${sortedLens.map(([l, c]) => `${l} (${c})`).join(" > ") || "(none)"}`,
     scenarioLine,
     `By category: ${sortedCategory.map(([c, n]) => `${c} (${n})`).join(" > ") || "(none)"}`,
+    repeatedLenses.length > 0
+      ? `Repeated lenses (bonus applied): ${repeatedLenses.join(", ")}`
+      : null,
+    repeatedScenarios.length > 0
+      ? `Repeated scenarios (bonus applied): ${repeatedScenarios.join(", ")}`
+      : null,
     underrepresented.length > 0
       ? `Underrepresented lenses: ${underrepresented.join(", ")} — consider recruiting agents with these perspectives`
       : "All lenses have comparable coverage",
