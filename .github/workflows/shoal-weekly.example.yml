@@ -7,6 +7,10 @@
 
 name: shoal weekly run
 
+permissions:
+  contents: read
+  issues: write
+
 on:
   schedule:
     - cron: '0 9 * * 1'   # every Monday at 09:00 UTC
