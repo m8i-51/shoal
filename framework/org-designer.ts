@@ -4,7 +4,7 @@ import { createMessageWithRetry } from "./agent-loop";
 import type { ProductSpec } from "./product-discovery";
 
 export interface OrgDesign {
-  hrGuidance: string;
+  personaGuidance: string;
 }
 
 // Evaluation lenses always included regardless of app type / アプリ種別に関わらず常に含める観点
@@ -22,7 +22,7 @@ export const UNIVERSAL_LENSES = [
 ];
 
 export async function designOrg(spec: ProductSpec, client: LLMClient, model: string, coverageSummary?: string): Promise<OrgDesign> {
-  console.log("\n[org-design] starting...");
+  console.log("\n[persona-policy] starting...");
 
   const response = await createMessageWithRetry(client, {
     model,
@@ -47,18 +47,36 @@ ${spec.features}
 ${spec.designContext ? `\n[Design Context]\n${spec.designContext}\n` : ""}${coverageSummary ? `\n[Coverage History]\n${coverageSummary}\nUse this to identify underrepresented perspectives and adjust the recruitment policy accordingly.\n` : ""}
 Please output the following:
 
+## App type classification
+Classify this app as one of:
+- "business": used in work contexts by employees with specific job roles (CRM, project management, HR tools, etc.)
+- "consumer": used by individuals in personal contexts (personal finance, entertainment, health, productivity, etc.)
+- "mixed": significant use in both contexts
+
 ## User types for this app
-(What kinds of users exist — roles, skill levels, usage scenarios)
+(What kinds of users exist — described appropriately for the app type)
 
 ## Agent types to recruit (5–8 types)
-By job function, role, and technical literacy. Always include:
-- At least one UX/product designer persona (evaluates visual consistency, interaction patterns, HIG/Material compliance)
-- At least one product manager or business analyst persona (evaluates feature completeness, user journey clarity)
-- At least one target end-user with low technical literacy (first-time or reluctant user)
-- Domain-specific roles relevant to this app type
 
-## Recruitment instructions for the HR agent
-(Concrete hiring/retirement guidelines based on the above — emphasize persona diversity across technical skill levels, job functions, and design sensitivity)`,
+**If business app:**
+Recruit primarily by job role and function (e.g., sales rep, manager, admin).
+Include personas with varying technical literacy within those roles.
+
+**If consumer app:**
+Recruit primarily as real end-users — define by lifestyle, demographics, and usage context.
+Focus on who actually uses this app in daily life, not job titles.
+Examples for a subscription tracker: "budget-conscious student juggling streaming costs", "freelancer tracking SaaS tool expenses", "household manager reviewing family subscriptions".
+Avoid professional/specialist titles (QA engineer, PM, auditor) as primary personas — these are not real users of this app.
+
+**If mixed:**
+Balance job-role personas and lifestyle-based end-user personas.
+
+**Always include as supplement (1–2 personas regardless of app type):**
+- 1 UX evaluator: focuses on visual consistency, interaction patterns, HIG/Material compliance
+- 1 edge-case/accessibility evaluator: focuses on error handling, accessibility, stress scenarios
+
+## Recruitment instructions for the persona designer agent
+(Concrete guidelines based on the above — emphasize that the majority of personas should reflect real users of this specific app, with expert evaluators as a minority supplement)`,
       },
     ],
   });
@@ -68,7 +86,7 @@ By job function, role, and technical literacy. Always include:
     .map((b) => b.text)
     .join("");
 
-  const hrGuidance = `${text}
+  const personaGuidance = `${text}
 
 [Universal Evaluation Lenses]
 Include one of the following perspectives in each agent's persona to ensure diverse findings:
@@ -86,6 +104,6 @@ When recruiting UX/design-oriented agents, give them awareness of these standard
   - Jakob's Law: flag interactions that contradict conventions users expect from similar apps (e.g., swipe to delete, pull to refresh, hamburger menus)
   - Nielsen's heuristics: check for missing system status feedback, unclear error messages, lack of undo, and forcing users to recall rather than recognize`;
 
-  console.log("[org-design] done");
-  return { hrGuidance };
+  console.log("[persona-policy] done");
+  return { personaGuidance };
 }

@@ -394,10 +394,10 @@ ${productSpec.uiFeatures ? `\n[UI-Only Features]\nThese features exist in the UI
 }
 
 // ================================================================
-// HR agent
+// Persona designer agent
 // ================================================================
 
-const HR_TOOLS: Anthropic.Tool[] = [
+const PERSONA_DESIGNER_TOOLS: Anthropic.Tool[] = [
   {
     name: "get_agents",
     description: "Get the current list of registered agents. / 現在登録されているエージェント一覧を取得する",
@@ -445,24 +445,24 @@ const HR_TOOLS: Anthropic.Tool[] = [
   },
 ];
 
-async function runHRAgent(
+async function runPersonaDesigner(
   productSpec: ProductSpec,
   orgGuidance: string,
   openIssues: { number: number; title: string; labels: string[] }[],
   scenarios: Scenario[],
   testAccounts: TestAccount[] = [],
 ): Promise<void> {
-  console.log("\n[hr] starting...");
+  console.log("\n[persona-designer] starting...");
   const messages: Anthropic.MessageParam[] = [
-    { role: "user", content: "Manage agent hiring and retirement." },
+    { role: "user", content: "Design and manage user personas for this run." },
   ];
 
   const accountContext = testAccounts.length > 0
     ? `\n[Available Test Accounts (one per role)]\n${testAccounts.map((a) => `- ${a.role}: ${a.email}`).join("\n")}\nWhen recruiting agents, match each persona's role to one of these accounts so they can operate with appropriate permissions.`
     : "";
 
-  const systemPrompt = `You are the test agent manager for "${productSpec.appName}".
-You recruit and manage agents that simulate real users of the app.
+  const systemPrompt = `You are the persona designer for "${productSpec.appName}".
+You create and manage test agents that simulate real users of the app.
 
 [Organization Design Guidelines]
 ${orgGuidance}${accountContext}
@@ -483,7 +483,7 @@ ${orgGuidance}${accountContext}
         model: defaultModel,
         max_tokens: 1024,
         system: systemPrompt,
-        tools: HR_TOOLS,
+        tools: PERSONA_DESIGNER_TOOLS,
         messages,
       });
       messages.push({ role: "assistant", content: response.content });
@@ -496,14 +496,14 @@ ${orgGuidance}${accountContext}
         let result: unknown;
         if (toolUse.name === "get_coverage") {
           result = computeWeightedSummary().formatted;
-          console.log("  [hr] coverage summary fetched");
+          console.log("  [persona-designer] coverage summary fetched");
         } else if (toolUse.name === "get_open_issues") {
           if (openIssues.length === 0) {
             result = "(no open issues — either GitHub is not configured or there are no known issues yet)";
           } else {
             result = openIssues.map((i) => `- #${i.number}: ${i.title} [${i.labels.join(", ")}]`).join("\n");
           }
-          console.log(`  [hr] open issues fetched (${openIssues.length})`);
+          console.log(`  [persona-designer] open issues fetched (${openIssues.length})`);
         } else if (toolUse.name === "get_scenarios") {
           if (scenarios.length === 0) {
             result = "(no scenarios generated — all agents will use free-exploration mode)";
@@ -512,19 +512,19 @@ ${orgGuidance}${accountContext}
               `[${s.id}] ${s.title}\n  Context: ${s.context}\n  Goal: ${s.goal}\n  Constraints: ${s.constraints}`
             ).join("\n\n");
           }
-          console.log(`  [hr] scenarios fetched (${scenarios.length})`);
+          console.log(`  [persona-designer] scenarios fetched (${scenarios.length})`);
         } else if (toolUse.name === "get_agents") {
           const agents = loadAgents();
           result = agents.map((a) => ({ id: a.id, name: a.name, role: a.role, createdAt: a.createdAt }));
-          console.log(`  [hr] current agents: ${agents.length}`);
+          console.log(`  [persona-designer] current agents: ${agents.length}`);
         } else if (toolUse.name === "add_agent") {
           const { name, role, persona } = toolUse.input as { name: string; role: string; persona: string };
           result = addAgent({ name, role, persona });
-          console.log(`  [hr] hired: ${name} (${role})`);
+          console.log(`  [persona-designer] created: ${name} (${role})`);
         } else if (toolUse.name === "retire_agent") {
           const { agentId, reason } = toolUse.input as { agentId: string; reason: string };
           result = { success: retireAgent(agentId) };
-          console.log(`  [hr] retired: ${agentId} — ${reason}`);
+          console.log(`  [persona-designer] retired: ${agentId} — ${reason}`);
         } else {
           result = { error: "unknown tool" };
         }
@@ -532,9 +532,9 @@ ${orgGuidance}${accountContext}
       }
       messages.push({ role: "user", content: toolResults });
     }
-    console.log("[hr] done");
+    console.log("[persona-designer] done");
   } catch (e) {
-    console.error("[hr] error:", e);
+    console.error("[persona-designer] error:", e);
   }
 }
 
@@ -1105,7 +1105,7 @@ async function main() {
     }
 
     // 4. HR agent
-    await runHRAgent(productSpec, orgDesign.hrGuidance, openIssues, scenarios, testAccounts);
+    await runPersonaDesigner(productSpec, orgDesign.personaGuidance, openIssues, scenarios, testAccounts);
 
     // 5. load agents + closed issues
     const allAgents = loadAgents();
