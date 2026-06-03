@@ -691,7 +691,7 @@ async function executeBrowserTool(
         const { path: navPath } = input as { path: string };
         await saveSnapshotBeforeAction(page, observation);
         await page.goto(`${BASE_URL}${navPath}`, { waitUntil: "networkidle" });
-        await page.waitForTimeout(500);
+        await page.waitForTimeout(3000);
         screenshot = await takeScreenshot(page, `navigate_${navPath.replace(/\//g, "_")}`);
         resultText = `Navigated to ${navPath}`;
         break;
@@ -925,7 +925,7 @@ ${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\
     : ""}`;
 
   await page.goto(BASE_URL, { waitUntil: "networkidle" });
-  await page.waitForTimeout(1000);
+  await page.waitForTimeout(5000);
   const initialScreenshot = await takeScreenshot(page, "initial");
 
   const messages: Anthropic.MessageParam[] = [
