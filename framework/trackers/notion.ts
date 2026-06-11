@@ -2,6 +2,7 @@ import type { IssueTracker, OpenIssue, ClosedIssue } from "./types";
 
 export class NotionTracker implements IssueTracker {
   readonly name = "notion";
+  readonly isEmpty = false;
   private token: string;
   private databaseId: string;
 
@@ -38,13 +39,15 @@ export class NotionTracker implements IssueTracker {
         ],
       }),
     });
-    const data = await res.json() as { id?: string; url?: string; message?: string };
     if (!res.ok) {
-      console.error(`[notion] failed to create page (${res.status}): ${data.message}`);
+      const msg = await res.text().catch(() => "");
+      console.error(`[notion] failed to create page (${res.status}): ${msg.slice(0, 200)}`);
       return null;
     }
-    console.log(`[notion] page created: ${data.url}`);
-    return data.url ?? null;
+    const data = await res.json() as { url?: string };
+    const url = data.url ?? null;
+    console.log(`[notion] page created: ${url}`);
+    return url;
   }
 
   async fetchOpenIssues(): Promise<OpenIssue[]> {

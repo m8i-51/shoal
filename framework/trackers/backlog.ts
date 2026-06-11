@@ -2,6 +2,7 @@ import type { IssueTracker, OpenIssue, ClosedIssue } from "./types";
 
 export class BacklogTracker implements IssueTracker {
   readonly name = "backlog";
+  readonly isEmpty = false;
   private baseUrl: string;
   private apiKey: string;
   private projectId: number;
@@ -30,9 +31,14 @@ export class BacklogTracker implements IssueTracker {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: form,
     });
-    const data = await res.json() as { issueKey?: string; message?: string };
     if (!res.ok) {
-      console.error(`[backlog] failed to create issue (${res.status}): ${data.message}`);
+      const msg = await res.text().catch(() => "");
+      console.error(`[backlog] failed to create issue (${res.status}): ${msg.slice(0, 200)}`);
+      return null;
+    }
+    const data = await res.json() as { issueKey?: string };
+    if (!data.issueKey) {
+      console.error("[backlog] create issue response missing issueKey");
       return null;
     }
     const url = `${this.baseUrl}/view/${data.issueKey}`;

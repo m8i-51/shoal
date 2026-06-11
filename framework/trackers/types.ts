@@ -13,6 +13,7 @@ export interface ClosedIssue {
 
 export interface IssueTracker {
   readonly name: string;
+  readonly isEmpty: boolean;
   createIssue(title: string, body: string, labels: string[]): Promise<string | null>;
   fetchOpenIssues(): Promise<OpenIssue[]>;
   fetchClosedIssues(): Promise<ClosedIssue[]>;

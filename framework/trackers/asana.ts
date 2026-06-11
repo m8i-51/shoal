@@ -2,6 +2,7 @@ import type { IssueTracker, OpenIssue, ClosedIssue } from "./types";
 
 export class AsanaTracker implements IssueTracker {
   readonly name = "asana";
+  readonly isEmpty = false;
   private token: string;
   private projectId: string;
 
@@ -30,15 +31,19 @@ export class AsanaTracker implements IssueTracker {
         },
       }),
     });
-    const data = await res.json() as {
-      data?: { gid: string; permalink_url?: string };
-      errors?: { message: string }[];
-    };
     if (!res.ok) {
-      console.error(`[asana] failed to create task (${res.status}): ${JSON.stringify(data.errors)}`);
+      const msg = await res.text().catch(() => "");
+      console.error(`[asana] failed to create task (${res.status}): ${msg.slice(0, 200)}`);
       return null;
     }
-    const url = data.data?.permalink_url ?? `https://app.asana.com/0/${this.projectId}/${data.data?.gid}`;
+    const data = await res.json() as {
+      data?: { gid: string; permalink_url?: string };
+    };
+    if (!data.data?.gid) {
+      console.error("[asana] create task response missing gid");
+      return null;
+    }
+    const url = data.data.permalink_url ?? `https://app.asana.com/0/${this.projectId}/${data.data.gid}`;
     console.log(`[asana] task created: ${url}`);
     return url;
   }

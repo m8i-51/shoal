@@ -17,7 +17,6 @@ reviews:
     drafts: false
     ignore_title_keywords:
       - "WIP"
-      - "chore"
   path_instructions:
     - path: "framework/trackers/**"
       instructions: |

@@ -2,6 +2,7 @@ import type { IssueTracker, OpenIssue, ClosedIssue } from "./types";
 
 export class JiraTracker implements IssueTracker {
   readonly name = "jira";
+  readonly isEmpty = false;
   private baseUrl: string;
   private authHeader: string;
   private projectKey: string;
@@ -38,9 +39,14 @@ export class JiraTracker implements IssueTracker {
         },
       }),
     });
-    const data = await res.json() as { key?: string; errors?: Record<string, string> };
     if (!res.ok) {
-      console.error(`[jira] failed to create issue (${res.status}): ${JSON.stringify(data.errors ?? data)}`);
+      const msg = await res.text().catch(() => "");
+      console.error(`[jira] failed to create issue (${res.status}): ${msg.slice(0, 200)}`);
+      return null;
+    }
+    const data = await res.json() as { key?: string };
+    if (!data.key) {
+      console.error("[jira] create issue response missing key");
       return null;
     }
     const url = `${this.baseUrl}/browse/${data.key}`;

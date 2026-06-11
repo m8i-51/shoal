@@ -21,18 +21,28 @@ export class AggregatedTracker implements IssueTracker {
 
   async createIssue(title: string, body: string, labels: string[]): Promise<string | null> {
     if (this.trackers.length === 0) return null;
-    const urls = await Promise.all(this.trackers.map((t) => t.createIssue(title, body, labels)));
-    return urls.find((u) => u !== null) ?? null;
+    const results = await Promise.allSettled(this.trackers.map((t) => t.createIssue(title, body, labels)));
+    for (const r of results) {
+      if (r.status === "rejected") console.error("[trackers] createIssue error:", r.reason);
+    }
+    const urls = results.filter((r): r is PromiseFulfilledResult<string | null> => r.status === "fulfilled");
+    return urls.map((r) => r.value).find((u) => u !== null) ?? null;
   }
 
   async fetchOpenIssues(): Promise<OpenIssue[]> {
-    const results = await Promise.all(this.trackers.map((t) => t.fetchOpenIssues()));
-    return results.flat();
+    const results = await Promise.allSettled(this.trackers.map((t) => t.fetchOpenIssues()));
+    return results.flatMap((r) => {
+      if (r.status === "rejected") { console.error("[trackers] fetchOpenIssues error:", r.reason); return []; }
+      return r.value;
+    });
   }
 
   async fetchClosedIssues(): Promise<ClosedIssue[]> {
-    const results = await Promise.all(this.trackers.map((t) => t.fetchClosedIssues()));
-    return results.flat();
+    const results = await Promise.allSettled(this.trackers.map((t) => t.fetchClosedIssues()));
+    return results.flatMap((r) => {
+      if (r.status === "rejected") { console.error("[trackers] fetchClosedIssues error:", r.reason); return []; }
+      return r.value;
+    });
   }
 }
 
@@ -87,8 +97,8 @@ export function buildTrackers(): AggregatedTracker {
       case "backlog": {
         const space = process.env.BACKLOG_SPACE ?? "";
         const apiKey = process.env.BACKLOG_API_KEY ?? "";
-        const projectId = parseInt(process.env.BACKLOG_PROJECT_ID ?? "0", 10);
-        if (space && apiKey && projectId) {
+        const projectId = parseInt(process.env.BACKLOG_PROJECT_ID ?? "", 10);
+        if (space && apiKey && !isNaN(projectId)) {
           trackers.push(new BacklogTracker(space, apiKey, projectId));
         } else {
           console.warn("[trackers] backlog: BACKLOG_SPACE / BACKLOG_API_KEY / BACKLOG_PROJECT_ID required, skipping");

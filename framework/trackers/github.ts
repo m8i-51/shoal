@@ -3,6 +3,7 @@ import { postGitHubIssue, fetchOpenIssues as ghFetchOpen, fetchClosedIssues as g
 
 export class GitHubTracker implements IssueTracker {
   readonly name = "github";
+  readonly isEmpty = false;
   private opts: { token: string; repo: string };
 
   constructor(token: string, repo: string) {
