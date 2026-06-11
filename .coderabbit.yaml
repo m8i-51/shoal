@@ -61,13 +61,3 @@ reviews:
 knowledge_base:
   learnings:
     scope: "auto"
-
-tools:
-  eslint:
-    enabled: true
-  semgrep:
-    enabled: true
-  gitleaks:
-    enabled: true
-  ruff:
-    enabled: false
