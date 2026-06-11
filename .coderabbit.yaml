@@ -1,0 +1,74 @@
+language: "ja"
+tone_instructions: "建設的かつ簡潔に。指摘は具体的な改善案とセットで伝えること。"
+early_access: false
+
+reviews:
+  profile: "assertive"
+  request_changes_workflow: false
+  high_level_summary: true
+  collapse_walkthrough: false
+  sequence_diagrams: true
+  estimate_code_review_effort: true
+  suggested_labels: true
+  poem: false
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    drafts: false
+    ignore_title_keywords:
+      - "WIP"
+      - "chore"
+  path_instructions:
+    - path: "framework/trackers/**"
+      instructions: |
+        各トラッカーのAPI実装をレビューする。
+        - HTTP 4xx/5xx のエラーハンドリングが適切か
+        - Authorization ヘッダーがログに漏洩していないか
+        - レスポンスの型キャスト（as）が安全か（予期しないフィールド欠損でクラッシュしないか）
+        - fetch が失敗したとき null を返して呼び出し元が処理できるか
+    - path: "framework/**"
+      instructions: |
+        エージェントループと findings 管理をレビューする。
+        - while ループの終了条件が適切で無限ループにならないか
+        - LLM の tool_use レスポンスの未知ツール名に対するハンドリングが漏れていないか
+        - finding の保存・集約で取りこぼしが起きないか
+        - LLM API の rate limit エラーが適切にリトライされるか
+    - path: "bin/**"
+      instructions: |
+        CLI の UX と安全性をレビューする。
+        - isCancel のチェックが全プロンプトに抜けなく入っているか
+        - .env への書き込みで既存の無関係なキーが消えないか
+        - エラーメッセージはユーザーが次に何をすべきか分かる内容か
+        - API キーなど秘密情報が process.stdout に出力されていないか
+    - path: "web/src/**"
+      instructions: |
+        React コンポーネントの品質をレビューする。
+        - useEffect の依存配列に漏れがないか
+        - dangerouslySetInnerHTML など XSS リスクのある API を使っていないか
+        - 非同期処理のアンマウント後の state 更新でエラーが起きないか
+    - path: "server/**"
+      instructions: |
+        Express サーバーのセキュリティをレビューする。
+        - 外部からのリクエストに対してバリデーションが適切か
+        - エラーレスポンスにスタックトレースや内部情報が含まれていないか
+        - rate limiting が適切に設定されているか
+    - path: "**/*.test.ts"
+      instructions: |
+        テストの品質をレビューする。
+        - テストが実際に失敗するケース（異常系）をカバーしているか
+        - モックの過剰使用による偽陽性テストになっていないか
+        - テスト名から何を検証しているか読み取れるか
+
+knowledge_base:
+  learnings:
+    scope: "auto"
+
+tools:
+  eslint:
+    enabled: true
+  semgrep:
+    enabled: true
+  gitleaks:
+    enabled: true
+  ruff:
+    enabled: false
