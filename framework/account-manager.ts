@@ -287,7 +287,8 @@ If user management is not accessible from this account, or the app has no role s
           }
 
           case "navigate": {
-            const { path: navPath } = toolUse.input as { path: string };
+            const { path: navPath } = toolUse.input as { path?: string };
+            if (!navPath) { resultText = "navigate: missing path"; break; }
             await saveSnapshotBeforeAction(page, observation);
             await page.goto(`${baseUrl}${navPath}`, { waitUntil: "networkidle" });
             await page.waitForTimeout(500);
@@ -297,7 +298,8 @@ If user management is not accessible from this account, or the app has no role s
           }
 
           case "click": {
-            const { description } = toolUse.input as { description: string };
+            const { description } = toolUse.input as { description?: string };
+            if (!description) { resultText = "click: missing description"; break; }
             await saveSnapshotBeforeAction(page, observation);
             const escaped = description.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
             let clicked = false;
@@ -316,7 +318,8 @@ If user management is not accessible from this account, or the app has no role s
           }
 
           case "fill": {
-            const { label, value } = toolUse.input as { label: string; value: string };
+            const { label, value } = toolUse.input as { label?: string; value?: string };
+            if (!label || value === undefined) { resultText = "fill: missing label or value"; break; }
             await saveSnapshotBeforeAction(page, observation);
             const byLabel = page.getByLabel(new RegExp(label, "i"));
             const byPlaceholder = page.getByPlaceholder(new RegExp(label, "i"));
@@ -340,7 +343,8 @@ If user management is not accessible from this account, or the app has no role s
           }
 
           case "save_account": {
-            const { email, password, role } = toolUse.input as { email: string; password: string; role: string };
+            const { email, password, role } = toolUse.input as { email?: string; password?: string; role?: string };
+            if (!email || !password || !role) { resultText = "save_account: missing required fields"; break; }
             savedAccounts.push({ email, password, role });
             console.log(`  [account-manager] saved account: ${email} (role: ${role})`);
             resultText = `Account saved: ${email} (${role})`;
@@ -348,7 +352,8 @@ If user management is not accessible from this account, or the app has no role s
           }
 
           case "post_finding": {
-            const { title, body } = toolUse.input as { title: string; body: string };
+            const { title, body } = toolUse.input as { title?: string; body?: string };
+            if (!title || !body) { resultText = "post_finding: missing title or body"; break; }
             saveFinding({
               id: `acct_${Date.now()}`,
               runId,

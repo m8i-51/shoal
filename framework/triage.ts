@@ -143,11 +143,16 @@ Organize feedback collected by multiple agents and post it as issue tickets.
 
       } else if (toolUse.name === "create_issue") {
         const { title, body, category, merged_finding_ids } = toolUse.input as {
-          title: string;
-          body: string;
-          category: string;
-          merged_finding_ids: string[] | undefined;
+          title?: string;
+          body?: string;
+          category?: string;
+          merged_finding_ids?: string[];
         };
+        if (!title || !body || !category) {
+          result = { error: "create_issue: missing required fields" };
+          toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: JSON.stringify(result) });
+          continue;
+        }
         const mergedIds = merged_finding_ids ?? [];
         if (mergedIds.length === 0) {
           result = { error: "merged_finding_ids must contain at least one ID" };
@@ -175,7 +180,12 @@ Organize feedback collected by multiple agents and post it as issue tickets.
         }
 
       } else if (toolUse.name === "skip_finding") {
-        const { finding_id, reason } = toolUse.input as { finding_id: string; reason: string };
+        const { finding_id, reason } = toolUse.input as { finding_id?: string; reason?: string };
+        if (!finding_id) {
+          result = { error: "skip_finding: missing finding_id" };
+          toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: JSON.stringify(result) });
+          continue;
+        }
         pendingIds.delete(finding_id);
         skippedIds.push(finding_id);
         skipped++;

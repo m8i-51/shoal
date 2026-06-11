@@ -253,7 +253,8 @@ Guidelines for output_spec:
       let result: string;
 
       if (toolUse.name === "navigate_and_read") {
-        const { path } = toolUse.input as { path: string };
+        const { path } = toolUse.input as { path?: string };
+        if (!path) { result = "navigate_and_read: missing path"; toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: result }); continue; }
         try {
           await page.goto(`${baseUrl}${path}`, { waitUntil: "networkidle", timeout: 10000 });
           await page.waitForTimeout(500);
@@ -268,7 +269,8 @@ Guidelines for output_spec:
         }
 
       } else if (toolUse.name === "fetch_url") {
-        const { url } = toolUse.input as { url: string };
+        const { url } = toolUse.input as { url?: string };
+        if (!url) { result = "fetch_url: missing url"; toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: result }); continue; }
         try {
           const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
           const text = await res.text();
