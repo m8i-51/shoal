@@ -47,12 +47,14 @@ function makeAgentLog(overrides: Partial<AgentLog> = {}): AgentLog {
   return {
     agentId: "a1",
     agentName: "Alice",
-    agentType: "browser",
+    agentType: "explorer",
     role: "tester",
     status: "completed",
     iterations: 3,
+    actions: [],
     issuesPosted: [],
     regressionChecks: [],
+    error: null,
     startedAt: "2026-04-27T00:01:00.000Z",
     completedAt: "2026-04-27T00:03:00.000Z",
     ...overrides,
@@ -172,7 +174,7 @@ describe("generateReport", () => {
 
   it("regression checks がある場合 Progress セクションが表示される", () => {
     const checks: RegressionCheck[] = [
-      { issueNumber: 42, issueTitle: "Login button broken", status: "fixed" },
+      { issueNumber: 42, issueTitle: "Login button broken", status: "fixed", note: "", regressionUrl: null },
     ];
     const agent = makeAgentLog({ agentType: "regression", regressionChecks: checks });
     generateReport(makeRunLog({ agents: [agent] }), [], emptyTriage, makeProductSpec(), [], new Map());
@@ -185,7 +187,7 @@ describe("generateReport", () => {
 
   it("regression が再発した場合 regressed バッジが表示される", () => {
     const checks: RegressionCheck[] = [
-      { issueNumber: 7, issueTitle: "Crash on submit", status: "regressed" },
+      { issueNumber: 7, issueTitle: "Crash on submit", status: "regressed", note: "", regressionUrl: null },
     ];
     const agent = makeAgentLog({ agentType: "regression", regressionChecks: checks });
     generateReport(makeRunLog({ agents: [agent] }), [], emptyTriage, makeProductSpec(), [], new Map());

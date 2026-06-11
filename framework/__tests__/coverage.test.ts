@@ -259,7 +259,7 @@ describe("computeWeightedSummary", () => {
 
     // updateCoverage が 31件目を追加してトリムすることを確認
     vi.mocked(fs.existsSync).mockReturnValue(true);
-    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ entries }) as unknown as Buffer);
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ entries }));
 
     // computeWeightedSummary は entries をそのまま使うだけなので、
     // 35件あってもエラーにならないことを確認

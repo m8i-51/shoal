@@ -157,11 +157,11 @@ function fromOpenAIResponse(response: OpenAI.ChatCompletion): Message {
   const content: ContentBlock[] = [];
 
   if (choice.message.content) {
-    content.push({ type: "text", text: choice.message.content });
+    content.push({ type: "text", text: choice.message.content } as ContentBlock);
   }
 
   if (choice.message.tool_calls) {
-    for (const tc of choice.message.tool_calls) {
+    for (const tc of choice.message.tool_calls.filter((t) => t.type === "function")) {
       let input: Record<string, unknown> = {};
       try {
         input = JSON.parse(tc.function.arguments);
@@ -172,7 +172,7 @@ function fromOpenAIResponse(response: OpenAI.ChatCompletion): Message {
         id: tc.id,
         name: tc.function.name,
         input,
-      });
+      } as ContentBlock);
     }
   }
 
@@ -392,7 +392,7 @@ function fromCodexResponse(response: Record<string, unknown>): Message {
     if (i.type === "message") {
       for (const block of (i.content as unknown[]) ?? []) {
         const b = block as Record<string, unknown>;
-        if (b.type === "output_text") content.push({ type: "text", text: b.text as string });
+        if (b.type === "output_text") content.push({ type: "text", text: b.text as string } as ContentBlock);
       }
     } else if (i.type === "function_call") {
       hasToolUse = true;
@@ -403,7 +403,7 @@ function fromCodexResponse(response: Record<string, unknown>): Message {
         id: (i.call_id ?? i.id) as string,
         name: i.name as string,
         input,
-      });
+      } as ContentBlock);
     }
   }
 
