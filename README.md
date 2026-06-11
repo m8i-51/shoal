@@ -39,7 +39,7 @@ Target App (any URL)
   explore via API                  browse the real UI
         │                                  │
         └──────────────┬───────────────────┘
-                       ▼  deduplicates and files GitHub Issues
+                       ▼  deduplicates and files issue tickets
                  Triage Agent
 ```
 
@@ -56,7 +56,7 @@ At the end of each run:
 - **Feature suggestions** — things that would add real value
 - **Goal gaps** — where the app falls short of what it's trying to achieve
 
-Findings are filed as GitHub Issues or saved as a self-contained HTML report. A **web dashboard** lets you start runs, watch live progress, review findings by category, and track estimated LLM cost per run.
+Findings are filed as issue tickets (GitHub Issues, Jira, Notion, Backlog, or Asana) or saved as a self-contained HTML report. A **web dashboard** lets you start runs, watch live progress, review findings by category, and track estimated LLM cost per run.
 
 ---
 
@@ -88,6 +88,7 @@ Then run:
 ```bash
 shoal serve    # open web dashboard at http://localhost:4000
 shoal          # or run agents directly from the terminal
+shoal config   # update settings in existing .env (e.g. issue trackers)
 ```
 
 **Or clone and develop locally:**
@@ -128,9 +129,22 @@ Opens at `http://localhost:4000`. From there you can:
 | `MAX_EXPLORERS` | `4` | API explorer agent count (0 to disable) |
 | `MAX_BROWSERS` | `2` | Browser agent count |
 | `ANTHROPIC_API_KEY` | — | Required |
-| `GITHUB_TOKEN` | — | Optional — enables Issue creation |
-| `GITHUB_REPO` | — | `owner/repo` format |
+| `ISSUE_TRACKERS` | — | Comma-separated list of active trackers: `github`, `jira`, `notion`, `backlog`, `asana` |
 | `REFRESH_SPEC` | — | Set to `1` to re-run product discovery |
+
+**Issue tracker variables** (set only what you need):
+
+| Tracker | Variables |
+|---|---|
+| GitHub Issues | `GITHUB_TOKEN`, `GITHUB_REPO` (`owner/repo`) |
+| Jira | `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `JIRA_PROJECT_KEY` |
+| Notion | `NOTION_API_KEY`, `NOTION_DATABASE_ID` ¹ |
+| Backlog | `BACKLOG_SPACE`, `BACKLOG_API_KEY`, `BACKLOG_PROJECT_ID` |
+| Asana | `ASANA_ACCESS_TOKEN`, `ASANA_PROJECT_ID` |
+
+¹ The Notion database must have `Name` (title), `Labels` (multi_select), and `Status` (select) properties.
+
+Multiple trackers can be active at the same time — findings are posted to all of them. If `ISSUE_TRACKERS` is not set but `GITHUB_TOKEN` and `GITHUB_REPO` are present, GitHub is used automatically (backward compatible).
 
 ---
 

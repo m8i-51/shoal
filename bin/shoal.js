@@ -4,6 +4,7 @@
  *
  * Usage:
  *   shoal init     # interactive setup — creates .env in current directory
+ *   shoal config   # update settings in existing .env (e.g. issue trackers)
  *   shoal serve    # web dashboard at http://localhost:4000
  *   shoal          # run agents from the terminal
  *   shoal triage   # triage-only mode
@@ -22,6 +23,13 @@ async function main() {
   if (subcommand === "init") {
     const { runInit } = await import("./init.js");
     await runInit(process.cwd());
+    process.exit(0);
+  }
+
+  // config — 既存の .env を対話形式で更新する
+  if (subcommand === "config") {
+    const { runConfig } = await import("./init.js");
+    await runConfig(process.cwd());
     process.exit(0);
   }
 

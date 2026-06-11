@@ -12,10 +12,8 @@ import * as fs from "fs";
 import * as path from "path";
 import { createLLMClient } from "./framework/llm-client";
 import { runTriageAgent } from "./framework/triage";
+import { buildTrackers } from "./framework/trackers/index";
 import type { Finding } from "./framework/types";
-
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN ?? "";
-const GITHUB_REPO = process.env.GITHUB_REPO ?? "";
 
 function loadFindings(runId: string): Finding[] {
   const dir = path.join(process.cwd(), "findings", runId);
@@ -46,7 +44,8 @@ async function main() {
   findings.forEach((f) => console.log(`  - ${f.agentName}: ${f.title.slice(0, 50)}`));
 
   const { client, defaultModel } = createLLMClient();
-  const result = await runTriageAgent(findings, client, defaultModel, { token: GITHUB_TOKEN, repo: GITHUB_REPO });
+  const trackers = buildTrackers();
+  const result = await runTriageAgent(findings, client, defaultModel, trackers);
 
   console.log("\n=== トリアージ結果 ===");
   console.log(`  Issue作成: ${result.issuesCreated}件`);

@@ -59,7 +59,7 @@ const OUTPUT_SCENARIOS_TOOL: Anthropic.Tool = {
 
 export async function designScenarios(
   spec: ProductSpec,
-  openIssues: { number: number; title: string; labels: string[] }[],
+  openIssues: { number: number | string; title: string; labels: string[] }[],
   client: LLMClient,
   model: string,
   count: number = 5,

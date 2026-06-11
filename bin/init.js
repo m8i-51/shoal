@@ -1,5 +1,5 @@
-import { intro, outro, select, text, confirm, isCancel, cancel } from "@clack/prompts";
-import { writeFileSync, existsSync, mkdirSync } from "fs";
+import { intro, outro, select, multiselect, text, confirm, isCancel, cancel } from "@clack/prompts";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { join } from "path";
 
 const PROVIDERS = [
@@ -101,19 +101,9 @@ export async function runInit(cwd) {
     defaultValue: "http://localhost:3000",
   }));
 
-  // ── GitHub (optional) ─────────────────────────────────────────────
-  const githubToken = guard(await text({
-    message: "GitHub token  (optional — for Issue creation)",
-    placeholder: "ghp_...  leave blank to skip",
-  }));
-  if (githubToken.trim()) {
-    env.GITHUB_TOKEN = githubToken.trim();
-    const githubRepo = guard(await text({
-      message: "GitHub repo",
-      placeholder: "owner/repo",
-    }));
-    if (githubRepo.trim()) env.GITHUB_REPO = githubRepo.trim();
-  }
+  // ── Issue trackers (optional) ─────────────────────────────────────
+  const trackerEnv = await promptTrackers();
+  Object.assign(env, trackerEnv);
 
   // ── Write .env ────────────────────────────────────────────────────
   const lines = Object.entries(env).map(([k, v]) => `${k}=${v}`);
@@ -183,4 +173,175 @@ jobs:
   }
 
   outro("Created .env\n\n  shoal serve   — open the dashboard at http://localhost:4000\n  shoal         — run agents from the terminal");
+}
+
+// ── Tracker config helpers ─────────────────────────────────────────
+
+const TRACKER_KEYS = [
+  "ISSUE_TRACKERS",
+  "GITHUB_TOKEN", "GITHUB_REPO",
+  "JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN", "JIRA_PROJECT_KEY",
+  "NOTION_API_KEY", "NOTION_DATABASE_ID",
+  "BACKLOG_SPACE", "BACKLOG_API_KEY", "BACKLOG_PROJECT_ID",
+  "ASANA_ACCESS_TOKEN", "ASANA_PROJECT_ID",
+];
+
+function parseEnv(content) {
+  const result = {};
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const idx = trimmed.indexOf("=");
+    if (idx === -1) continue;
+    result[trimmed.slice(0, idx)] = trimmed.slice(idx + 1);
+  }
+  return result;
+}
+
+function updateEnvFile(envPath, newKeys, removeKeys) {
+  const content = existsSync(envPath) ? readFileSync(envPath, "utf-8") : "";
+  const lines = content.split("\n").filter((line) => {
+    const key = line.split("=")[0].trim();
+    return !removeKeys.includes(key);
+  });
+  while (lines.length > 0 && lines[lines.length - 1].trim() === "") lines.pop();
+  const newLines = Object.entries(newKeys).map(([k, v]) => `${k}=${v}`);
+  writeFileSync(envPath, [...lines, "", ...newLines, ""].join("\n"), "utf-8");
+}
+
+async function promptTrackers(existing = {}) {
+  const currentTrackers = (existing.ISSUE_TRACKERS ?? "")
+    .split(",").map((s) => s.trim()).filter(Boolean);
+
+  const selectedTrackers = guard(await multiselect({
+    message: "Issue trackers  (select all that apply; leave empty to save locally only)",
+    options: [
+      { value: "github",  label: "GitHub Issues", selected: currentTrackers.includes("github") },
+      { value: "jira",    label: "Jira",           selected: currentTrackers.includes("jira") },
+      { value: "notion",  label: "Notion",          selected: currentTrackers.includes("notion") },
+      { value: "backlog", label: "Backlog",         selected: currentTrackers.includes("backlog") },
+      { value: "asana",   label: "Asana",           selected: currentTrackers.includes("asana") },
+    ],
+    required: false,
+  }));
+
+  const env = {};
+
+  if (selectedTrackers.length > 0) {
+    env.ISSUE_TRACKERS = selectedTrackers.join(",");
+  }
+
+  if (selectedTrackers.includes("github")) {
+    env.GITHUB_TOKEN = guard(await text({
+      message: "GitHub token",
+      placeholder: "ghp_...",
+      initialValue: existing.GITHUB_TOKEN ?? "",
+      validate: (v) => v?.trim() ? undefined : "Required",
+    }));
+    env.GITHUB_REPO = guard(await text({
+      message: "GitHub repo",
+      placeholder: "owner/repo",
+      initialValue: existing.GITHUB_REPO ?? "",
+      validate: (v) => v?.trim() ? undefined : "Required",
+    }));
+  }
+
+  if (selectedTrackers.includes("jira")) {
+    env.JIRA_BASE_URL = guard(await text({
+      message: "Jira base URL",
+      placeholder: "https://yourcompany.atlassian.net",
+      initialValue: existing.JIRA_BASE_URL ?? "",
+      validate: (v) => v?.trim() ? undefined : "Required",
+    }));
+    env.JIRA_EMAIL = guard(await text({
+      message: "Jira account email",
+      initialValue: existing.JIRA_EMAIL ?? "",
+      validate: (v) => v?.trim() ? undefined : "Required",
+    }));
+    env.JIRA_API_TOKEN = guard(await text({
+      message: "Jira API token",
+      initialValue: existing.JIRA_API_TOKEN ?? "",
+      validate: (v) => v?.trim() ? undefined : "Required",
+    }));
+    env.JIRA_PROJECT_KEY = guard(await text({
+      message: "Jira project key",
+      placeholder: "PROJ",
+      initialValue: existing.JIRA_PROJECT_KEY ?? "",
+      validate: (v) => v?.trim() ? undefined : "Required",
+    }));
+  }
+
+  if (selectedTrackers.includes("notion")) {
+    env.NOTION_API_KEY = guard(await text({
+      message: "Notion API key",
+      placeholder: "secret_...",
+      initialValue: existing.NOTION_API_KEY ?? "",
+      validate: (v) => v?.trim() ? undefined : "Required",
+    }));
+    env.NOTION_DATABASE_ID = guard(await text({
+      message: "Notion database ID",
+      hint: "DB must have Name (title), Labels (multi_select), Status (select) properties",
+      initialValue: existing.NOTION_DATABASE_ID ?? "",
+      validate: (v) => v?.trim() ? undefined : "Required",
+    }));
+  }
+
+  if (selectedTrackers.includes("backlog")) {
+    env.BACKLOG_SPACE = guard(await text({
+      message: "Backlog space name",
+      placeholder: "yourspace  (from yourspace.backlog.com)",
+      initialValue: existing.BACKLOG_SPACE ?? "",
+      validate: (v) => v?.trim() ? undefined : "Required",
+    }));
+    env.BACKLOG_API_KEY = guard(await text({
+      message: "Backlog API key",
+      initialValue: existing.BACKLOG_API_KEY ?? "",
+      validate: (v) => v?.trim() ? undefined : "Required",
+    }));
+    env.BACKLOG_PROJECT_ID = guard(await text({
+      message: "Backlog project ID  (numeric)",
+      initialValue: existing.BACKLOG_PROJECT_ID ?? "",
+      validate: (v) => /^\d+$/.test(v?.trim()) ? undefined : "Must be a number",
+    }));
+  }
+
+  if (selectedTrackers.includes("asana")) {
+    env.ASANA_ACCESS_TOKEN = guard(await text({
+      message: "Asana personal access token",
+      initialValue: existing.ASANA_ACCESS_TOKEN ?? "",
+      validate: (v) => v?.trim() ? undefined : "Required",
+    }));
+    env.ASANA_PROJECT_ID = guard(await text({
+      message: "Asana project ID",
+      initialValue: existing.ASANA_PROJECT_ID ?? "",
+      validate: (v) => v?.trim() ? undefined : "Required",
+    }));
+  }
+
+  return env;
+}
+
+export async function runConfig(cwd) {
+  const envPath = join(cwd, ".env");
+
+  if (!existsSync(envPath)) {
+    console.log(".env not found. Run shoal init first.");
+    process.exit(1);
+  }
+
+  intro("shoal config");
+
+  const section = guard(await select({
+    message: "What do you want to configure?",
+    options: [
+      { value: "trackers", label: "Issue trackers" },
+    ],
+  }));
+
+  if (section === "trackers") {
+    const existing = parseEnv(readFileSync(envPath, "utf-8"));
+    const newTrackerEnv = await promptTrackers(existing);
+    updateEnvFile(envPath, newTrackerEnv, TRACKER_KEYS);
+    outro("Updated .env — run shoal to apply changes");
+  }
 }
