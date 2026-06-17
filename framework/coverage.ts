@@ -10,6 +10,7 @@ export interface RunCoverage {
   byCategory: Record<string, number>;
   byLens: Record<string, number>;
   byScenario: Record<string, number>;
+  visitedPaths: string[];
 }
 
 export interface Coverage {
@@ -45,10 +46,18 @@ function saveCoverage(coverage: Coverage): void {
   fs.writeFileSync(COVERAGE_PATH, JSON.stringify(coverage, null, 2), "utf-8");
 }
 
+export function getLastRunPaths(): { visitedPaths: string[]; runId: string } | null {
+  const coverage = loadCoverage();
+  if (coverage.entries.length === 0) return null;
+  const last = coverage.entries[coverage.entries.length - 1];
+  return { visitedPaths: last.visitedPaths ?? [], runId: last.runId };
+}
+
 export function updateCoverage(
   runId: string,
   findings: Finding[],
   agentAssignments: Map<string, { scenario?: Scenario; lens?: string }>,
+  visitedPaths: string[] = [],
 ): void {
   const coverage = loadCoverage();
 
@@ -69,6 +78,7 @@ export function updateCoverage(
     }
   }
 
+  const uniquePaths = [...new Set(visitedPaths)].sort();
   coverage.entries.push({
     runId,
     timestamp: new Date().toISOString(),
@@ -76,6 +86,7 @@ export function updateCoverage(
     byCategory,
     byLens,
     byScenario,
+    visitedPaths: uniquePaths,
   });
 
   if (coverage.entries.length > MAX_ENTRIES) {

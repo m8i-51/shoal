@@ -43,6 +43,7 @@ export interface AgentLog {
   status: "completed" | "error" | "iteration_limit";
   iterations: number;
   actions: ToolAction[];
+  visitedPaths: string[];
   issuesPosted: IssuePosted[];
   regressionChecks: RegressionCheck[];
   error: string | null;

@@ -52,6 +52,7 @@ function makeAgentLog(overrides: Partial<AgentLog> = {}): AgentLog {
     status: "completed",
     iterations: 3,
     actions: [],
+    visitedPaths: [],
     issuesPosted: [],
     regressionChecks: [],
     error: null,

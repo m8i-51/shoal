@@ -17,7 +17,7 @@ import type { Tool } from "./framework/llm-client";
 import { createMessageWithRetry, runAgentLoop, sleep, rateLimitRetries } from "./framework/agent-loop";
 import { collectedFindings, initRunLog, saveRunLog, saveFinding, runLog } from "./framework/findings";
 import { loadAgents, addAgent, retireAgent } from "./framework/agent-store";
-import { updateCoverage, computeWeightedSummary } from "./framework/coverage";
+import { updateCoverage, computeWeightedSummary, getLastRunPaths } from "./framework/coverage";
 import { buildTrackers } from "./framework/trackers/index";
 import {
   setupObservation,
@@ -304,6 +304,7 @@ async function runExplorer(
     status: "completed",
     iterations: 0,
     actions: [],
+    visitedPaths: [],
     issuesPosted: [],
     regressionChecks: [],
     error: null,
@@ -357,6 +358,7 @@ async function runRegressionAgent(
     status: "completed",
     iterations: 0,
     actions: [],
+    visitedPaths: [],
     issuesPosted: [],
     regressionChecks: [],
     error: null,
@@ -406,6 +408,11 @@ const PERSONA_DESIGNER_TOOLS: Anthropic.Tool[] = [
     input_schema: { type: "object", properties: {}, required: [] },
   },
   {
+    name: "get_path_coverage",
+    description: "Get the list of URL paths visited in the previous run. Use this to identify unexplored areas of the app and recruit agents likely to visit NEW paths. / 前回のrunで訪れたURLパス一覧を取得する。未探索エリアを特定し、新しいパスを訪れる可能性の高いペルソナを採用するために使う",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
     name: "get_open_issues",
     description: "Get the titles and labels of currently open GitHub Issues (known problems). Use this to understand what is already known and recruit agents who are likely to explore DIFFERENT areas. / 現在オープンなGitHub Issueのタイトルとラベルを取得する。既知の問題を把握し、未探索領域を掘れるペルソナを採用するために使う",
     input_schema: { type: "object", properties: {}, required: [] },
@@ -448,6 +455,7 @@ async function runPersonaDesigner(
   openIssues: { number: number | string; title: string; labels: string[] }[],
   scenarios: Scenario[],
   testAccounts: TestAccount[] = [],
+  lastRunPaths: { visitedPaths: string[]; runId: string } | null = null,
 ): Promise<void> {
   console.log("\n[persona-designer] starting...");
   const messages: Anthropic.MessageParam[] = [
@@ -458,6 +466,10 @@ async function runPersonaDesigner(
     ? `\n[Available Test Accounts (one per role)]\n${testAccounts.map((a) => `- ${a.role}: ${a.email}`).join("\n")}\nWhen recruiting agents, match each persona's role to one of these accounts so they can operate with appropriate permissions.`
     : "";
 
+  const pathCoverageStep = lastRunPaths
+    ? "2. Call get_path_coverage to see which URL paths were visited last run — recruit agents whose role would naturally take them to DIFFERENT or unexplored paths"
+    : "2. (No previous run data yet — skip get_path_coverage)";
+
   const systemPrompt = `You are the persona designer for "${productSpec.appName}".
 You create and manage test agents that simulate real users of the app.
 
@@ -466,11 +478,12 @@ ${orgGuidance}${accountContext}
 
 [Steps]
 1. Call get_coverage to review which lenses and categories are underrepresented in past runs
-2. Call get_open_issues to understand what problems are already known — recruit agents likely to find DIFFERENT issues in unexplored areas
-3. Call get_scenarios to see the user test scenarios generated for this run — about 70% of agents will be assigned a scenario, so recruit personas whose background fits those scenarios
-4. Call get_agents to check the current agent roster
-5. Add 2–3 agents with add_agent — balance between scenario-fit personas (step 3), underrepresented lenses (step 1), and unexplored areas (step 2)${testAccounts.length > 0 ? "\n   — assign each agent a role that matches one of the available test accounts" : ""}
-6. If there are agents with old createdAt dates (oldest 1–2), retire them with retire_agent`;
+${pathCoverageStep}
+3. Call get_open_issues to understand what problems are already known — recruit agents likely to find DIFFERENT issues in unexplored areas
+4. Call get_scenarios to see the user test scenarios generated for this run — about 70% of agents will be assigned a scenario, so recruit personas whose background fits those scenarios
+5. Call get_agents to check the current agent roster
+6. Add 2–3 agents with add_agent — balance between scenario-fit personas (step 4), underrepresented lenses (step 1), unexplored paths (step 2), and unexplored areas (step 3)${testAccounts.length > 0 ? "\n   — assign each agent a role that matches one of the available test accounts" : ""}
+7. If there are agents with old createdAt dates (oldest 1–2), retire them with retire_agent`;
 
   try {
     let iterations = 0;
@@ -494,6 +507,13 @@ ${orgGuidance}${accountContext}
         if (toolUse.name === "get_coverage") {
           result = computeWeightedSummary().formatted;
           console.log("  [persona-designer] coverage summary fetched");
+        } else if (toolUse.name === "get_path_coverage") {
+          if (!lastRunPaths || lastRunPaths.visitedPaths.length === 0) {
+            result = "(no path coverage data yet — this is the first run or no paths were recorded)";
+          } else {
+            result = `Paths visited in last run (${lastRunPaths.runId}):\n${lastRunPaths.visitedPaths.map((p) => `- ${p}`).join("\n")}\n\nRecruit agents whose role naturally takes them to paths NOT in this list.`;
+          }
+          console.log(`  [persona-designer] path coverage fetched (${lastRunPaths?.visitedPaths.length ?? 0} paths)`);
         } else if (toolUse.name === "get_open_issues") {
           if (openIssues.length === 0) {
             result = "(no open issues — either GitHub is not configured or there are no known issues yet)";
@@ -555,6 +575,7 @@ interface BrowserAgentLog {
   status: "completed" | "error" | "iteration_limit";
   iterations: number;
   actions: BrowserAction[];
+  visitedPaths: string[];
   feedbacksSaved: { title: string; category: string; findingId: string }[];
   error: string | null;
 }
@@ -690,6 +711,7 @@ async function executeBrowserTool(
         await page.goto(`${BASE_URL}${navPath}`, { waitUntil: "networkidle" });
         await page.waitForTimeout(3000);
         screenshot = await takeScreenshot(page, `navigate_${navPath.replace(/\//g, "_")}`);
+        agentLog.visitedPaths.push(navPath);
         resultText = `Navigated to ${navPath}`;
         break;
       }
@@ -870,6 +892,7 @@ async function runBrowserAgent(
     status: "completed",
     iterations: 0,
     actions: [],
+    visitedPaths: [],
     feedbacksSaved: [],
     error: null,
   };
@@ -1102,7 +1125,8 @@ async function main() {
     }
 
     // 4. HR agent
-    await runPersonaDesigner(productSpec, orgDesign.personaGuidance, openIssues, scenarios, testAccounts);
+    const lastRunPaths = getLastRunPaths();
+    await runPersonaDesigner(productSpec, orgDesign.personaGuidance, openIssues, scenarios, testAccounts, lastRunPaths);
 
     // 5. load agents + closed issues
     const allAgents = loadAgents();
@@ -1159,7 +1183,7 @@ async function main() {
     browserAgents.forEach((a) => console.log(`  - ${a.name} (${a.role})`));
 
     await sleep(2000);
-    await Promise.all(
+    const browserLogs = await Promise.all(
       browserAgents.map(async (agent) => {
         const assignment = pickAssignment(dispatchIdx++, scenarios);
         agentAssignments.set(agent.id, assignment);
@@ -1182,6 +1206,7 @@ async function main() {
         }
       })
     );
+    const allVisitedPaths = browserLogs.flatMap((log) => log.visitedPaths);
 
     // 8. triage (API + browser findings)
     await sleep(2000);
@@ -1199,7 +1224,7 @@ async function main() {
     console.log(`\n[report] ${reportPath}`);
 
     // 10. update coverage
-    updateCoverage(runLog.runId, collectedFindings, agentAssignments);
+    updateCoverage(runLog.runId, collectedFindings, agentAssignments, allVisitedPaths);
 
   } finally {
     await browser.close();

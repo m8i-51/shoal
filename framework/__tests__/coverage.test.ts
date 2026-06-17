@@ -22,6 +22,7 @@ function makeEntry(overrides: Partial<RunCoverage> = {}): RunCoverage {
     byCategory: {},
     byLens: {},
     byScenario: {},
+    visitedPaths: [],
     ...overrides,
   };
 }
