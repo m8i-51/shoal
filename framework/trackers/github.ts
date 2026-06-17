@@ -21,4 +21,22 @@ export class GitHubTracker implements IssueTracker {
   async fetchClosedIssues(): Promise<ClosedIssue[]> {
     return ghFetchClosed(this.opts);
   }
+
+  async commentOnIssue(issueNumber: number | string, body: string): Promise<boolean> {
+    const [owner, repo] = this.opts.repo.split("/");
+    const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/comments`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.opts.token}`,
+        "Content-Type": "application/json",
+        Accept: "application/vnd.github+json",
+      },
+      body: JSON.stringify({ body }),
+    });
+    if (!res.ok) {
+      const msg = await res.text().catch(() => "");
+      console.error(`[github] failed to comment on issue #${issueNumber} (${res.status}): ${msg.slice(0, 200)}`);
+    }
+    return res.ok;
+  }
 }

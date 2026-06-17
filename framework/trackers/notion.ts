@@ -50,6 +50,22 @@ export class NotionTracker implements IssueTracker {
     return url;
   }
 
+  async commentOnIssue(issueNumber: number | string, body: string): Promise<boolean> {
+    const res = await fetch("https://api.notion.com/v1/comments", {
+      method: "POST",
+      headers: this.headers,
+      body: JSON.stringify({
+        parent: { page_id: String(issueNumber) },
+        rich_text: [{ type: "text", text: { content: body } }],
+      }),
+    });
+    if (!res.ok) {
+      const msg = await res.text().catch(() => "");
+      console.error(`[notion] failed to comment on page ${issueNumber} (${res.status}): ${msg.slice(0, 200)}`);
+    }
+    return res.ok;
+  }
+
   async fetchOpenIssues(): Promise<OpenIssue[]> {
     return this._queryPages("Open");
   }

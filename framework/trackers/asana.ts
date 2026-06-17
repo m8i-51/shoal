@@ -48,6 +48,19 @@ export class AsanaTracker implements IssueTracker {
     return url;
   }
 
+  async commentOnIssue(issueNumber: number | string, body: string): Promise<boolean> {
+    const res = await fetch(`https://app.asana.com/api/1.0/tasks/${issueNumber}/stories`, {
+      method: "POST",
+      headers: this.headers,
+      body: JSON.stringify({ data: { text: body } }),
+    });
+    if (!res.ok) {
+      const msg = await res.text().catch(() => "");
+      console.error(`[asana] failed to comment on task ${issueNumber} (${res.status}): ${msg.slice(0, 200)}`);
+    }
+    return res.ok;
+  }
+
   async fetchOpenIssues(): Promise<OpenIssue[]> {
     const res = await fetch(
       `https://app.asana.com/api/1.0/tasks?project=${this.projectId}&completed_since=now&opt_fields=gid,name&limit=50`,

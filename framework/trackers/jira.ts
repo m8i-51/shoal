@@ -73,6 +73,25 @@ export class JiraTracker implements IssueTracker {
     }));
   }
 
+  async commentOnIssue(issueNumber: number | string, body: string): Promise<boolean> {
+    const res = await fetch(`${this.baseUrl}/rest/api/3/issue/${issueNumber}/comment`, {
+      method: "POST",
+      headers: this.headers,
+      body: JSON.stringify({
+        body: {
+          type: "doc",
+          version: 1,
+          content: [{ type: "paragraph", content: [{ type: "text", text: body }] }],
+        },
+      }),
+    });
+    if (!res.ok) {
+      const msg = await res.text().catch(() => "");
+      console.error(`[jira] failed to comment on issue ${issueNumber} (${res.status}): ${msg.slice(0, 200)}`);
+    }
+    return res.ok;
+  }
+
   async fetchClosedIssues(): Promise<ClosedIssue[]> {
     const jql = encodeURIComponent(
       `project = ${this.projectKey} AND statusCategory = Done AND labels = "feedback-agent" ORDER BY updated DESC`

@@ -17,4 +17,5 @@ export interface IssueTracker {
   createIssue(title: string, body: string, labels: string[]): Promise<string | null>;
   fetchOpenIssues(): Promise<OpenIssue[]>;
   fetchClosedIssues(): Promise<ClosedIssue[]>;
+  commentOnIssue(issueNumber: number | string, body: string): Promise<boolean>;
 }

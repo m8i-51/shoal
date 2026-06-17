@@ -44,6 +44,15 @@ export class AggregatedTracker implements IssueTracker {
       return r.value;
     });
   }
+
+  async commentOnIssue(issueNumber: number | string, body: string): Promise<boolean> {
+    if (this.trackers.length === 0) return false;
+    const results = await Promise.allSettled(this.trackers.map((t) => t.commentOnIssue(issueNumber, body)));
+    for (const r of results) {
+      if (r.status === "rejected") console.error("[trackers] commentOnIssue error:", r.reason);
+    }
+    return results.some((r) => r.status === "fulfilled" && r.value === true);
+  }
 }
 
 export function buildTrackers(): AggregatedTracker {

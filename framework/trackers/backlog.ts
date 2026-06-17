@@ -46,6 +46,20 @@ export class BacklogTracker implements IssueTracker {
     return url;
   }
 
+  async commentOnIssue(issueNumber: number | string, body: string): Promise<boolean> {
+    const form = new URLSearchParams({ content: body });
+    const res = await fetch(this.endpoint(`/issues/${issueNumber}/comments`), {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: form,
+    });
+    if (!res.ok) {
+      const msg = await res.text().catch(() => "");
+      console.error(`[backlog] failed to comment on issue ${issueNumber} (${res.status}): ${msg.slice(0, 200)}`);
+    }
+    return res.ok;
+  }
+
   async fetchOpenIssues(): Promise<OpenIssue[]> {
     const res = await fetch(this.endpoint("/issues", {
       "projectId[]": String(this.projectId),
