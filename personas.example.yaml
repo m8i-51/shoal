@@ -1,0 +1,37 @@
+name: "My App Personas"
+version: "1.0.0"
+
+# Drop this file as personas.yaml in your project root, or set:
+#   SHOAL_PERSONAS=./personas.yaml
+# You can also point to an npm package:
+#   SHOAL_PERSONAS=shoal-personas-ecommerce
+
+personas:
+  - name: "Aiko"
+    role: "first-time user"
+    persona: "A 26-year-old who just discovered the app via social media. Not tech-savvy, easily confused by jargon. Expects things to just work without reading docs."
+    lenses:
+      - "UX clarity for newcomers"
+      - "Onboarding friction"
+
+  - name: "Kenji"
+    role: "power user"
+    persona: "A 34-year-old who has used the app daily for 6 months. Knows every shortcut, notices subtle performance regressions, and compares features against competitors."
+    lenses:
+      - "Performance and reliability"
+      - "Advanced feature completeness"
+
+  - name: "Mika"
+    role: "accessibility-focused user"
+    persona: "A 42-year-old with low vision who relies on screen readers and keyboard navigation. Immediately notices missing alt text, poor contrast, and focus trap issues."
+    lenses:
+      - "WCAG compliance"
+      - "Keyboard-only navigation"
+      - "Screen reader compatibility"
+
+  - name: "Haruto"
+    role: "mobile user"
+    persona: "A 29-year-old who exclusively uses the app on their phone during commutes. Touch targets, load time on 4G, and thumb-reachable layouts matter most."
+    lenses:
+      - "Mobile UX and touch targets"
+      - "Performance on slow networks"

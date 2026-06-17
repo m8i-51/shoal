@@ -18,6 +18,7 @@ import { createMessageWithRetry, runAgentLoop, sleep, rateLimitRetries } from ".
 import { collectedFindings, initRunLog, saveRunLog, saveFinding, runLog } from "./framework/findings";
 import { loadAgents, addAgent, retireAgent } from "./framework/agent-store";
 import { updateCoverage, computeWeightedSummary, getLastRunPaths } from "./framework/coverage";
+import { loadPersonaPack, formatPackForPrompt, type PersonaPack } from "./framework/persona-pack";
 import { buildTrackers } from "./framework/trackers/index";
 import {
   setupObservation,
@@ -421,6 +422,11 @@ const PERSONA_DESIGNER_TOOLS: Anthropic.Tool[] = [
     input_schema: { type: "object", properties: {}, required: [] },
   },
   {
+    name: "get_persona_templates",
+    description: "Get the persona template pack defined for this project. Prefer these archetypes when adding agents — adapt names/details to fit the app context but keep the role intact. / このプロジェクト用に定義されたペルソナテンプレート一覧を取得する。エージェントを追加する際はまずこのテンプレートから選ぶこと",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
     name: "get_open_issues",
     description: "Get the titles and labels of currently open GitHub Issues (known problems). Use this to understand what is already known and recruit agents who are likely to explore DIFFERENT areas. / 現在オープンなGitHub Issueのタイトルとラベルを取得する。既知の問題を把握し、未探索領域を掘れるペルソナを採用するために使う",
     input_schema: { type: "object", properties: {}, required: [] },
@@ -464,6 +470,7 @@ async function runPersonaDesigner(
   scenarios: Scenario[],
   testAccounts: TestAccount[] = [],
   lastRunPaths: { visitedPaths: string[]; runId: string } | null = null,
+  personaPack: PersonaPack | null = null,
 ): Promise<void> {
   console.log("\n[persona-designer] starting...");
   const messages: Anthropic.MessageParam[] = [
@@ -475,8 +482,12 @@ async function runPersonaDesigner(
     : "";
 
   const pathCoverageStep = lastRunPaths
-    ? "2. Call get_path_coverage to see which URL paths were visited last run — recruit agents whose role would naturally take them to DIFFERENT or unexplored paths"
-    : "2. (No previous run data yet — skip get_path_coverage)";
+    ? "3. Call get_path_coverage to see which URL paths were visited last run — recruit agents whose role would naturally take them to DIFFERENT or unexplored paths"
+    : "3. (No previous run data yet — skip get_path_coverage)";
+
+  const personaTemplateStep = personaPack
+    ? "2. Call get_persona_templates to get project-specific persona archetypes — prefer these over inventing new personas from scratch"
+    : "2. (No persona templates configured — invent personas that fit the app context)";
 
   const systemPrompt = `You are the persona designer for "${productSpec.appName}".
 You create and manage test agents that simulate real users of the app.
@@ -486,12 +497,13 @@ ${orgGuidance}${accountContext}
 
 [Steps]
 1. Call get_coverage to review which lenses and categories are underrepresented in past runs
+${personaTemplateStep}
 ${pathCoverageStep}
-3. Call get_open_issues to understand what problems are already known — recruit agents likely to find DIFFERENT issues in unexplored areas
-4. Call get_scenarios to see the user test scenarios generated for this run — about 70% of agents will be assigned a scenario, so recruit personas whose background fits those scenarios
-5. Call get_agents to check the current agent roster
-6. Add 2–3 agents with add_agent — balance between scenario-fit personas (step 4), underrepresented lenses (step 1), unexplored paths (step 2), and unexplored areas (step 3)${testAccounts.length > 0 ? "\n   — assign each agent a role that matches one of the available test accounts" : ""}
-7. If there are agents with old createdAt dates (oldest 1–2), retire them with retire_agent`;
+4. Call get_open_issues to understand what problems are already known — recruit agents likely to find DIFFERENT issues in unexplored areas
+5. Call get_scenarios to see the user test scenarios generated for this run — about 70% of agents will be assigned a scenario, so recruit personas whose background fits those scenarios
+6. Call get_agents to check the current agent roster
+7. Add 2–3 agents with add_agent — balance between scenario-fit personas (step 5), underrepresented lenses (step 1), unexplored paths (step 3), and unexplored areas (step 4)${testAccounts.length > 0 ? "\n   — assign each agent a role that matches one of the available test accounts" : ""}
+8. If there are agents with old createdAt dates (oldest 1–2), retire them with retire_agent`;
 
   try {
     let iterations = 0;
@@ -515,6 +527,13 @@ ${pathCoverageStep}
         if (toolUse.name === "get_coverage") {
           result = computeWeightedSummary().formatted;
           console.log("  [persona-designer] coverage summary fetched");
+        } else if (toolUse.name === "get_persona_templates") {
+          if (!personaPack) {
+            result = "(no persona templates configured — set SHOAL_PERSONAS env var or add personas.yaml to your project)";
+          } else {
+            result = formatPackForPrompt(personaPack);
+          }
+          console.log(`  [persona-designer] persona templates fetched (${personaPack?.personas.length ?? 0})`);
         } else if (toolUse.name === "get_path_coverage") {
           if (!lastRunPaths || lastRunPaths.visitedPaths.length === 0) {
             result = "(no path coverage data yet — this is the first run or no paths were recorded)";
@@ -1134,7 +1153,8 @@ async function main() {
 
     // 4. HR agent
     const lastRunPaths = getLastRunPaths();
-    await runPersonaDesigner(productSpec, orgDesign.personaGuidance, openIssues, scenarios, testAccounts, lastRunPaths);
+    const personaPack = await loadPersonaPack();
+    await runPersonaDesigner(productSpec, orgDesign.personaGuidance, openIssues, scenarios, testAccounts, lastRunPaths, personaPack);
 
     // 5. load agents + closed issues
     const allAgents = loadAgents();
