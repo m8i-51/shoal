@@ -26,6 +26,7 @@
     "noReport": "No report found for this run.",
     "noLog": "No log available.",
     "tabLog": "Log",
+    "tabSwarm": "Swarm",
     "tabReport": "Report",
     "cancel": "Cancel run",
     "cancelConfirmLabel": "Stop this run?",

@@ -1,8 +1,9 @@
 import { useParams, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState } from "react";
+import { SwarmVisualizer } from "../components/SwarmVisualizer";
 
-type Tab = "log" | "report";
+type Tab = "log" | "swarm" | "report";
 
 export function RunDetail() {
   const { runId } = useParams<{ runId: string }>();
@@ -150,6 +151,12 @@ export function RunDetail() {
           {t("detail.tabLog")}
         </button>
         <button
+          style={{ ...styles.tab, ...(tab === "swarm" ? styles.tabActive : {}) }}
+          onClick={() => setTab("swarm")}
+        >
+          {t("detail.tabSwarm")}
+        </button>
+        <button
           style={{ ...styles.tab, ...(tab === "report" ? styles.tabActive : {}), ...(hasReport ? {} : styles.tabDisabled) }}
           onClick={() => hasReport && setTab("report")}
           disabled={!hasReport}
@@ -159,6 +166,10 @@ export function RunDetail() {
       </div>
 
       {/* コンテンツ */}
+      {tab === "swarm" && (
+        <SwarmVisualizer logLines={logLines} isLive={isLive} />
+      )}
+
       {tab === "log" && (
         <div ref={logRef} style={styles.log}>
           {logLines.length === 0 && !isLive && (
