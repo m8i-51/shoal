@@ -69,6 +69,21 @@
     "nextRun": "Next run",
     "saved": "Saved"
   },
+  "hall": {
+    "title": "Hall of Issues",
+    "subtitle": "All findings across every run",
+    "export": "Export JSON",
+    "searchPlaceholder": "Search findings…",
+    "filterAll": "All",
+    "import": "Load",
+    "importing": "Loading…",
+    "importPlaceholder": "Paste URL to a community findings JSON…",
+    "importError": "Failed to load. Check the URL.",
+    "importedBadge": "+{{count}} imported",
+    "noFindings": "No findings yet. Start a run to discover issues.",
+    "noResults": "No results matching your search.",
+    "navLink": "Hall"
+  },
   "goals": {
     "title": "App Goals",
     "noSpec": "No product spec yet. Start a run to discover app goals.",

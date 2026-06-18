@@ -3,11 +3,12 @@ import express from "express";
 import { rateLimit } from "express-rate-limit";
 import { fileURLToPath } from "url";
 import { dirname, join, resolve } from "path";
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, readdirSync } from "fs";
 import { listRuns, getReportPath } from "./runs.js";
 import { activeSessions, spawnRun, cancelSession } from "./runner.js";
 import { loadSchedule, saveSchedule, startScheduler, type ScheduleConfig } from "./scheduler.js";
 import { generateDiary, getDiaryPath } from "../framework/diary.js";
+import type { Finding } from "../framework/types.js";
 
 function specFilePath(baseUrl: string): string {
   try {
@@ -125,6 +126,69 @@ app.post("/api/runs/:runId/diary", async (req, res) => {
   } catch (err) {
     console.error("[diary] generation failed:", err);
     res.status(500).json({ error: "diary generation failed" });
+  }
+});
+
+// ----------------------------------------------------------------
+// API: Hall of Issues — 全 run の findings を横断取得
+// ----------------------------------------------------------------
+function loadAllFindings(): (Finding & { runId: string })[] {
+  const base = resolve(process.cwd(), "findings");
+  if (!existsSync(base)) return [];
+  const all: (Finding & { runId: string })[] = [];
+  for (const runDir of readdirSync(base)) {
+    if (!/^run_\d+$/.test(runDir)) continue;
+    const dir = join(base, runDir);
+    try {
+      for (const file of readdirSync(dir)) {
+        if (!file.endsWith(".json")) continue;
+        try {
+          const f: Finding = JSON.parse(readFileSync(join(dir, file), "utf-8"));
+          all.push({ ...f, runId: runDir });
+        } catch { /* skip */ }
+      }
+    } catch { /* skip */ }
+  }
+  return all.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+}
+
+app.get("/api/findings", (_req, res) => {
+  res.json(loadAllFindings());
+});
+
+app.get("/api/findings/export", (_req, res) => {
+  const findings = loadAllFindings().map(({ id, title, body, category, agentName, role, timestamp, runId }) => ({
+    id, title, body, category, agentName, role, timestamp, runId,
+  }));
+  const bundle = { version: "1", exportedAt: new Date().toISOString(), source: "shoal", findings };
+  res.setHeader("Content-Type", "application/json");
+  res.setHeader("Content-Disposition", `attachment; filename="shoal-findings-${Date.now()}.json"`);
+  res.json(bundle);
+});
+
+app.post("/api/findings/proxy-url", async (req, res) => {
+  const { url } = req.body as { url?: string };
+  if (!url || typeof url !== "string") { res.status(400).json({ error: "url required" }); return; }
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+    if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("invalid protocol");
+    const h = parsed.hostname;
+    if (h === "localhost" || h === "127.0.0.1" || h === "::1" || h.startsWith("192.168.") || h.startsWith("10.") || h.endsWith(".local")) {
+      res.status(400).json({ error: "private urls not allowed" });
+      return;
+    }
+  } catch {
+    res.status(400).json({ error: "invalid url" });
+    return;
+  }
+  try {
+    const upstream = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+    if (!upstream.ok) { res.status(502).json({ error: "upstream error" }); return; }
+    const data = await upstream.json();
+    res.json(data);
+  } catch {
+    res.status(502).json({ error: "failed to fetch url" });
   }
 });
 

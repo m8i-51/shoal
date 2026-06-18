@@ -69,6 +69,21 @@
     "nextRun": "次回実行",
     "saved": "保存しました"
   },
+  "hall": {
+    "title": "Hall of Issues",
+    "subtitle": "全 run の findings を横断表示",
+    "export": "JSON をエクスポート",
+    "searchPlaceholder": "findings を検索…",
+    "filterAll": "すべて",
+    "import": "読み込む",
+    "importing": "読み込み中…",
+    "importPlaceholder": "コミュニティ findings JSON の URL を貼り付け…",
+    "importError": "読み込みに失敗しました。URL を確認してください。",
+    "importedBadge": "+{{count}} 件インポート済み",
+    "noFindings": "まだ findings がありません。実行を開始して問題を発見しましょう。",
+    "noResults": "検索結果がありません。",
+    "navLink": "Hall"
+  },
   "goals": {
     "title": "App Goals",
     "noSpec": "プロダクト仕様がまだありません。実行を開始するとゴールが自動推論されます。",
