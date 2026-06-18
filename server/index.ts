@@ -7,6 +7,7 @@ import { existsSync, readFileSync, writeFileSync } from "fs";
 import { listRuns, getReportPath } from "./runs.js";
 import { activeSessions, spawnRun, cancelSession } from "./runner.js";
 import { loadSchedule, saveSchedule, startScheduler, type ScheduleConfig } from "./scheduler.js";
+import { generateDiary, getDiaryPath } from "../framework/diary.js";
 
 function specFilePath(baseUrl: string): string {
   try {
@@ -88,6 +89,43 @@ app.get("/api/runs", (_req, res) => {
   });
 
   res.json(enriched);
+});
+
+// ----------------------------------------------------------------
+// API: diary for a run
+// ----------------------------------------------------------------
+app.get("/api/runs/:runId/diary", (req, res) => {
+  const { runId } = req.params;
+  if (!isValidRunId(runId)) { res.status(400).json({ error: "invalid run id" }); return; }
+  const p = getDiaryPath(runId);
+  if (!p) { res.status(404).json({ error: "diary not found" }); return; }
+  res.json({ content: readFileSync(p, "utf-8") });
+});
+
+app.post("/api/runs/:runId/diary", async (req, res) => {
+  const { runId } = req.params;
+  if (!isValidRunId(runId)) { res.status(400).json({ error: "invalid run id" }); return; }
+
+  const session = activeSessions.get(runId);
+  let lines: string[];
+  if (session) {
+    lines = session.lines;
+  } else {
+    const logFilePath = safeLogPath(`log_${runId}.txt`);
+    if (!logFilePath || !existsSync(logFilePath)) {
+      res.status(404).json({ error: "no log found" });
+      return;
+    }
+    lines = readFileSync(logFilePath, "utf-8").split("\n").filter((l) => l !== "");
+  }
+
+  try {
+    const content = await generateDiary(runId, lines);
+    res.json({ content });
+  } catch (err) {
+    console.error("[diary] generation failed:", err);
+    res.status(500).json({ error: "diary generation failed" });
+  }
 });
 
 // ----------------------------------------------------------------

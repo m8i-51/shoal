@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState } from "react";
 import { SwarmVisualizer } from "../components/SwarmVisualizer";
 
-type Tab = "log" | "swarm" | "report";
+type Tab = "log" | "swarm" | "report" | "diary";
 
 export function RunDetail() {
   const { runId } = useParams<{ runId: string }>();
@@ -17,7 +17,25 @@ export function RunDetail() {
   const [hasReport, setHasReport] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [confirmingCancel, setConfirmingCancel] = useState(false);
+  const [diaryContent, setDiaryContent] = useState<string | null>(null);
+  const [diaryLoading, setDiaryLoading] = useState(false);
+  const [diaryError, setDiaryError] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
+
+  const handleGenerateDiary = async () => {
+    setDiaryLoading(true);
+    setDiaryError(false);
+    try {
+      const res = await fetch(`/api/runs/${runId}/diary`, { method: "POST" });
+      const data = await res.json();
+      if (data.content) setDiaryContent(data.content);
+      else setDiaryError(true);
+    } catch {
+      setDiaryError(true);
+    } finally {
+      setDiaryLoading(false);
+    }
+  };
 
   const handleCancelConfirm = async () => {
     setCancelling(true);
@@ -115,6 +133,15 @@ export function RunDetail() {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [logLines]);
 
+  // 日誌タブに切り替えた時、既存の日誌ファイルを取得
+  useEffect(() => {
+    if (tab !== "diary" || diaryContent) return;
+    fetch(`/api/runs/${runId}/diary`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => { if (data?.content) setDiaryContent(data.content); })
+      .catch(() => {});
+  }, [tab, runId, diaryContent]);
+
   return (
     <div style={styles.wrapper}>
       {/* ツールバー */}
@@ -163,6 +190,13 @@ export function RunDetail() {
         >
           {t("detail.tabReport")}
         </button>
+        <button
+          style={{ ...styles.tab, ...(tab === "diary" ? styles.tabActive : {}), ...(!done ? styles.tabDisabled : {}) }}
+          onClick={() => done && setTab("diary")}
+          disabled={!done}
+        >
+          {t("detail.tabDiary")}
+        </button>
       </div>
 
       {/* コンテンツ */}
@@ -191,6 +225,26 @@ export function RunDetail() {
           style={styles.frame}
           title={`Report for ${runId}`}
         />
+      )}
+
+      {tab === "diary" && (
+        <div style={styles.diaryWrapper}>
+          {!diaryContent && !diaryLoading && (
+            <div style={styles.diaryPrompt}>
+              <p style={styles.diaryHint}>{t("detail.diaryHint")}</p>
+              {diaryError && <p style={styles.diaryErrMsg}>{t("detail.diaryError")}</p>}
+              <button onClick={handleGenerateDiary} style={styles.generateBtn}>
+                {t("detail.generateDiary")}
+              </button>
+            </div>
+          )}
+          {diaryLoading && (
+            <div style={styles.diaryLoading}>{t("detail.generatingDiary")}</div>
+          )}
+          {diaryContent && (
+            <pre style={styles.diaryContent}>{diaryContent}</pre>
+          )}
+        </div>
       )}
     </div>
   );
@@ -327,6 +381,63 @@ const styles = {
   frame: {
     flex: 1,
     width: "100%",
+    border: "none",
+  },
+  diaryWrapper: {
+    flex: 1,
+    overflowY: "auto" as const,
+    background: "#f8fafc",
+  },
+  diaryPrompt: {
+    display: "flex",
+    flexDirection: "column" as const,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "1rem",
+    height: "100%",
+    minHeight: "200px",
+    padding: "3rem 2rem",
+  },
+  diaryHint: {
+    fontSize: "0.875rem",
+    color: "#64748b",
+    textAlign: "center" as const,
+    maxWidth: "400px",
+  },
+  diaryErrMsg: {
+    fontSize: "0.8rem",
+    color: "#ef4444",
+  },
+  generateBtn: {
+    background: "#1e293b",
+    color: "#f8fafc",
+    border: "none",
+    borderRadius: "8px",
+    padding: "0.6rem 1.5rem",
+    fontSize: "0.875rem",
+    fontWeight: 600,
+    cursor: "pointer",
+  },
+  diaryLoading: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    height: "100%",
+    minHeight: "200px",
+    fontSize: "0.875rem",
+    color: "#64748b",
+  },
+  diaryContent: {
+    margin: "0 auto",
+    maxWidth: "720px",
+    padding: "2rem",
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+    fontSize: "0.9rem",
+    lineHeight: 1.8,
+    color: "#1e293b",
+    whiteSpace: "pre-wrap" as const,
+    wordBreak: "break-word" as const,
+    background: "transparent",
     border: "none",
   },
 } as const;
