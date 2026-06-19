@@ -17,7 +17,8 @@ import type { Tool } from "./framework/llm-client";
 import { createMessageWithRetry, runAgentLoop, sleep, rateLimitRetries } from "./framework/agent-loop";
 import { collectedFindings, initRunLog, saveRunLog, saveFinding, runLog } from "./framework/findings";
 import { loadAgents, addAgent, retireAgent } from "./framework/agent-store";
-import { updateCoverage, computeWeightedSummary, getLastRunPaths } from "./framework/coverage";
+import { updateCoverage, computeWeightedSummary, getLastRunPaths, getFindingHotspots } from "./framework/coverage";
+import { loadPageHashes, updatePageHashes, hashContent } from "./framework/page-cache";
 import { loadPersonaPack, formatPackForPrompt, type PersonaPack } from "./framework/persona-pack";
 import { buildTrackers } from "./framework/trackers/index";
 import {
@@ -422,6 +423,11 @@ const PERSONA_DESIGNER_TOOLS: Anthropic.Tool[] = [
     input_schema: { type: "object", properties: {}, required: [] },
   },
   {
+    name: "get_finding_hotspots",
+    description: "Get URL areas where findings have clustered across all past runs. Use this to understand which parts of the app have been thoroughly investigated vs. overlooked — recruit agents to explore under-investigated areas, or specialists to deep-dive problem hotspots. / 過去のrun全体でfindingsが集中しているURLエリアを取得する。十分に調査済みのエリアと見落とされているエリアを把握し、未探索エリアへの新エージェント採用や問題多発エリアへのスペシャリスト派遣に活かす",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
     name: "get_persona_templates",
     description: "Get the persona template pack defined for this project. Prefer these archetypes when adding agents — adapt names/details to fit the app context but keep the role intact. / このプロジェクト用に定義されたペルソナテンプレート一覧を取得する。エージェントを追加する際はまずこのテンプレートから選ぶこと",
     input_schema: { type: "object", properties: {}, required: [] },
@@ -482,8 +488,8 @@ async function runPersonaDesigner(
     : "";
 
   const pathCoverageStep = lastRunPaths
-    ? "3. Call get_path_coverage to see which URL paths were visited last run — recruit agents whose role would naturally take them to DIFFERENT or unexplored paths"
-    : "3. (No previous run data yet — skip get_path_coverage)";
+    ? "3. Call get_path_coverage to see which URL paths were visited last run — recruit agents whose role would naturally take them to DIFFERENT or unexplored paths\n4. Call get_finding_hotspots to see where problems have clustered across all past runs — recruit agents to under-investigated areas, or specialists to problem hotspots"
+    : "3. (No previous run data yet — skip get_path_coverage)\n4. Call get_finding_hotspots to see if any areas have already accumulated findings";
 
   const personaTemplateStep = personaPack
     ? "2. Call get_persona_templates to get project-specific persona archetypes — prefer these over inventing new personas from scratch"
@@ -499,11 +505,11 @@ ${orgGuidance}${accountContext}
 1. Call get_coverage to review which lenses and categories are underrepresented in past runs
 ${personaTemplateStep}
 ${pathCoverageStep}
-4. Call get_open_issues to understand what problems are already known — recruit agents likely to find DIFFERENT issues in unexplored areas
-5. Call get_scenarios to see the user test scenarios generated for this run — about 70% of agents will be assigned a scenario, so recruit personas whose background fits those scenarios
-6. Call get_agents to check the current agent roster
-7. Add 2–3 agents with add_agent — balance between scenario-fit personas (step 5), underrepresented lenses (step 1), unexplored paths (step 3), and unexplored areas (step 4)${testAccounts.length > 0 ? "\n   — assign each agent a role that matches one of the available test accounts" : ""}
-8. If there are agents with old createdAt dates (oldest 1–2), retire them with retire_agent`;
+5. Call get_open_issues to understand what problems are already known — recruit agents likely to find DIFFERENT issues in unexplored areas
+6. Call get_scenarios to see the user test scenarios generated for this run — about 70% of agents will be assigned a scenario, so recruit personas whose background fits those scenarios
+7. Call get_agents to check the current agent roster
+8. Add 2–3 agents with add_agent — balance between scenario-fit personas (step 6), underrepresented lenses (step 1), unexplored paths (step 3), finding hotspots (step 4), and unexplored areas (step 5)${testAccounts.length > 0 ? "\n   — assign each agent a role that matches one of the available test accounts" : ""}
+9. If there are agents with old createdAt dates (oldest 1–2), retire them with retire_agent`;
 
   try {
     let iterations = 0;
@@ -541,6 +547,16 @@ ${pathCoverageStep}
             result = `Paths visited in last run (${lastRunPaths.runId}):\n${lastRunPaths.visitedPaths.map((p) => `- ${p}`).join("\n")}\n\nRecruit agents whose role naturally takes them to paths NOT in this list.`;
           }
           console.log(`  [persona-designer] path coverage fetched (${lastRunPaths?.visitedPaths.length ?? 0} paths)`);
+        } else if (toolUse.name === "get_finding_hotspots") {
+          const hotspots = getFindingHotspots();
+          if (hotspots.length === 0) {
+            result = "(no past findings data yet — this appears to be the first run)";
+          } else {
+            result = hotspots.map((h) =>
+              `${h.pathPrefix}: ${h.totalFindings} findings — ${Object.entries(h.categories).map(([c, n]) => `${c}:${n}`).join(", ")}`
+            ).join("\n");
+          }
+          console.log(`  [persona-designer] finding hotspots fetched (${hotspots.length} areas)`);
         } else if (toolUse.name === "get_open_issues") {
           if (openIssues.length === 0) {
             result = "(no open issues — either GitHub is not configured or there are no known issues yet)";
@@ -718,6 +734,8 @@ async function executeBrowserTool(
   observation: ObservationState,
   agentId: string,
   scenarioOutcomes: ScenarioOutcome[],
+  cachedHashes: Record<string, string>,
+  pageHashUpdates: Record<string, string>,
   scenario?: Scenario,
 ): Promise<{ text: string; screenshot: { base64: string; filePath: string } | null; sendToClaude: boolean }> {
   const startedAt = Date.now();
@@ -739,7 +757,18 @@ async function executeBrowserTool(
         await page.waitForTimeout(3000);
         screenshot = await takeScreenshot(page, `navigate_${navPath.replace(/\//g, "_")}`);
         agentLog.visitedPaths.push(navPath);
-        resultText = `Navigated to ${navPath}`;
+        // ページコンテンツハッシュで差分検出
+        try {
+          const content = await page.innerText("body", { timeout: 2000 });
+          const h = hashContent(content);
+          const unchanged = cachedHashes[navPath] && cachedHashes[navPath] === h;
+          pageHashUpdates[navPath] = h;
+          resultText = unchanged
+            ? `Navigated to ${navPath} (page content unchanged since last run — consider exploring a different area)`
+            : `Navigated to ${navPath}`;
+        } catch {
+          resultText = `Navigated to ${navPath}`;
+        }
         break;
       }
       case "click": {
@@ -925,6 +954,9 @@ async function runBrowserAgent(
   };
 
   const observation = setupObservation(page);
+  const host = new URL(BASE_URL).host;
+  const cachedHashes = loadPageHashes(host);
+  const pageHashUpdates: Record<string, string> = {};
 
   const systemPrompt = `You are "${agent.name}".
 Role: ${agent.role}
@@ -1023,6 +1055,8 @@ ${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\
           observation,
           agent.id,
           scenarioOutcomes,
+          cachedHashes,
+          pageHashUpdates,
           assignment.scenario,
         );
 
@@ -1075,6 +1109,7 @@ ${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\
     console.error(`[${agent.name}] error:`, e);
   } finally {
     agentLog.completedAt = new Date().toISOString();
+    updatePageHashes(host, pageHashUpdates);
   }
 
   console.log(`[browser] ${agent.name} done (feedback: ${agentLog.feedbacksSaved.length})`);

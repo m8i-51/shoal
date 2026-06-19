@@ -201,3 +201,51 @@ export function computeWeightedSummary(): WeightedSummary {
 
   return { totalWeighted, byCategory, byLens, byScenario, formatted };
 }
+
+// ================================================================
+// Finding hotspots — 集合知（過去 run の findings をパス別に集計）
+// ================================================================
+
+export interface FindingHotspot {
+  pathPrefix: string;
+  totalFindings: number;
+  categories: Record<string, number>;
+}
+
+function extractPath(finding: Finding): string {
+  const text = `${finding.title} ${finding.body}`;
+  const m = text.match(/\b(\/[a-zA-Z0-9_/-]{2,})/);
+  if (!m) return "/";
+  const segments = m[1].split("/").filter(Boolean);
+  return segments.length > 0 ? `/${segments[0]}` : "/";
+}
+
+export function getFindingHotspots(topN = 12): FindingHotspot[] {
+  const base = path.join(process.cwd(), "findings");
+  if (!fs.existsSync(base)) return [];
+
+  const counts = new Map<string, { total: number; categories: Record<string, number> }>();
+
+  for (const runDir of fs.readdirSync(base)) {
+    if (!/^run_\d+$/.test(runDir)) continue;
+    const dir = path.join(base, runDir);
+    try {
+      for (const file of fs.readdirSync(dir)) {
+        if (!file.endsWith(".json")) continue;
+        try {
+          const f: Finding = JSON.parse(fs.readFileSync(path.join(dir, file), "utf-8"));
+          const p = extractPath(f);
+          const entry = counts.get(p) ?? { total: 0, categories: {} };
+          entry.total++;
+          entry.categories[f.category] = (entry.categories[f.category] ?? 0) + 1;
+          counts.set(p, entry);
+        } catch { /* skip */ }
+      }
+    } catch { /* skip */ }
+  }
+
+  return Array.from(counts.entries())
+    .map(([pathPrefix, { total, categories }]) => ({ pathPrefix, totalFindings: total, categories }))
+    .sort((a, b) => b.totalFindings - a.totalFindings)
+    .slice(0, topN);
+}
