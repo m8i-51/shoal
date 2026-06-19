@@ -50,6 +50,7 @@
     "@types/node": "^20",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@types/supertest": "^7.2.0",
     "@vitejs/plugin-react": "^4.7.0",
     "@vitest/coverage-v8": "^4.1.6",
     "concurrently": "^10.0.3",
@@ -58,6 +59,7 @@
     "react-dom": "^19.2.5",
     "react-i18next": "^17.0.4",
     "react-router-dom": "^7.14.1",
+    "supertest": "^7.2.2",
     "typescript": "^5",
     "vite": "^6.4.2",
     "vitest": "^4.1.5"

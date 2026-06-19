@@ -214,7 +214,7 @@ export interface FindingHotspot {
 
 function extractPath(finding: Finding): string {
   const text = `${finding.title} ${finding.body}`;
-  const m = text.match(/\b(\/[a-zA-Z0-9_/-]{2,})/);
+  const m = text.match(/(\/[a-zA-Z0-9_][a-zA-Z0-9_/-]*)/);
   if (!m) return "/";
   const segments = m[1].split("/").filter(Boolean);
   return segments.length > 0 ? `/${segments[0]}` : "/";

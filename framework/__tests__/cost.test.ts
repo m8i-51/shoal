@@ -19,6 +19,18 @@ describe("formatCostUSD", () => {
     expect(formatCostUSD(undefined)).toBe("—");
   });
 
+  it("0 は < $0.0001", () => {
+    expect(formatCostUSD(0)).toBe("< $0.0001");
+  });
+
+  it("負値は < $0.0001", () => {
+    expect(formatCostUSD(-1)).toBe("< $0.0001");
+  });
+
+  it("0.0001 ちょうどは 4 桁小数", () => {
+    expect(formatCostUSD(0.0001)).toBe("$0.0001");
+  });
+
   it("0.00005 未満は < $0.0001", () => {
     expect(formatCostUSD(0.000005)).toBe("< $0.0001");
   });

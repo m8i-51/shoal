@@ -83,15 +83,17 @@ describe("scheduler — 時刻判定ロジック", () => {
   it("スケジュール時刻に一致したとき spawnRun を呼ぶ", async () => {
     vi.useFakeTimers();
 
-    // 月曜 09:00 に固定（UTC = ローカルとして扱う）
+    // 月曜 09:00 に固定。scheduler は new Date().getDay() などローカル時刻を使うため、
+    // テスト設定も同じメソッドで一致させる（環境のタイムゾーンに依存するが両者が整合する）
     const monday9am = new Date("2026-05-11T09:00:00.000Z");
     vi.setSystemTime(monday9am);
+    const now = new Date();
 
     const config: ScheduleConfig = {
       enabled: true,
-      dayOfWeek: monday9am.getDay(),
-      hour: monday9am.getHours(),
-      minute: monday9am.getMinutes(),
+      dayOfWeek: now.getDay(),
+      hour: now.getHours(),
+      minute: now.getMinutes(),
       lastRunDate: null,
     };
     vi.mocked(fs.existsSync).mockReturnValue(true);
@@ -111,13 +113,14 @@ describe("scheduler — 時刻判定ロジック", () => {
 
     const monday9am = new Date("2026-05-11T09:00:00.000Z");
     vi.setSystemTime(monday9am);
-    const today = monday9am.toISOString().slice(0, 10);
+    const now = new Date();
+    const today = now.toISOString().slice(0, 10); // scheduler と同じ UTC 日付を使う
 
     const config: ScheduleConfig = {
       enabled: true,
-      dayOfWeek: monday9am.getDay(),
-      hour: monday9am.getHours(),
-      minute: monday9am.getMinutes(),
+      dayOfWeek: now.getDay(),
+      hour: now.getHours(),
+      minute: now.getMinutes(),
       lastRunDate: today,
     };
     vi.mocked(fs.existsSync).mockReturnValue(true);

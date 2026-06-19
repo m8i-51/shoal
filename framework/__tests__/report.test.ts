@@ -126,6 +126,14 @@ describe("generateReport", () => {
     expect(html).toContain("&lt;script&gt;");
   });
 
+  it("finding の body が HTML エスケープされる", () => {
+    const finding = makeFinding({ body: 'Click <a href="javascript:void(0)" onclick="steal()">here</a>' });
+    generateReport(makeRunLog(), [finding], emptyTriage, makeProductSpec(), [], new Map());
+    const html = getSavedHtml();
+    expect(html).not.toContain("<a href=");
+    expect(html).toContain("&lt;a href=");
+  });
+
   it("issued finding に → Issue バッジが付く", () => {
     const finding = makeFinding({ id: "f1" });
     const triage: TriageResult = { issued: ["f1"], skipped: [], unprocessed: [], issuesCreated: 1 };

@@ -8,7 +8,7 @@ vi.mock("path", async (importOriginal) => {
   return { ...actual, join: (...args: string[]) => args.join("/") };
 });
 
-import { computeWeightedSummary, updateCoverage, loadCoverage } from "../coverage";
+import { computeWeightedSummary, updateCoverage, loadCoverage, getLastRunPaths, getFindingHotspots } from "../coverage";
 import type { Coverage, RunCoverage } from "../coverage";
 
 const HALF_LIFE_DAYS = 7;
@@ -170,7 +170,7 @@ describe("computeWeightedSummary", () => {
 
   it("14日以内に同じレンズが複数 run に登場するとボーナスが乗る", () => {
     const now = Date.now();
-    // 同じ Accessibility レンズが2回登場 → bonus = 1 + (2-1)*0.5 = 1.5
+    // 同じ Accessibility レンズが2回登場 → bonus = 1 + (2-1)^3 * 0.005 = 1.005
     setupMockCoverage({
       entries: [
         makeEntry({
@@ -249,22 +249,29 @@ describe("computeWeightedSummary", () => {
   });
 
   it("MAX_ENTRIES を超えると最新30件に切り捨てる", () => {
-    const entries = Array.from({ length: 35 }, (_, i) =>
+    // 既に30件ある状態で updateCoverage を呼ぶと31件→30件にトリムされることを確認
+    const entries = Array.from({ length: 30 }, (_, i) =>
       makeEntry({
         runId: `run_${i}`,
-        timestamp: new Date(Date.now() - i * 1000).toISOString(),
+        timestamp: new Date(Date.now() - (30 - i) * 1000).toISOString(),
       })
     );
-    setupMockCoverage({ entries });
-    vi.mocked(fs.writeFileSync).mockImplementation(() => {});
-
-    // updateCoverage が 31件目を追加してトリムすることを確認
     vi.mocked(fs.existsSync).mockReturnValue(true);
     vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ entries }));
+    vi.mocked(fs.writeFileSync).mockImplementation(() => {});
+    vi.mocked(fs.mkdirSync).mockReturnValue(undefined);
 
-    // computeWeightedSummary は entries をそのまま使うだけなので、
-    // 35件あってもエラーにならないことを確認
-    expect(() => computeWeightedSummary()).not.toThrow();
+    updateCoverage("run_new", [], new Map());
+
+    const calls = vi.mocked(fs.writeFileSync).mock.calls;
+    const written = calls[calls.length - 1][1] as string;
+    const saved = JSON.parse(written) as Coverage;
+    // 30件 + 1件 → MAX_ENTRIES(30) に切り詰め
+    expect(saved.entries).toHaveLength(30);
+    // 最新のエントリーが含まれる
+    expect(saved.entries.some((e) => e.runId === "run_new")).toBe(true);
+    // 最も古いエントリーが除外される
+    expect(saved.entries.some((e) => e.runId === "run_0")).toBe(false);
   });
 });
 
@@ -309,5 +316,114 @@ describe("updateCoverage", () => {
     const written = calls[calls.length - 1][1] as string;
     const saved = JSON.parse(written) as Coverage;
     expect(saved.entries[0].byScenario["New employee task"]).toBe(1);
+  });
+});
+
+describe("getLastRunPaths", () => {
+  it("エントリーがない場合は null を返す", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    expect(getLastRunPaths()).toBeNull();
+  });
+
+  it("最後のエントリーの visitedPaths と runId を返す", () => {
+    setupMockCoverage({
+      entries: [
+        makeEntry({ runId: "run_1", visitedPaths: ["/old"] }),
+        makeEntry({ runId: "run_2", visitedPaths: ["/a", "/b"] }),
+      ],
+    });
+    const result = getLastRunPaths();
+    expect(result).not.toBeNull();
+    expect(result!.runId).toBe("run_2");
+    expect(result!.visitedPaths).toEqual(["/a", "/b"]);
+  });
+
+  it("visitedPaths が undefined のエントリーは空配列を返す", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({ entries: [{ ...makeEntry({ runId: "run_1" }), visitedPaths: undefined }] })
+    );
+    const result = getLastRunPaths();
+    expect(result!.visitedPaths).toEqual([]);
+  });
+});
+
+describe("getFindingHotspots", () => {
+  beforeEach(() => {
+    vi.mocked(fs.mkdirSync).mockReturnValue(undefined);
+    vi.mocked(fs.writeFileSync).mockReturnValue(undefined);
+  });
+
+  it("findings ディレクトリが存在しない場合は空配列を返す", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    expect(getFindingHotspots()).toEqual([]);
+  });
+
+  it("run_\\d+ パターン以外のディレクトリは無視する", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readdirSync).mockReturnValue(
+      [".DS_Store", "run_abc", "tmp"] as unknown as ReturnType<typeof fs.readdirSync>
+    );
+    expect(getFindingHotspots()).toEqual([]);
+  });
+
+  it("複数 run の findings を同一パスで合算する", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readdirSync)
+      .mockReturnValueOnce(["run_1", "run_2"] as unknown as ReturnType<typeof fs.readdirSync>)
+      .mockReturnValueOnce(["f1.json"] as unknown as ReturnType<typeof fs.readdirSync>)
+      .mockReturnValueOnce(["f2.json"] as unknown as ReturnType<typeof fs.readdirSync>);
+
+    const finding1 = { id: "f1", runId: "run_1", agentId: "a1", agentName: "Alice", role: "r", title: "Bug on /settings page", body: "Found at /settings/profile", category: "bug", timestamp: new Date().toISOString() };
+    const finding2 = { id: "f2", runId: "run_2", agentId: "a2", agentName: "Bob", role: "r", title: "UX issue on /settings", body: "The /settings layout is confusing", category: "ux", timestamp: new Date().toISOString() };
+
+    vi.mocked(fs.readFileSync)
+      .mockReturnValueOnce(JSON.stringify(finding1) as unknown as ReturnType<typeof fs.readFileSync>)
+      .mockReturnValueOnce(JSON.stringify(finding2) as unknown as ReturnType<typeof fs.readFileSync>);
+
+    const hotspots = getFindingHotspots();
+    const settings = hotspots.find((h) => h.pathPrefix === "/settings");
+    expect(settings).toBeDefined();
+    expect(settings!.totalFindings).toBe(2);
+    expect(settings!.categories["bug"]).toBe(1);
+    expect(settings!.categories["ux"]).toBe(1);
+  });
+
+  it("topN パラメータで件数を絞る", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readdirSync)
+      .mockReturnValueOnce(["run_1"] as unknown as ReturnType<typeof fs.readdirSync>)
+      .mockReturnValueOnce(["f1.json", "f2.json", "f3.json"] as unknown as ReturnType<typeof fs.readdirSync>);
+
+    const makeFinding = (id: string, path: string) => ({ id, runId: "run_1", agentId: "a", agentName: "A", role: "r", title: `Issue on ${path}`, body: `Problem at ${path}`, category: "bug", timestamp: new Date().toISOString() });
+    vi.mocked(fs.readFileSync)
+      .mockReturnValueOnce(JSON.stringify(makeFinding("f1", "/alpha")) as unknown as ReturnType<typeof fs.readFileSync>)
+      .mockReturnValueOnce(JSON.stringify(makeFinding("f2", "/beta")) as unknown as ReturnType<typeof fs.readFileSync>)
+      .mockReturnValueOnce(JSON.stringify(makeFinding("f3", "/gamma")) as unknown as ReturnType<typeof fs.readFileSync>);
+
+    expect(getFindingHotspots(2)).toHaveLength(2);
+  });
+
+  it("壊れた JSON ファイルはスキップする", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readdirSync)
+      .mockReturnValueOnce(["run_1"] as unknown as ReturnType<typeof fs.readdirSync>)
+      .mockReturnValueOnce(["bad.json"] as unknown as ReturnType<typeof fs.readdirSync>);
+    vi.mocked(fs.readFileSync).mockReturnValueOnce("invalid{{{" as unknown as ReturnType<typeof fs.readFileSync>);
+
+    expect(() => getFindingHotspots()).not.toThrow();
+    expect(getFindingHotspots()).toEqual([]);
+  });
+
+  it("パスが見つからない場合は / にフォールバックする", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readdirSync)
+      .mockReturnValueOnce(["run_1"] as unknown as ReturnType<typeof fs.readdirSync>)
+      .mockReturnValueOnce(["f1.json"] as unknown as ReturnType<typeof fs.readdirSync>);
+    const finding = { id: "f1", runId: "run_1", agentId: "a", agentName: "A", role: "r", title: "Generic error", body: "Something went wrong", category: "bug", timestamp: new Date().toISOString() };
+    vi.mocked(fs.readFileSync).mockReturnValueOnce(JSON.stringify(finding) as unknown as ReturnType<typeof fs.readFileSync>);
+
+    const hotspots = getFindingHotspots();
+    expect(hotspots.some((h) => h.pathPrefix === "/")).toBe(true);
   });
 });

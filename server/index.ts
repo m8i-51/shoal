@@ -174,7 +174,8 @@ app.post("/api/findings/proxy-url", async (req, res) => {
     parsed = new URL(url);
     if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("invalid protocol");
     const h = parsed.hostname;
-    if (h === "localhost" || h === "127.0.0.1" || h === "::1" || h.startsWith("192.168.") || h.startsWith("10.") || h.endsWith(".local")) {
+    const bare = h.replace(/^\[|\]$/g, ""); // IPv6 brackets: [::1] → ::1
+    if (bare === "localhost" || bare === "127.0.0.1" || bare === "::1" || bare.startsWith("192.168.") || bare.startsWith("10.") || bare.endsWith(".local")) {
       res.status(400).json({ error: "private urls not allowed" });
       return;
     }
@@ -372,7 +373,11 @@ app.patch("/api/schedule", (req, res) => {
   res.json(updated);
 });
 
-app.listen(PORT, () => {
-  console.log(`\nshoal dashboard → http://localhost:${PORT}\n`);
-  startScheduler();
-});
+export { app };
+
+if (process.env.NODE_ENV !== "test") {
+  app.listen(PORT, () => {
+    console.log(`\nshoal dashboard → http://localhost:${PORT}\n`);
+    startScheduler();
+  });
+}
