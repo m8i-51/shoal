@@ -18,7 +18,8 @@
     "web/dist/",
     "run.ts",
     "triage-only.ts",
-    ".env.example"
+    ".env.example",
+    "!**/__tests__/**"
   ],
   "scripts": {
     "prepublishOnly": "npm run build:web",
