@@ -171,4 +171,13 @@ describe("cancelSession", () => {
     expect(fakeChild.kill).not.toHaveBeenCalledWith("SIGKILL");
     vi.useRealTimers();
   });
+
+  it("kill が例外を投げた場合は false を返す", () => {
+    const fakeChild = createFakeChild();
+    fakeChild.kill.mockImplementation(() => { throw new Error("ESRCH"); });
+    vi.mocked(spawn).mockReturnValue(fakeChild as never);
+    const sessionId = spawnRun({});
+
+    expect(cancelSession(sessionId)).toBe(false);
+  });
 });
