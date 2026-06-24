@@ -35,9 +35,21 @@ function makeFakePage(overrides: Record<string, unknown> = {}): Page {
     getByPlaceholder: vi.fn(() => makeFakeLocator()),
     screenshot: vi.fn().mockResolvedValue(Buffer.from("fake-png")),
     close: vi.fn().mockResolvedValue(undefined),
+    evaluate: vi.fn().mockResolvedValue("page text"),
+    ariaSnapshot: vi.fn().mockResolvedValue("aria tree"),
     on: vi.fn(),
     ...overrides,
   } as unknown as Page;
+}
+
+function makeLoggedInPage(overrides: Record<string, unknown> = {}): Page {
+  const emailLocator = makeFakeLocator({ isVisible: vi.fn().mockResolvedValue(true) });
+  const passLocator = makeFakeLocator({ isVisible: vi.fn().mockResolvedValue(true) });
+  const submitLocator = makeFakeLocator({ isVisible: vi.fn().mockResolvedValue(true) });
+  return makeFakePage({
+    locator: vi.fn((sel: string) => sel.includes("password") ? passLocator : sel.includes("submit") ? submitLocator : emailLocator),
+    ...overrides,
+  });
 }
 
 function makeFakeContext(page: Page): BrowserContext {
@@ -215,5 +227,125 @@ describe("runAccountManager", () => {
 
     await runAccountManager("https://example.com", credentials, makeSpec(), context, {} as LLMClient, "m", "run_1");
     expect(createMessageWithRetry).toHaveBeenCalledTimes(12);
+  });
+
+  it("navigate は page.goto を呼んでスクリーンショットを撮る", async () => {
+    const page = makeLoggedInPage();
+    const context = makeFakeContext(page);
+    vi.mocked(createMessageWithRetry)
+      .mockResolvedValueOnce(toolUseResponse("navigate", { path: "/settings" }) as never)
+      .mockResolvedValueOnce(toolUseResponse("done", {}) as never);
+
+    await runAccountManager("https://example.com", credentials, makeSpec(), context, {} as LLMClient, "m", "run_1");
+    expect(page.goto).toHaveBeenCalledWith("https://example.com/settings", expect.any(Object));
+    expect(page.screenshot).toHaveBeenCalled();
+  });
+
+  it("navigate で path が無い場合は page.goto を呼ばない", async () => {
+    const page = makeLoggedInPage();
+    const context = makeFakeContext(page);
+    vi.mocked(createMessageWithRetry)
+      .mockResolvedValueOnce(toolUseResponse("navigate", {}) as never)
+      .mockResolvedValueOnce(toolUseResponse("done", {}) as never);
+
+    await runAccountManager("https://example.com", credentials, makeSpec(), context, {} as LLMClient, "m", "run_1");
+    // ログイン時の goto 以外で呼ばれていないことを確認
+    expect(vi.mocked(page.goto).mock.calls).toHaveLength(1);
+  });
+
+  it("click は getByRole(button) で見つかった要素をクリックする", async () => {
+    const clickableButton = makeFakeLocator({ isVisible: vi.fn().mockResolvedValue(true) });
+    const page = makeLoggedInPage({ getByRole: vi.fn(() => clickableButton) });
+    const context = makeFakeContext(page);
+    vi.mocked(createMessageWithRetry)
+      .mockResolvedValueOnce(toolUseResponse("click", { description: "Save" }) as never)
+      .mockResolvedValueOnce(toolUseResponse("done", {}) as never);
+
+    await runAccountManager("https://example.com", credentials, makeSpec(), context, {} as LLMClient, "m", "run_1");
+    expect(clickableButton.click).toHaveBeenCalled();
+  });
+
+  it("click で description が無い場合はエラーになる（throw せず継続）", async () => {
+    const page = makeLoggedInPage();
+    const context = makeFakeContext(page);
+    vi.mocked(createMessageWithRetry)
+      .mockResolvedValueOnce(toolUseResponse("click", {}) as never)
+      .mockResolvedValueOnce(toolUseResponse("done", {}) as never);
+
+    await expect(
+      runAccountManager("https://example.com", credentials, makeSpec(), context, {} as LLMClient, "m", "run_1")
+    ).resolves.toBeDefined();
+  });
+
+  it("click で一致する要素が無い場合はエラーになるがループは継続する", async () => {
+    const page = makeLoggedInPage();
+    const context = makeFakeContext(page);
+    vi.mocked(createMessageWithRetry)
+      .mockResolvedValueOnce(toolUseResponse("click", { description: "Nonexistent button" }) as never)
+      .mockResolvedValueOnce(toolUseResponse("done", {}) as never);
+
+    await expect(
+      runAccountManager("https://example.com", credentials, makeSpec(), context, {} as LLMClient, "m", "run_1")
+    ).resolves.toEqual([]);
+    expect(createMessageWithRetry).toHaveBeenCalledTimes(2);
+  });
+
+  it("fill は getByLabel で見つかった入力欄に値を入れる", async () => {
+    const fillableInput = makeFakeLocator({ isVisible: vi.fn().mockResolvedValue(true) });
+    const page = makeLoggedInPage({ getByLabel: vi.fn(() => fillableInput) });
+    const context = makeFakeContext(page);
+    vi.mocked(createMessageWithRetry)
+      .mockResolvedValueOnce(toolUseResponse("fill", { label: "Email", value: "test@example.com" }) as never)
+      .mockResolvedValueOnce(toolUseResponse("done", {}) as never);
+
+    await runAccountManager("https://example.com", credentials, makeSpec(), context, {} as LLMClient, "m", "run_1");
+    expect(fillableInput.fill).toHaveBeenCalledWith("test@example.com", expect.any(Object));
+  });
+
+  it("fill で label/value が無い場合はエラーになる", async () => {
+    const page = makeLoggedInPage();
+    const context = makeFakeContext(page);
+    vi.mocked(createMessageWithRetry)
+      .mockResolvedValueOnce(toolUseResponse("fill", { label: "Email" }) as never)
+      .mockResolvedValueOnce(toolUseResponse("done", {}) as never);
+
+    await expect(
+      runAccountManager("https://example.com", credentials, makeSpec(), context, {} as LLMClient, "m", "run_1")
+    ).resolves.toEqual([]);
+  });
+
+  it("view_screen はスクリーンショットを撮る", async () => {
+    const page = makeLoggedInPage();
+    const context = makeFakeContext(page);
+    vi.mocked(createMessageWithRetry)
+      .mockResolvedValueOnce(toolUseResponse("view_screen", {}) as never)
+      .mockResolvedValueOnce(toolUseResponse("done", {}) as never);
+
+    await runAccountManager("https://example.com", credentials, makeSpec(), context, {} as LLMClient, "m", "run_1");
+    expect(page.screenshot).toHaveBeenCalled();
+  });
+
+  it("read_page_text は page.evaluate の結果をそのまま使う", async () => {
+    const page = makeLoggedInPage({ evaluate: vi.fn().mockResolvedValue("visible page text") });
+    const context = makeFakeContext(page);
+    vi.mocked(createMessageWithRetry)
+      .mockResolvedValueOnce(toolUseResponse("read_page_text", {}) as never)
+      .mockResolvedValueOnce(toolUseResponse("done", {}) as never);
+
+    await expect(
+      runAccountManager("https://example.com", credentials, makeSpec(), context, {} as LLMClient, "m", "run_1")
+    ).resolves.toEqual([]);
+    expect(page.evaluate).toHaveBeenCalled();
+  });
+
+  it("read_accessibility_tree は page.ariaSnapshot の結果をそのまま使う", async () => {
+    const page = makeLoggedInPage({ ariaSnapshot: vi.fn().mockResolvedValue("tree dump") });
+    const context = makeFakeContext(page);
+    vi.mocked(createMessageWithRetry)
+      .mockResolvedValueOnce(toolUseResponse("read_accessibility_tree", {}) as never)
+      .mockResolvedValueOnce(toolUseResponse("done", {}) as never);
+
+    await runAccountManager("https://example.com", credentials, makeSpec(), context, {} as LLMClient, "m", "run_1");
+    expect(page.ariaSnapshot).toHaveBeenCalled();
   });
 });
