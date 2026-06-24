@@ -134,6 +134,48 @@ describe("generateReport", () => {
     expect(html).toContain("&lt;a href=");
   });
 
+  it.each([
+    ["ux", "#f97316"],
+    ["feature-request", "#3b82f6"],
+    ["goal-gap", "#6b7280"],
+  ])("category=%s は対応する色を使う", (category, color) => {
+    const finding = makeFinding({ category });
+    generateReport(makeRunLog(), [finding], emptyTriage, makeProductSpec(), [], new Map());
+    expect(getSavedHtml()).toContain(color);
+  });
+
+  it("screenshotPath があり画像が存在する場合は base64 で埋め込む", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockImplementation((p: unknown) => {
+      if (String(p).endsWith(".png")) return Buffer.from("fake-png-bytes");
+      return "{}" as unknown as ReturnType<typeof fs.readFileSync>;
+    });
+    const finding = makeFinding({ screenshotPath: "/tmp/shot.png" });
+    generateReport(makeRunLog(), [finding], emptyTriage, makeProductSpec(), [], new Map());
+    const html = getSavedHtml();
+    expect(html).toContain("data:image/png;base64,");
+  });
+
+  it("screenshotPath があるが画像ファイルが存在しない場合は埋め込まない", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    const finding = makeFinding({ screenshotPath: "/tmp/missing.png" });
+    expect(() => generateReport(makeRunLog(), [finding], emptyTriage, makeProductSpec(), [], new Map())).not.toThrow();
+    const html = getSavedHtml();
+    expect(html).not.toContain("data:image/png;base64,");
+  });
+
+  it("画像読み込みで例外が起きても埋め込まずレポート生成は継続する", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockImplementation((p: unknown) => {
+      if (String(p).endsWith(".png")) throw new Error("EACCES");
+      return "{}" as unknown as ReturnType<typeof fs.readFileSync>;
+    });
+    const finding = makeFinding({ screenshotPath: "/tmp/broken.png" });
+    expect(() => generateReport(makeRunLog(), [finding], emptyTriage, makeProductSpec(), [], new Map())).not.toThrow();
+    const html = getSavedHtml();
+    expect(html).not.toContain("data:image/png;base64,");
+  });
+
   it("issued finding に → Issue バッジが付く", () => {
     const finding = makeFinding({ id: "f1" });
     const triage: TriageResult = { issued: ["f1"], skipped: [], unprocessed: [], issuesCreated: 1 };
