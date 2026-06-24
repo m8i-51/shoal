@@ -124,6 +124,64 @@ describe("listRuns", () => {
     expect(result[0].findingsByCategory).toEqual({ bug: 1, ux: 1 });
   });
 
+  it("category が文字列でない finding はカウントしない", () => {
+    const log = mockRunLog({ runId: "run_bad_category" });
+    vi.mocked(fs.existsSync).mockImplementation((p: unknown) => {
+      const s = String(p);
+      return s.endsWith("logs") || s.endsWith("run_bad_category");
+    });
+    vi.mocked(fs.readdirSync).mockImplementation((p: unknown) => {
+      const s = String(p);
+      if (s.endsWith("logs")) return ["2026-01-01T00-00-00_run_bad_category.json"] as unknown as ReturnType<typeof fs.readdirSync>;
+      return ["f0.json"] as unknown as ReturnType<typeof fs.readdirSync>;
+    });
+    vi.mocked(fs.readFileSync).mockImplementation((p: unknown) => {
+      const s = String(p);
+      if (s.endsWith("f0.json")) return JSON.stringify(mockFinding({ id: "f0", category: undefined as unknown as string })) as unknown as ReturnType<typeof fs.readFileSync>;
+      return JSON.stringify(log) as unknown as ReturnType<typeof fs.readFileSync>;
+    });
+
+    const result = listRuns();
+    expect(result[0].findingCount).toBe(0);
+    expect(result[0].findingsByCategory).toEqual({});
+  });
+
+  it("running_*.json が複数あっても同じ runId は1件だけ登録する", () => {
+    vi.mocked(fs.existsSync).mockImplementation((p: unknown) => String(p).endsWith("logs"));
+    vi.mocked(fs.readdirSync).mockReturnValue([
+      "running_a.json",
+      "running_b.json",
+    ] as unknown as ReturnType<typeof fs.readdirSync>);
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({ runId: "run_same", startedAt: "2026-01-01T00:00:00.000Z" }) as unknown as ReturnType<typeof fs.readFileSync>
+    );
+
+    const result = listRuns();
+    expect(result).toHaveLength(1);
+  });
+
+  it("completedAt が null の run ログは status:running になる", () => {
+    const log = mockRunLog({ runId: "run_inflight", completedAt: null });
+    vi.mocked(fs.existsSync).mockImplementation((p: unknown) => String(p).endsWith("logs"));
+    vi.mocked(fs.readdirSync).mockReturnValue(["2026-01-01T00-00-00_run_inflight.json"] as unknown as ReturnType<typeof fs.readdirSync>);
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(log) as unknown as ReturnType<typeof fs.readFileSync>);
+
+    const result = listRuns();
+    expect(result[0].status).toBe("running");
+  });
+
+  it("summary が欠けている run ログでも cost/regression 系は安全にフォールバックする", () => {
+    const log = mockRunLog({ runId: "run_no_summary" });
+    // @ts-expect-error 意図的に summary を欠落させた壊れたログを再現する
+    delete log.summary;
+    vi.mocked(fs.existsSync).mockImplementation((p: unknown) => String(p).endsWith("logs"));
+    vi.mocked(fs.readdirSync).mockReturnValue(["2026-01-01T00-00-00_run_no_summary.json"] as unknown as ReturnType<typeof fs.readdirSync>);
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(log) as unknown as ReturnType<typeof fs.readFileSync>);
+
+    const result = listRuns();
+    expect(result[0]).toMatchObject({ estimatedCostUSD: null, regressionChecked: 0, regressionFailed: 0 });
+  });
+
   it("同じ runId が複数ファイルに登場しても重複しない", () => {
     vi.mocked(fs.existsSync).mockImplementation((p: unknown) => String(p).endsWith("logs"));
     vi.mocked(fs.readdirSync).mockReturnValue([
