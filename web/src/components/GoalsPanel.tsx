@@ -37,13 +37,19 @@ export function GoalsPanel() {
     const goals = draft.map((g) => g.trim()).filter(Boolean);
     setSaving(true);
     try {
-      await fetch("/api/spec/goals", {
+      const res = await fetch("/api/spec/goals", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ goals }),
       });
+      if (!res.ok) {
+        console.error("[goals] failed to save:", res.status);
+        return;
+      }
       setSpec((prev) => prev ? { ...prev, appGoals: goals } : prev);
       setEditing(false);
+    } catch (e) {
+      console.error("[goals] failed to save:", e);
     } finally {
       setSaving(false);
     }

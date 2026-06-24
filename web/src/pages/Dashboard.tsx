@@ -49,6 +49,9 @@ export function Dashboard() {
               findingsByCategory: {},
               hasReport: false,
               isLive: true,
+              estimatedCostUSD: null,
+              regressionChecked: 0,
+              regressionFailed: 0,
             }];
           }
         }
