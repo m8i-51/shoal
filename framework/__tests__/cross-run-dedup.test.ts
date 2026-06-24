@@ -29,6 +29,13 @@ describe("groupSimilarFindings", () => {
     expect(clusters).toHaveLength(2);
   });
 
+  it("英数字を含まないタイトル/本文（絵文字や記号のみ）でも例外にならず別クラスタになる", () => {
+    const a = mockFinding({ id: "a", title: "！？", body: "🐛🐛" });
+    const b = mockFinding({ id: "b", title: "★★★", body: "…!!" });
+    expect(() => groupSimilarFindings([a, b])).not.toThrow();
+    expect(groupSimilarFindings([a, b])).toHaveLength(2);
+  });
+
   it("似ている finding は同じクラスタになる（run をまたいでも）", () => {
     const a = mockFinding({
       id: "a", runId: "run_1",
@@ -53,6 +60,21 @@ describe("groupSimilarFindings", () => {
     expect(clusters).toHaveLength(2);
     const sizes = clusters.map((cl) => cl.length).sort();
     expect(sizes).toEqual([1, 2]);
+  });
+
+  it("既に別クラスタに含まれた finding は内側ループでスキップされる", () => {
+    // a-c が類似クラスタ、b-d が別の類似クラスタ。b の内側ループ走査時に c は
+    // 既に a のクラスタで seen 済みのため、その分岐を通過する。
+    const a = mockFinding({ id: "a", title: "Profile update API missing", body: "no endpoint to update profile" });
+    const c = mockFinding({ id: "c", title: "Profile update API is missing", body: "no endpoint exists to update the profile" });
+    const b = mockFinding({ id: "b", title: "Dark mode toggle missing", body: "no way to switch themes at all" });
+    const d = mockFinding({ id: "d", title: "Dark mode toggle is missing", body: "no way at all to switch themes" });
+
+    const clusters = groupSimilarFindings([a, b, c, d]);
+    expect(clusters).toHaveLength(2);
+    expect(clusters.map((cl) => cl.map((f) => f.id).sort())).toEqual(
+      expect.arrayContaining([["a", "c"], ["b", "d"]])
+    );
   });
 
   it("threshold を下げるとより緩く同一クラスタになる", () => {
