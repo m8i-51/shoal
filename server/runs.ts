@@ -25,9 +25,10 @@ function countFindings(runId: string): { total: number; byCategory: Record<strin
   const byCategory: Record<string, number> = {};
   let total = 0;
   for (const file of fs.readdirSync(dir)) {
-    if (!file.endsWith(".json")) continue;
+    if (!file.endsWith(".json") || file === "triage_result.json") continue;
     try {
       const f: Finding = JSON.parse(fs.readFileSync(path.join(dir, file), "utf-8"));
+      if (typeof f.category !== "string") continue;
       byCategory[f.category] = (byCategory[f.category] ?? 0) + 1;
       total++;
     } catch {
