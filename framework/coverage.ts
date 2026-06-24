@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
-import type { Finding } from "./types";
+import { isFinding, type Finding } from "./types";
 import type { Scenario } from "./scenario-designer";
 
 export interface RunCoverage {
@@ -233,8 +233,8 @@ export function getFindingHotspots(topN = 12): FindingHotspot[] {
       for (const file of fs.readdirSync(dir)) {
         if (!file.endsWith(".json") || file === "triage_result.json") continue;
         try {
-          const f: Finding = JSON.parse(fs.readFileSync(path.join(dir, file), "utf-8"));
-          if (typeof f.category !== "string") continue;
+          const f: unknown = JSON.parse(fs.readFileSync(path.join(dir, file), "utf-8"));
+          if (!isFinding(f)) continue;
           const p = extractPath(f);
           const entry = counts.get(p) ?? { total: 0, categories: {} };
           entry.total++;

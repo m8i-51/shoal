@@ -9,7 +9,7 @@ import { activeSessions, spawnRun, cancelSession } from "./runner.js";
 import { loadSchedule, saveSchedule, startScheduler, type ScheduleConfig } from "./scheduler.js";
 import { generateDiary, getDiaryPath } from "../framework/diary.js";
 import { findCrossRunDuplicates } from "../framework/cross-run-dedup.js";
-import type { Finding } from "../framework/types.js";
+import { isFinding, type Finding } from "../framework/types.js";
 
 function specFilePath(baseUrl: string): string {
   try {
@@ -144,8 +144,8 @@ function loadAllFindings(): (Finding & { runId: string })[] {
       for (const file of readdirSync(dir)) {
         if (!file.endsWith(".json") || file === "triage_result.json") continue;
         try {
-          const f: Finding = JSON.parse(readFileSync(join(dir, file), "utf-8"));
-          if (typeof f.timestamp !== "string") continue;
+          const f: unknown = JSON.parse(readFileSync(join(dir, file), "utf-8"));
+          if (!isFinding(f)) continue;
           all.push({ ...f, runId: runDir });
         } catch { /* skip */ }
       }

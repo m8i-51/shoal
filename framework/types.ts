@@ -25,6 +25,17 @@ export interface Finding {
   screenshotPath?: string;
 }
 
+/**
+ * findings/run_<id>/ ディレクトリには各 finding の JSON と並んで
+ * triage_result.json（集計ファイル、Finding ではない）が置かれる。
+ * 読み込んだ JSON が実際に Finding かどうかをここで一括判定する。
+ */
+export function isFinding(v: unknown): v is Finding {
+  if (typeof v !== "object" || v === null) return false;
+  const o = v as Record<string, unknown>;
+  return typeof o.id === "string" && typeof o.category === "string" && typeof o.timestamp === "string";
+}
+
 export interface RegressionCheck {
   issueNumber: number;
   issueTitle: string;

@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
-import type { RunLog, Finding } from "../framework/types";
+import { isFinding, type RunLog } from "../framework/types";
 
 export interface RunSummary {
   runId: string;
@@ -27,8 +27,8 @@ function countFindings(runId: string): { total: number; byCategory: Record<strin
   for (const file of fs.readdirSync(dir)) {
     if (!file.endsWith(".json") || file === "triage_result.json") continue;
     try {
-      const f: Finding = JSON.parse(fs.readFileSync(path.join(dir, file), "utf-8"));
-      if (typeof f.category !== "string") continue;
+      const f: unknown = JSON.parse(fs.readFileSync(path.join(dir, file), "utf-8"));
+      if (!isFinding(f)) continue;
       byCategory[f.category] = (byCategory[f.category] ?? 0) + 1;
       total++;
     } catch {

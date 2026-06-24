@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { createLLMClient } from "./llm-client.js";
-import type { Finding } from "./types.js";
+import { isFinding, type Finding } from "./types.js";
 
 function loadFindings(runId: string): Finding[] {
   const dir = path.join(process.cwd(), "findings", runId);
@@ -10,8 +10,8 @@ function loadFindings(runId: string): Finding[] {
   for (const file of fs.readdirSync(dir)) {
     if (!file.endsWith(".json") || file === "triage_result.json") continue;
     try {
-      const f: Finding = JSON.parse(fs.readFileSync(path.join(dir, file), "utf-8"));
-      if (typeof f.timestamp !== "string") continue;
+      const f: unknown = JSON.parse(fs.readFileSync(path.join(dir, file), "utf-8"));
+      if (!isFinding(f)) continue;
       out.push(f);
     } catch { /* skip */ }
   }
