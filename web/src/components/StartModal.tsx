@@ -24,14 +24,23 @@ export function StartModal({ onClose, onStarted }: Props) {
     if (llmApiKey) body.llmApiKey = llmApiKey;
     if (llmModel) body.llmModel = llmModel;
 
-    const res = await fetch("/api/runs/start", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const { sessionId } = await res.json();
-    setLoading(false);
-    onStarted(sessionId);
+    try {
+      const res = await fetch("/api/runs/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        console.error("[start] failed to start run:", res.status);
+        return;
+      }
+      const { sessionId } = await res.json();
+      onStarted(sessionId);
+    } catch (e) {
+      console.error("[start] failed to start run:", e);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
