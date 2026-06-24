@@ -175,6 +175,44 @@ describe("GET /api/findings", () => {
 });
 
 // ================================================================
+// GET /api/findings/cross-run-duplicates
+// ================================================================
+describe("GET /api/findings/cross-run-duplicates", () => {
+  it("findings がない → 空配列", async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    const res = await request(app).get("/api/findings/cross-run-duplicates");
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+  });
+
+  it("run をまたいで似た finding をクラスタとして返す", async () => {
+    const a = mockFinding({
+      id: "f0", runId: "run_1",
+      title: "Dashboard metric not accessible via API",
+      body: "no API endpoint for the metric card",
+    });
+    const b = mockFinding({
+      id: "f0", runId: "run_2",
+      title: "Dashboard metrics not accessible via API",
+      body: "no API endpoint for the metric card",
+    });
+    setupFindingsDir({ run_1: [a], run_2: [b] });
+    const res = await request(app).get("/api/findings/cross-run-duplicates");
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0]).toHaveLength(2);
+  });
+
+  it("似ていない finding しかない → 空配列", async () => {
+    const a = mockFinding({ id: "f0", runId: "run_1", title: "Login button broken", body: "click does nothing" });
+    const b = mockFinding({ id: "f0", runId: "run_2", title: "Dark mode missing", body: "no theme switch" });
+    setupFindingsDir({ run_1: [a], run_2: [b] });
+    const res = await request(app).get("/api/findings/cross-run-duplicates");
+    expect(res.body).toEqual([]);
+  });
+});
+
+// ================================================================
 // GET /api/findings/export
 // ================================================================
 describe("GET /api/findings/export", () => {

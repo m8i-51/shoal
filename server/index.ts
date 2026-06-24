@@ -8,6 +8,7 @@ import { listRuns, getReportPath } from "./runs.js";
 import { activeSessions, spawnRun, cancelSession } from "./runner.js";
 import { loadSchedule, saveSchedule, startScheduler, type ScheduleConfig } from "./scheduler.js";
 import { generateDiary, getDiaryPath } from "../framework/diary.js";
+import { findCrossRunDuplicates } from "../framework/cross-run-dedup.js";
 import type { Finding } from "../framework/types.js";
 
 function specFilePath(baseUrl: string): string {
@@ -154,6 +155,10 @@ function loadAllFindings(): (Finding & { runId: string })[] {
 
 app.get("/api/findings", (_req, res) => {
   res.json(loadAllFindings());
+});
+
+app.get("/api/findings/cross-run-duplicates", (_req, res) => {
+  res.json(findCrossRunDuplicates(loadAllFindings()));
 });
 
 app.get("/api/findings/export", (_req, res) => {
