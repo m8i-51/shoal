@@ -127,4 +127,12 @@ describe("estimateCost — OpenRouter", () => {
     const cost = await estimateCost("some/model", "openrouter", 1_000_000, 1_000_000);
     expect(cost).toBeCloseTo(18, 5);
   });
+
+  it("TTL 以内の再呼び出しはキャッシュを使い fetch を呼ばない", async () => {
+    // 直前のテストで openrouterCache が温まっている前提（モジュールレベルで共有）
+    vi.mocked(fetch).mockClear();
+    const cost = await estimateCost("some/model", "openrouter", 1_000_000, 1_000_000);
+    expect(cost).toBeCloseTo(18, 5);
+    expect(fetch).not.toHaveBeenCalled();
+  });
 });
