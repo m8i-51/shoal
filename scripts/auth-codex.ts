@@ -47,5 +47,5 @@ fs.writeFileSync(ENV_PATH, env);
 
 console.log("\n[auth:codex] Done.");
 console.log(`  Token stored at: ${AUTH_JSON}`);
-console.log("  .env updated: LLM_PROVIDER=codex, LLM_MODEL=codex-mini-latest");
+console.log("  .env updated: LLM_PROVIDER=codex, LLM_MODEL=gpt-5.1-codex-mini");
 console.log("\nRun `npm start` to launch shoal.");
