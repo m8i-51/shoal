@@ -8,9 +8,11 @@ function loadFindings(runId: string): Finding[] {
   if (!fs.existsSync(dir)) return [];
   const out: Finding[] = [];
   for (const file of fs.readdirSync(dir)) {
-    if (!file.endsWith(".json")) continue;
+    if (!file.endsWith(".json") || file === "triage_result.json") continue;
     try {
-      out.push(JSON.parse(fs.readFileSync(path.join(dir, file), "utf-8")));
+      const f: Finding = JSON.parse(fs.readFileSync(path.join(dir, file), "utf-8"));
+      if (typeof f.timestamp !== "string") continue;
+      out.push(f);
     } catch { /* skip */ }
   }
   return out;

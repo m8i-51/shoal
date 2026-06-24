@@ -90,6 +90,22 @@ describe("generateDiary", () => {
     expect(params.messages[0].content).toContain("Login is broken");
   });
 
+  it("triage_result.json（timestamp を持たない集計ファイル）はプロンプトに混ぜない", async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readdirSync).mockReturnValue(["f1.json", "triage_result.json"] as unknown as ReturnType<typeof fs.readdirSync>);
+    const finding = { id: "f1", runId: "run_123", agentId: "a", agentName: "A", role: "r", title: "Login is broken", body: "", category: "bug", timestamp: new Date().toISOString() };
+    const triageResult = { runId: "run_123", completedAt: "x", issued: [], skipped: [], unprocessed: [] };
+    vi.mocked(fs.readFileSync).mockImplementation((p: unknown) => {
+      const path = String(p);
+      if (path.endsWith("triage_result.json")) return JSON.stringify(triageResult) as unknown as ReturnType<typeof fs.readFileSync>;
+      return JSON.stringify(finding) as unknown as ReturnType<typeof fs.readFileSync>;
+    });
+
+    await generateDiary("run_123", []);
+    const [params] = mockCreateMessage.mock.calls[0];
+    expect(params.messages[0].content).not.toContain("undefined");
+  });
+
   it("ログが空の場合はプロンプトに「イベントログなし」を含める", async () => {
     await generateDiary("run_123", []);
     const [params] = mockCreateMessage.mock.calls[0];
