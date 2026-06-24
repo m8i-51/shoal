@@ -426,4 +426,23 @@ describe("getFindingHotspots", () => {
     const hotspots = getFindingHotspots();
     expect(hotspots.some((h) => h.pathPrefix === "/")).toBe(true);
   });
+
+  it("triage_result.json（timestamp/category を持たない集計ファイル）は無視する", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readdirSync)
+      .mockReturnValueOnce(["run_1"] as unknown as ReturnType<typeof fs.readdirSync>)
+      .mockReturnValueOnce(["f1.json", "triage_result.json"] as unknown as ReturnType<typeof fs.readdirSync>);
+
+    const finding = { id: "f1", runId: "run_1", agentId: "a", agentName: "A", role: "r", title: "Bug on /settings", body: "broken at /settings", category: "bug", timestamp: new Date().toISOString() };
+    const triageResult = { runId: "run_1", completedAt: "x", issued: [], skipped: [], unprocessed: [] };
+    vi.mocked(fs.readFileSync)
+      .mockReturnValueOnce(JSON.stringify(finding) as unknown as ReturnType<typeof fs.readFileSync>)
+      .mockReturnValueOnce(JSON.stringify(triageResult) as unknown as ReturnType<typeof fs.readFileSync>);
+
+    const hotspots = getFindingHotspots();
+    const settings = hotspots.find((h) => h.pathPrefix === "/settings");
+    expect(settings?.totalFindings).toBe(1);
+    expect(settings?.categories).toEqual({ bug: 1 });
+    expect(Object.keys(settings?.categories ?? {})).not.toContain("undefined");
+  });
 });

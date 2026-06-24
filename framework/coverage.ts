@@ -231,9 +231,10 @@ export function getFindingHotspots(topN = 12): FindingHotspot[] {
     const dir = path.join(base, runDir);
     try {
       for (const file of fs.readdirSync(dir)) {
-        if (!file.endsWith(".json")) continue;
+        if (!file.endsWith(".json") || file === "triage_result.json") continue;
         try {
           const f: Finding = JSON.parse(fs.readFileSync(path.join(dir, file), "utf-8"));
+          if (typeof f.category !== "string") continue;
           const p = extractPath(f);
           const entry = counts.get(p) ?? { total: 0, categories: {} };
           entry.total++;
