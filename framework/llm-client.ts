@@ -200,7 +200,10 @@ class OpenAICompatClient {
   private defaultModel: string;
 
   constructor(apiKey: string, baseURL?: string, defaultModel?: string) {
-    this.client = new OpenAI({ apiKey, baseURL });
+    // ローカルプロバイダ（Ollama/LM Studio）は空のキーで使われることがある。
+    // openai SDK は空文字列のキーをコンストラクタで拒否するバージョンがあるため、
+    // ダミー値で代替する（API互換エンドポイント側はキーを検証しない）。
+    this.client = new OpenAI({ apiKey: apiKey || "not-needed", baseURL });
     this.defaultModel = defaultModel ?? "gpt-4o-mini";
   }
 

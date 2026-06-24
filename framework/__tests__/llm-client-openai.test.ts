@@ -9,6 +9,7 @@ vi.mock("openai", () => ({
 vi.mock("@anthropic-ai/sdk", () => ({ default: vi.fn() }));
 vi.mock("@anthropic-ai/bedrock-sdk", () => ({ default: vi.fn() }));
 
+import OpenAI from "openai";
 import { createLLMClient } from "../llm-client";
 import type { LLMClient, CreateMessageParams } from "../llm-client";
 
@@ -43,6 +44,23 @@ function basicResponse(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
+
+describe("OpenAICompatClient constructor", () => {
+  it("apiKey が空文字の場合はダミー値で OpenAI SDK を初期化する（ローカルプロバイダ対策）", () => {
+    vi.mocked(OpenAI).mockClear();
+    process.env.LLM_PROVIDER = "ollama";
+    createLLMClient();
+    const [opts] = vi.mocked(OpenAI).mock.calls[0];
+    expect((opts as { apiKey: string }).apiKey).toBe("not-needed");
+  });
+
+  it("apiKey が指定されている場合はそのまま使う", () => {
+    vi.mocked(OpenAI).mockClear();
+    makeOpenAICompatClient();
+    const [opts] = vi.mocked(OpenAI).mock.calls[0];
+    expect((opts as { apiKey: string }).apiKey).toBe("sk-test");
+  });
+});
 
 describe("OpenAICompatClient.createMessage", () => {
   it("テキストのみのレスポンスを Message 形式に変換する", async () => {
