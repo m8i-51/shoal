@@ -47,9 +47,9 @@ export function RunDetail() {
   useEffect(() => {
     fetch(`/api/runs/${runId}/log`)
       .then((r) => r.json())
-      .then((data: { lines: string[]; done: boolean }) => {
-        setLogLines(data.lines);
-        setDone(data.done);
+      .then((data: { lines?: string[]; done?: boolean }) => {
+        setLogLines(Array.isArray(data.lines) ? data.lines : []);
+        setDone(data.done ?? false);
         if (!data.done) setIsLive(true);
       })
       .catch(() => {});
