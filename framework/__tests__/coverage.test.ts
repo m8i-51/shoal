@@ -248,6 +248,26 @@ describe("computeWeightedSummary", () => {
     expect(result.formatted).toContain("×2");
   });
 
+  it("複数の繰り返しレンズ/シナリオは回数の多い順にソートされる", () => {
+    const now = Date.now();
+    setupMockCoverage({
+      entries: [
+        makeEntry({ runId: "r1", timestamp: new Date(now - 3000).toISOString(), findingsCount: 1, byLens: { "Lens B": 1 }, byScenario: { "Scenario B": 1 } }),
+        makeEntry({ runId: "r2", timestamp: new Date(now - 2000).toISOString(), findingsCount: 1, byLens: { "Lens B": 1, "Lens A": 1 }, byScenario: { "Scenario B": 1, "Scenario A": 1 } }),
+        makeEntry({ runId: "r3", timestamp: new Date(now - 1000).toISOString(), findingsCount: 1, byLens: { "Lens A": 1 }, byScenario: { "Scenario A": 1 } }),
+        makeEntry({ runId: "r4", timestamp: new Date(now).toISOString(), findingsCount: 1, byLens: { "Lens A": 1 }, byScenario: { "Scenario A": 1 } }),
+      ],
+    });
+
+    const result = computeWeightedSummary();
+    const lensLine = result.formatted.split("\n").find((l) => l.startsWith("Repeated lenses"))!;
+    const scenarioLine = result.formatted.split("\n").find((l) => l.startsWith("Repeated scenarios"))!;
+    expect(lensLine.indexOf("Lens A")).toBeLessThan(lensLine.indexOf("Lens B"));
+    expect(lensLine).toContain("Lens A (×3)");
+    expect(lensLine).toContain("Lens B (×2)");
+    expect(scenarioLine.indexOf("Scenario A")).toBeLessThan(scenarioLine.indexOf("Scenario B"));
+  });
+
   it("MAX_ENTRIES を超えると最新30件に切り捨てる", () => {
     // 既に30件ある状態で updateCoverage を呼ぶと31件→30件にトリムされることを確認
     const entries = Array.from({ length: 30 }, (_, i) =>
