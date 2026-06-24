@@ -245,6 +245,16 @@ describe("generateReport", () => {
     expect(getSavedHtml()).toContain("⚠ regressed");
   });
 
+  it("regression が複数再発した場合は複数形（regressions）で表示される", () => {
+    const checks: RegressionCheck[] = [
+      { issueNumber: 7, issueTitle: "Crash on submit", status: "regressed", note: "", regressionUrl: null },
+      { issueNumber: 8, issueTitle: "Logout fails", status: "regressed", note: "", regressionUrl: null },
+    ];
+    const agent = makeAgentLog({ agentType: "regression", regressionChecks: checks });
+    generateReport(makeRunLog({ agents: [agent] }), [], emptyTriage, makeProductSpec(), [], new Map());
+    expect(getSavedHtml()).toContain("2 regressions detected");
+  });
+
   it("regression checks がない場合 Progress セクションは表示されない", () => {
     generateReport(makeRunLog(), [], emptyTriage, makeProductSpec(), [], new Map());
     expect(getSavedHtml()).not.toContain("Progress (");
