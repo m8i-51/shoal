@@ -580,3 +580,22 @@ describe("SSE events", () => {
     expect(res.text).toContain("event: done");
   });
 });
+
+// ================================================================
+// Node プロセスレベルのフェイルセーフ
+// ================================================================
+describe("process-level safety nets", () => {
+  it("uncaughtException はログだけしてプロセスを落とさない", () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    process.emit("uncaughtException", new Error("simulated crash"));
+    expect(errorSpy).toHaveBeenCalledWith("[server] uncaughtException:", "simulated crash");
+    errorSpy.mockRestore();
+  });
+
+  it("unhandledRejection はログだけしてプロセスを落とさない", () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    process.emit("unhandledRejection", new Error("simulated rejection"), Promise.resolve());
+    expect(errorSpy).toHaveBeenCalledWith("[server] unhandledRejection:", new Error("simulated rejection"));
+    errorSpy.mockRestore();
+  });
+});
