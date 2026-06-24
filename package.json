@@ -32,7 +32,8 @@
     "build:web": "vite build web",
     "auth:codex": "tsx scripts/auth-codex.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@anthropic-ai/bedrock-sdk": "^0.29.1",
