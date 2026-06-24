@@ -142,9 +142,10 @@ function loadAllFindings(): (Finding & { runId: string })[] {
     const dir = join(base, runDir);
     try {
       for (const file of readdirSync(dir)) {
-        if (!file.endsWith(".json")) continue;
+        if (!file.endsWith(".json") || file === "triage_result.json") continue;
         try {
           const f: Finding = JSON.parse(readFileSync(join(dir, file), "utf-8"));
+          if (typeof f.timestamp !== "string") continue;
           all.push({ ...f, runId: runDir });
         } catch { /* skip */ }
       }

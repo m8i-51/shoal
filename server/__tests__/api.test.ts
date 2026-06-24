@@ -172,6 +172,28 @@ describe("GET /api/findings", () => {
     const res = await request(app).get("/api/findings");
     expect(res.body).toEqual([]);
   });
+
+  it("triage_result.json（timestamp を持たない集計ファイル）は無視する", async () => {
+    const finding = mockFinding({ id: "f1", runId: "run_1", timestamp: "2026-01-01T00:00:00.000Z" });
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readdirSync).mockImplementation((p: unknown) => {
+      const path = String(p);
+      if (path.endsWith("run_1")) return ["f0.json", "triage_result.json"] as unknown as ReturnType<typeof fs.readdirSync>;
+      return ["run_1"] as unknown as ReturnType<typeof fs.readdirSync>;
+    });
+    vi.mocked(fs.readFileSync).mockImplementation((p: unknown) => {
+      const path = String(p);
+      if (path.endsWith("f0.json")) return JSON.stringify(finding) as unknown as ReturnType<typeof fs.readFileSync>;
+      if (path.endsWith("triage_result.json")) {
+        return JSON.stringify({ runId: "run_1", completedAt: "x", issued: [], skipped: [], unprocessed: [] }) as unknown as ReturnType<typeof fs.readFileSync>;
+      }
+      return "{}" as unknown as ReturnType<typeof fs.readFileSync>;
+    });
+    const res = await request(app).get("/api/findings");
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0].id).toBe("f1");
+  });
 });
 
 // ================================================================
