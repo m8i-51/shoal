@@ -135,4 +135,30 @@ describe("estimateCost — OpenRouter", () => {
     expect(cost).toBeCloseTo(18, 5);
     expect(fetch).not.toHaveBeenCalled();
   });
+
+  it("pricing フィールドが無いモデルは 0/0 として扱われる", async () => {
+    vi.useFakeTimers();
+    vi.advanceTimersByTime(60 * 60 * 1000 + 1000); // キャッシュ TTL を超過させて再 fetch させる
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ data: [{ id: "no-pricing/model" }] }),
+    } as Response);
+    const cost = await estimateCost("no-pricing/model", "openrouter", 1000, 500);
+    expect(cost).toBe(0);
+    vi.useRealTimers();
+  });
+
+  it("pricing.prompt が数値に変換できない場合はそのモデルを map に含めず null を返す", async () => {
+    vi.useFakeTimers();
+    vi.advanceTimersByTime(60 * 60 * 1000 + 1000);
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        data: [{ id: "invalid-pricing/model", pricing: { prompt: "not-a-number", completion: "0.001" } }],
+      }),
+    } as Response);
+    const cost = await estimateCost("invalid-pricing/model", "openrouter", 1000, 500);
+    expect(cost).toBeNull();
+    vi.useRealTimers();
+  });
 });
