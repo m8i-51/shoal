@@ -61,6 +61,13 @@ describe("computeWeightedSummary", () => {
     expect(result.formatted).toContain("no coverage data");
   });
 
+  it("byScenario を持たない古い形式のエントリーでも例外にならない", () => {
+    setupMockCoverage({
+      entries: [makeEntry({ findingsCount: 1, byLens: { "UX": 1 }, byScenario: undefined })],
+    });
+    expect(() => computeWeightedSummary()).not.toThrow();
+  });
+
   it("直近のエントリーは重みが高い", () => {
     const now = Date.now();
     const recentEntry = makeEntry({
