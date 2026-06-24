@@ -56,6 +56,59 @@ describe("spawnRun", () => {
     expect((spawnOpts as { env: Record<string, string> }).env.MAX_BROWSERS).toBe("3");
   });
 
+  it("maxExplorers/llmBaseUrl/llmApiKey/llmModel も env 変数として渡す", () => {
+    const fakeChild = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(fakeChild as never);
+
+    spawnRun({ maxExplorers: 5, llmBaseUrl: "https://llm.example.com", llmApiKey: "key123", llmModel: "model-x" });
+    const [, , spawnOpts] = vi.mocked(spawn).mock.calls[0];
+    const env = (spawnOpts as { env: Record<string, string> }).env;
+    expect(env.MAX_EXPLORERS).toBe("5");
+    expect(env.LLM_BASE_URL).toBe("https://llm.example.com");
+    expect(env.LLM_API_KEY).toBe("key123");
+    expect(env.LLM_MODEL).toBe("model-x");
+  });
+
+  it("opts が空の場合は対応する env 変数を設定しない", () => {
+    const fakeChild = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(fakeChild as never);
+    // シェルの実行環境由来の値を排除し、opts 由来のキーが追加されないことだけを見る
+    const keys = ["BASE_URL", "MAX_BROWSERS", "MAX_EXPLORERS", "LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL"] as const;
+    const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+    for (const k of keys) delete process.env[k];
+
+    spawnRun({});
+    const [, , spawnOpts] = vi.mocked(spawn).mock.calls[0];
+    const env = (spawnOpts as { env: Record<string, string> }).env;
+    for (const k of keys) expect(env[k]).toBeUndefined();
+
+    for (const k of keys) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  });
+
+  it("node_modules/.bin/tsx が存在する場合はそのパスを使う", () => {
+    const fakeChild = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(fakeChild as never);
+    vi.mocked(fs.existsSync).mockImplementation((p: unknown) => String(p).includes(".bin/tsx"));
+
+    spawnRun({});
+    const [bin] = vi.mocked(spawn).mock.calls[0];
+    expect(bin).toContain(".bin/tsx");
+  });
+
+  it("stderr のデータも session.lines に積まれる", () => {
+    const fakeChild = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(fakeChild as never);
+
+    const sessionId = spawnRun({});
+    const session = activeSessions.get(sessionId)!;
+    fakeChild.stderr.emit("data", Buffer.from("err line\n"));
+
+    expect(session.lines).toEqual(["err line"]);
+  });
+
   it("stdout のデータを改行区切りで session.lines に積み、listener に通知する", () => {
     const fakeChild = createFakeChild();
     vi.mocked(spawn).mockReturnValue(fakeChild as never);
