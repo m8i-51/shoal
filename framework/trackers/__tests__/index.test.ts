@@ -157,6 +157,12 @@ describe("buildTrackers", () => {
     expect(trackers.isEmpty).toBe(true);
   });
 
+  it("jira は環境変数が一つも設定されていない場合もスキップされる", () => {
+    process.env.ISSUE_TRACKERS = "jira";
+    // JIRA_* を何も設定しない
+    expect(buildTrackers().isEmpty).toBe(true);
+  });
+
   it("jira は4変数すべて揃うと有効化される", () => {
     process.env.ISSUE_TRACKERS = "jira";
     process.env.JIRA_BASE_URL = "https://x.atlassian.net";
@@ -171,6 +177,12 @@ describe("buildTrackers", () => {
     process.env.BACKLOG_SPACE = "space";
     process.env.BACKLOG_API_KEY = "key";
     process.env.BACKLOG_PROJECT_ID = "not-a-number";
+    expect(buildTrackers().isEmpty).toBe(true);
+  });
+
+  it("backlog は環境変数が一つも設定されていない場合もスキップされる", () => {
+    process.env.ISSUE_TRACKERS = "backlog";
+    // BACKLOG_* を何も設定しない
     expect(buildTrackers().isEmpty).toBe(true);
   });
 
