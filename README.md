@@ -150,6 +150,7 @@ All signals work passively — no configuration needed. They improve automatical
 | `ANTHROPIC_API_KEY` | — | Required |
 | `ISSUE_TRACKERS` | — | Comma-separated list of active trackers: `github`, `jira`, `notion`, `backlog`, `asana` |
 | `SHOAL_MODE` | `safe` | Safety mode: `read-only` \| `safe` \| `full` (see below) |
+| `SHOAL_TRACE` | `1` | Record Playwright traces of browser agent sessions (`0` to disable). Each finding links to its session trace — replay exactly what the agent saw with `npx playwright show-trace logs/traces/<run>/<agent>.zip` |
 | `REFRESH_SPEC` | — | Set to `1` to re-run product discovery |
 
 **Safety modes** — agents write data as they explore, so choose how much they're allowed to touch:

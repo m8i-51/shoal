@@ -83,6 +83,13 @@ const MAX_BROWSERS = parseInt(process.env.MAX_BROWSERS ?? "2", 10);
 
 const { client, defaultModel, provider: llmProvider } = createLLMClient();
 
+// Playwright trace — ブラウザエージェントのセッションを丸ごと記録する（SHOAL_TRACE=0 で無効化）
+const TRACE_ENABLED = process.env.SHOAL_TRACE !== "0";
+
+function traceZipPath(runId: string, agentId: string): string {
+  return path.join(process.cwd(), "logs", "traces", runId, `${agentId}.zip`);
+}
+
 // ================================================================
 // Screenshots
 // ================================================================
@@ -901,6 +908,7 @@ async function executeBrowserTool(
           category: safeCategory,
           timestamp: new Date().toISOString(),
           screenshotPath: screenshot.filePath,
+          ...(TRACE_ENABLED ? { tracePath: traceZipPath(runLog.runId, agentId) } : {}),
         };
         saveFinding(finding);
         agentLog.feedbacksSaved.push({ title: String(title), category: safeCategory, findingId: finding.id });
@@ -1270,10 +1278,26 @@ async function main() {
 
         const context = await browser.newContext(contextOptions);
         await applyBrowserGuardrails(context, SHOAL_MODE);
+        if (TRACE_ENABLED) {
+          try {
+            await context.tracing.start({ screenshots: true, snapshots: true });
+          } catch (e) {
+            console.warn(`[trace] failed to start for ${agent.name}:`, e);
+          }
+        }
         const page = await context.newPage();
         try {
           return await runBrowserAgent(agent, page, productSpec, assignment, scenarioOutcomes);
         } finally {
+          if (TRACE_ENABLED) {
+            const tracePath = traceZipPath(runLog.runId, agent.id);
+            try {
+              fs.mkdirSync(path.dirname(tracePath), { recursive: true });
+              await context.tracing.stop({ path: tracePath });
+            } catch (e) {
+              console.warn(`[trace] failed to save for ${agent.name}:`, e);
+            }
+          }
           await context.close();
         }
       })

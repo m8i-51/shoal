@@ -101,6 +101,7 @@ export function generateReport(
   <h3 class="finding-title">${esc(f.title)}</h3>
   <p class="finding-body">${esc(f.body).replace(/\n/g, "<br>")}</p>
   ${imgData ? `<details class="screenshot-toggle"><summary>スクリーンショット</summary><img src="${imgData}" alt="screenshot" class="screenshot"></details>` : ""}
+  ${f.tracePath && fs.existsSync(f.tracePath) ? `<div class="trace-hint">▶ replay this session: <code>npx playwright show-trace ${esc(f.tracePath)}</code></div>` : ""}
 </div>`;
   }).join("\n");
 
@@ -221,6 +222,8 @@ export function generateReport(
     .assignment-tag.lens{color:#0369a1;background:#e0f2fe}
     .finding-title{font-size:.95rem;font-weight:600;margin-bottom:.35rem}
     .finding-body{font-size:.85rem;color:#475569}
+    .trace-hint{margin-top:.6rem;font-size:.75rem;color:#64748b}
+    .trace-hint code{background:#f1f5f9;border:1px solid #e2e8f0;border-radius:4px;padding:.1rem .4rem;font-size:.72rem;user-select:all}
     .screenshot-toggle{margin-top:.75rem}
     .screenshot-toggle summary{font-size:.8rem;color:#64748b;cursor:pointer;user-select:none}
     .screenshot{max-width:100%;max-height:400px;object-fit:contain;border:1px solid #e2e8f0;border-radius:4px;margin-top:.5rem;display:block}

@@ -152,6 +152,7 @@ shoal は run のたびに学習する。
 | `ANTHROPIC_API_KEY` | — | 必須 |
 | `ISSUE_TRACKERS` | — | 有効にするトラッカーをカンマ区切りで指定: `github`, `jira`, `notion`, `backlog`, `asana` |
 | `SHOAL_MODE` | `safe` | セーフティモード: `read-only` \| `safe` \| `full`（下記参照） |
+| `SHOAL_TRACE` | `1` | ブラウザエージェントのセッションを Playwright trace として記録（`0` で無効化）。各 finding からセッションの trace に辿れ、`npx playwright show-trace logs/traces/<run>/<agent>.zip` でエージェントが見たものをそのまま再生できる |
 | `REFRESH_SPEC` | — | `1` を設定するとプロダクト仕様を再探索する |
 
 **セーフティモード** — エージェントは探索中にデータを書き込むため、どこまで許可するかを選べる:
