@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("fs");
 
 import * as fs from "fs";
-import { loadAgents, addAgent, retireAgent, type Agent } from "../agent-store";
+import { loadAgents, addAgent, retireAgent, recordAgentMemories, formatAgentMemories, type Agent, type AgentMemory } from "../agent-store";
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
   return {
@@ -94,5 +94,89 @@ describe("retireAgent", () => {
     const result = retireAgent("agent_nonexistent");
     expect(result).toBe(false);
     expect(fs.writeFileSync).not.toHaveBeenCalled();
+  });
+});
+
+describe("recordAgentMemories", () => {
+  function setupAgents(agents: Agent[]) {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(agents) as unknown as ReturnType<typeof fs.readFileSync>);
+  }
+
+  function readSaved(): Agent[] {
+    const [, content] = vi.mocked(fs.writeFileSync).mock.calls[0];
+    return JSON.parse(content as string) as Agent[];
+  }
+
+  it("体験のあるエージェントに memory を追記する", () => {
+    setupAgents([makeAgent({ id: "agent_1" }), makeAgent({ id: "agent_2" })]);
+    recordAgentMemories("run_10", new Map([
+      ["agent_1", { frustrations: ["Could not find export"], achievements: ['Completed "Submit request"'] }],
+    ]));
+    const saved = readSaved();
+    expect(saved[0].memories).toHaveLength(1);
+    expect(saved[0].memories![0].runId).toBe("run_10");
+    expect(saved[0].memories![0].frustrations).toEqual(["Could not find export"]);
+    expect(saved[1].memories).toBeUndefined();
+  });
+
+  it("空の体験しかない場合は書き込まない", () => {
+    setupAgents([makeAgent({ id: "agent_1" })]);
+    recordAgentMemories("run_10", new Map([
+      ["agent_1", { frustrations: [], achievements: [] }],
+    ]));
+    expect(fs.writeFileSync).not.toHaveBeenCalled();
+  });
+
+  it("直近 3 run 分だけ保持する", () => {
+    const oldMemories: AgentMemory[] = ["run_1", "run_2", "run_3"].map((runId) => ({
+      runId, timestamp: "2026-01-01T00:00:00.000Z", frustrations: ["old"], achievements: [],
+    }));
+    setupAgents([makeAgent({ id: "agent_1", memories: oldMemories })]);
+    recordAgentMemories("run_4", new Map([
+      ["agent_1", { frustrations: ["new"], achievements: [] }],
+    ]));
+    const saved = readSaved();
+    expect(saved[0].memories!.map((m) => m.runId)).toEqual(["run_2", "run_3", "run_4"]);
+  });
+
+  it("1 run あたりの項目数を 5 件に制限する", () => {
+    setupAgents([makeAgent({ id: "agent_1" })]);
+    recordAgentMemories("run_1", new Map([
+      ["agent_1", { frustrations: ["a", "b", "c", "d", "e", "f", "g"], achievements: [] }],
+    ]));
+    const saved = readSaved();
+    expect(saved[0].memories![0].frustrations).toHaveLength(5);
+  });
+});
+
+describe("formatAgentMemories", () => {
+  it("memory がないエージェントは空文字を返す", () => {
+    expect(formatAgentMemories(makeAgent())).toBe("");
+    expect(formatAgentMemories(makeAgent({ memories: [] }))).toBe("");
+  });
+
+  it("frustrations と achievements を経過日数付きで整形する", () => {
+    const twoDaysAgo = new Date(Date.now() - 2 * 86_400_000).toISOString();
+    const agent = makeAgent({
+      memories: [{
+        runId: "run_1",
+        timestamp: twoDaysAgo,
+        frustrations: ['Could not complete "Checkout" — button missing'],
+        achievements: ['Completed "Sign up"'],
+      }],
+    });
+    const text = formatAgentMemories(agent);
+    expect(text).toContain("[Your Memory from Previous Visits]");
+    expect(text).toContain('(2 days ago) Could not complete "Checkout" — button missing');
+    expect(text).toContain('(2 days ago) ✓ Completed "Sign up"');
+    expect(text).toContain("RETURNING user");
+  });
+
+  it("当日の memory は earlier today と表示する", () => {
+    const agent = makeAgent({
+      memories: [{ runId: "run_1", timestamp: new Date().toISOString(), frustrations: ["x"], achievements: [] }],
+    });
+    expect(formatAgentMemories(agent)).toContain("(earlier today) x");
   });
 });

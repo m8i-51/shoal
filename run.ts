@@ -16,7 +16,7 @@ import { createLLMClient } from "./framework/llm-client";
 import type { Tool } from "./framework/llm-client";
 import { createMessageWithRetry, runAgentLoop, sleep, rateLimitRetries } from "./framework/agent-loop";
 import { collectedFindings, initRunLog, saveRunLog, saveFinding, runLog } from "./framework/findings";
-import { loadAgents, addAgent, retireAgent } from "./framework/agent-store";
+import { loadAgents, addAgent, retireAgent, recordAgentMemories, formatAgentMemories, type Agent, type MemoryInput } from "./framework/agent-store";
 import { updateCoverage, computeWeightedSummary, getLastRunPaths, getFindingHotspots } from "./framework/coverage";
 import { computeExperienceScore, formatExperienceLine } from "./framework/experience-score";
 import { getShoalMode, filterAppTools, applyBrowserGuardrails, guardrailPrompt } from "./framework/guardrails";
@@ -300,7 +300,7 @@ function makeExecutor(agentLog: AgentLog, scenarioOutcomes: ScenarioOutcome[], s
 // ================================================================
 
 async function runExplorer(
-  agent: { id: string; name: string; persona: string; role: string },
+  agent: Agent,
   productSpec: ProductSpec,
   assignment: { scenario?: Scenario; lens?: string } = {},
   scenarioOutcomes: ScenarioOutcome[] = [],
@@ -352,7 +352,7 @@ ${productSpec.uiFeatures ? `\n[UI-Only Features]\nThese features exist in the UI
     ? `\n[Your Task for This Run]\nTitle: ${assignment.scenario.title}\nYou are: ${assignment.scenario.context}\nGoal: ${assignment.scenario.goal}\nConstraints: ${assignment.scenario.constraints}\n\nFocus on completing this task naturally. Report any issues you encounter along the way.\nWhen done (or if you cannot complete the goal), call post_outcome with achieved=true/false and a brief reason.\n`
     : assignment.lens
     ? `\n[Focus Area for This Run]\n${assignment.lens}\nKeep this perspective in mind and prioritize reporting related issues.\n`
-    : ""}${guardrailPrompt(SHOAL_MODE)}
+    : ""}${formatAgentMemories(agent)}${guardrailPrompt(SHOAL_MODE)}
 Take 3–5 actions, then finish.`;
 
   await runAgentLoop(agentLog, systemPrompt, EXPLORER_TOOLS, client, defaultModel, makeExecutor(agentLog, scenarioOutcomes, assignment.scenario));
@@ -935,7 +935,7 @@ async function executeBrowserTool(
 }
 
 async function runBrowserAgent(
-  agent: { id: string; name: string; persona: string; role: string },
+  agent: Agent,
   page: Page,
   productSpec: ProductSpec,
   assignment: { scenario?: Scenario; lens?: string } = {},
@@ -1009,7 +1009,7 @@ ${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\
     ? `\n[Your Task for This Run]\nTitle: ${assignment.scenario.title}\nYou are: ${assignment.scenario.context}\nGoal: ${assignment.scenario.goal}\nConstraints: ${assignment.scenario.constraints}\n\nFocus on completing this task naturally as this user. Report any issues you encounter along the way.\nWhen done (or if you cannot complete the goal), call post_outcome with achieved=true/false and a brief reason.`
     : assignment.lens
     ? `\n[Focus Area for This Run]\n${assignment.lens}\nKeep this perspective in mind and prioritize reporting related issues.`
-    : ""}${guardrailPrompt(SHOAL_MODE)}`;
+    : ""}${formatAgentMemories(agent)}${guardrailPrompt(SHOAL_MODE)}`;
 
   await page.goto(BASE_URL, { waitUntil: "networkidle" });
   await page.waitForTimeout(5000);
@@ -1291,7 +1291,24 @@ async function main() {
       console.error("[triage] error:", e);
     }
 
-    // 9. update coverage (report が最新スコアを含められるよう先に更新する)
+    // 9. record each agent's personal memory (frustrations / achievements)
+    const memoryInputs = new Map<string, MemoryInput>();
+    for (const log of runLog.agents) {
+      const input: MemoryInput = { frustrations: [], achievements: [] };
+      for (const o of scenarioOutcomes) {
+        if (o.agentId !== log.agentId) continue;
+        if (o.achieved) input.achievements.push(`Completed "${o.scenarioTitle}"`);
+        else input.frustrations.push(`Could not complete "${o.scenarioTitle}" — ${o.reason}`);
+      }
+      for (const f of collectedFindings) {
+        if (f.agentId !== log.agentId) continue;
+        input.frustrations.push(`Reported [${f.category}] "${f.title}"`);
+      }
+      memoryInputs.set(log.agentId, input);
+    }
+    recordAgentMemories(runLog.runId, memoryInputs);
+
+    // 10. update coverage (report が最新スコアを含められるよう先に更新する)
     updateCoverage(runLog.runId, collectedFindings, agentAssignments, allVisitedPaths, {
       scenarioOutcomes,
       regression: {
@@ -1300,7 +1317,7 @@ async function main() {
       },
     });
 
-    // 10. experience score + HTML report
+    // 11. experience score + HTML report
     const experience = computeExperienceScore();
     if (experience) console.log(`\n[experience] ${formatExperienceLine(experience)}`);
     const reportPath = generateReport(runLog, collectedFindings, triageResult, productSpec, scenarios, agentAssignments, scenarioOutcomes, experience);
