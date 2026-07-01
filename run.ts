@@ -19,6 +19,7 @@ import { collectedFindings, initRunLog, saveRunLog, saveFinding, runLog } from "
 import { loadAgents, addAgent, retireAgent } from "./framework/agent-store";
 import { updateCoverage, computeWeightedSummary, getLastRunPaths, getFindingHotspots } from "./framework/coverage";
 import { computeExperienceScore, formatExperienceLine } from "./framework/experience-score";
+import { getShoalMode, filterAppTools, applyBrowserGuardrails, guardrailPrompt } from "./framework/guardrails";
 import { loadPageHashes, updatePageHashes, hashContent } from "./framework/page-cache";
 import { loadPersonaPack, formatPackForPrompt, type PersonaPack } from "./framework/persona-pack";
 import { buildTrackers } from "./framework/trackers/index";
@@ -70,8 +71,12 @@ for (const name of ["shoal.config.ts", "shoal.config.js", "shoal.config.mjs"]) {
   }
 }
 
-// skip exploration when no API tools are configured
-const MAX_EXPLORERS = targetConfig.appTools.length > 0
+const SHOAL_MODE = getShoalMode();
+if (SHOAL_MODE !== "full") console.log(`[guardrails] mode: ${SHOAL_MODE}`);
+const APP_TOOLS = filterAppTools(targetConfig.appTools, SHOAL_MODE);
+
+// skip exploration when no API tools are configured (after guardrail filtering)
+const MAX_EXPLORERS = APP_TOOLS.length > 0
   ? parseInt(process.env.MAX_EXPLORERS ?? "4", 10)
   : 0;
 const MAX_BROWSERS = parseInt(process.env.MAX_BROWSERS ?? "2", 10);
@@ -174,13 +179,13 @@ const POST_OUTCOME_TOOL: Tool = {
   },
 };
 
-const EXPLORER_TOOLS: Tool[] = [...targetConfig.appTools, POST_FEEDBACK_TOOL, POST_OUTCOME_TOOL];
+const EXPLORER_TOOLS: Tool[] = [...APP_TOOLS, POST_FEEDBACK_TOOL, POST_OUTCOME_TOOL];
 
 function goalsSection(spec: ProductSpec): string {
   if (!spec.appGoals?.length) return "";
   return `\n[App Goals]\nThis app is designed to achieve the following goals. If you find anything that prevents these goals from being met, use category "goal-gap" when posting feedback.\n${spec.appGoals.map((g) => `- ${g}`).join("\n")}\n`;
 }
-const REGRESSION_TOOLS: Tool[] = [...targetConfig.appTools, REPORT_REGRESSION_TOOL, MARK_VERIFIED_TOOL];
+const REGRESSION_TOOLS: Tool[] = [...APP_TOOLS, REPORT_REGRESSION_TOOL, MARK_VERIFIED_TOOL];
 
 function makeExecutor(agentLog: AgentLog, scenarioOutcomes: ScenarioOutcome[], scenario?: Scenario) {
   return async (toolName: string, input: Record<string, unknown>): Promise<string> => {
@@ -347,7 +352,7 @@ ${productSpec.uiFeatures ? `\n[UI-Only Features]\nThese features exist in the UI
     ? `\n[Your Task for This Run]\nTitle: ${assignment.scenario.title}\nYou are: ${assignment.scenario.context}\nGoal: ${assignment.scenario.goal}\nConstraints: ${assignment.scenario.constraints}\n\nFocus on completing this task naturally. Report any issues you encounter along the way.\nWhen done (or if you cannot complete the goal), call post_outcome with achieved=true/false and a brief reason.\n`
     : assignment.lens
     ? `\n[Focus Area for This Run]\n${assignment.lens}\nKeep this perspective in mind and prioritize reporting related issues.\n`
-    : ""}
+    : ""}${guardrailPrompt(SHOAL_MODE)}
 Take 3–5 actions, then finish.`;
 
   await runAgentLoop(agentLog, systemPrompt, EXPLORER_TOOLS, client, defaultModel, makeExecutor(agentLog, scenarioOutcomes, assignment.scenario));
@@ -396,7 +401,7 @@ ${issueList}
 
 [Reference: Implemented Features]
 ${productSpec.features}
-${productSpec.uiFeatures ? `\n[UI-Only Features]\nThese features exist in the UI but may not be reflected in API responses.\n${productSpec.uiFeatures}\n` : ""}${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${goalsSection(productSpec)}`;
+${productSpec.uiFeatures ? `\n[UI-Only Features]\nThese features exist in the UI but may not be reflected in API responses.\n${productSpec.uiFeatures}\n` : ""}${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${goalsSection(productSpec)}${guardrailPrompt(SHOAL_MODE)}`;
 
   await runAgentLoop(agentLog, systemPrompt, REGRESSION_TOOLS, client, defaultModel, makeExecutor(agentLog, []));
   const checked = agentLog.regressionChecks.length;
@@ -628,7 +633,7 @@ interface BrowserAgentLog {
 const TOOLS_THAT_SEND_SCREENSHOT = new Set(["navigate", "post_feedback", "view_screen"]);
 
 const BROWSER_TOOLS: Anthropic.Tool[] = [
-  ...(MAX_EXPLORERS > 0 ? targetConfig.appTools.map((t) => ({ ...t, description: `[API check] ${t.description}` })) : []),
+  ...(MAX_EXPLORERS > 0 ? APP_TOOLS.map((t) => ({ ...t, description: `[API check] ${t.description}` })) : []),
   {
     name: "view_screen",
     description: "Capture the current screen. / 現在の画面を確認する",
@@ -1004,7 +1009,7 @@ ${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\
     ? `\n[Your Task for This Run]\nTitle: ${assignment.scenario.title}\nYou are: ${assignment.scenario.context}\nGoal: ${assignment.scenario.goal}\nConstraints: ${assignment.scenario.constraints}\n\nFocus on completing this task naturally as this user. Report any issues you encounter along the way.\nWhen done (or if you cannot complete the goal), call post_outcome with achieved=true/false and a brief reason.`
     : assignment.lens
     ? `\n[Focus Area for This Run]\n${assignment.lens}\nKeep this perspective in mind and prioritize reporting related issues.`
-    : ""}`;
+    : ""}${guardrailPrompt(SHOAL_MODE)}`;
 
   await page.goto(BASE_URL, { waitUntil: "networkidle" });
   await page.waitForTimeout(5000);
@@ -1264,6 +1269,7 @@ async function main() {
         }
 
         const context = await browser.newContext(contextOptions);
+        await applyBrowserGuardrails(context, SHOAL_MODE);
         const page = await context.newPage();
         try {
           return await runBrowserAgent(agent, page, productSpec, assignment, scenarioOutcomes);

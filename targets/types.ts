@@ -1,4 +1,4 @@
-import type { Tool } from "../framework/llm-client";
+import type { AppTool } from "../framework/guardrails";
 
 export interface Credentials {
   email: string;
@@ -6,7 +6,9 @@ export interface Credentials {
 }
 
 export interface TargetConfig {
-  appTools: Tool[];
+  /** App-specific tools. Mark irreversible ones (delete, pay, send) with `destructive: true`
+   *  so they are excluded unless SHOAL_MODE=full. */
+  appTools: AppTool[];
   execute(toolName: string, input: Record<string, unknown>, agentId: string): Promise<unknown>;
   /** Optional: absolute path to the project repository on the local filesystem.
    *  If set, product-discovery will scan for README/docs/openapi files here.

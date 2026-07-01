@@ -24,6 +24,7 @@ export function spawnRun(opts: {
   baseUrl?: string;
   maxBrowsers?: number;
   maxExplorers?: number;
+  mode?: string;
   llmBaseUrl?: string;
   llmApiKey?: string;
   llmModel?: string;
@@ -64,6 +65,7 @@ export function spawnRun(opts: {
     ...(opts.baseUrl ? { BASE_URL: opts.baseUrl } : {}),
     ...(opts.maxBrowsers != null ? { MAX_BROWSERS: String(opts.maxBrowsers) } : {}),
     ...(opts.maxExplorers != null ? { MAX_EXPLORERS: String(opts.maxExplorers) } : {}),
+    ...(opts.mode ? { SHOAL_MODE: opts.mode } : {}),
     ...(opts.llmBaseUrl ? { LLM_BASE_URL: opts.llmBaseUrl } : {}),
     ...(opts.llmApiKey ? { LLM_API_KEY: opts.llmApiKey } : {}),
     ...(opts.llmModel ? { LLM_MODEL: opts.llmModel } : {}),

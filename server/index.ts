@@ -234,15 +234,20 @@ app.get("/api/runs/:runId/report", (req, res) => {
 // API: start a run
 // ----------------------------------------------------------------
 app.post("/api/runs/start", (req, res) => {
-  const { baseUrl, maxBrowsers, maxExplorers, llmBaseUrl, llmApiKey, llmModel } = req.body as {
+  const { baseUrl, maxBrowsers, maxExplorers, mode, llmBaseUrl, llmApiKey, llmModel } = req.body as {
     baseUrl?: string;
     maxBrowsers?: number;
     maxExplorers?: number;
+    mode?: string;
     llmBaseUrl?: string;
     llmApiKey?: string;
     llmModel?: string;
   };
-  const sessionId = spawnRun({ baseUrl, maxBrowsers, maxExplorers, llmBaseUrl, llmApiKey, llmModel });
+  if (mode !== undefined && !["read-only", "safe", "full"].includes(mode)) {
+    res.status(400).json({ error: "mode must be one of: read-only, safe, full" });
+    return;
+  }
+  const sessionId = spawnRun({ baseUrl, maxBrowsers, maxExplorers, mode, llmBaseUrl, llmApiKey, llmModel });
   res.json({ sessionId });
 });
 

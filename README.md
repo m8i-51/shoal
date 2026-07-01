@@ -147,7 +147,16 @@ All signals work passively — no configuration needed. They improve automatical
 | `MAX_BROWSERS` | `2` | Browser agent count |
 | `ANTHROPIC_API_KEY` | — | Required |
 | `ISSUE_TRACKERS` | — | Comma-separated list of active trackers: `github`, `jira`, `notion`, `backlog`, `asana` |
+| `SHOAL_MODE` | `safe` | Safety mode: `read-only` \| `safe` \| `full` (see below) |
 | `REFRESH_SPEC` | — | Set to `1` to re-run product discovery |
+
+**Safety modes** — agents write data as they explore, so choose how much they're allowed to touch:
+
+- `read-only` — no writes at all. Mutation requests (POST/PUT/PATCH/DELETE) from browser agents are blocked at the network layer. Safe to point at production.
+- `safe` (default) — creating and editing test data is fine, but agents are instructed to stop before irreversible actions: deleting records, payments, sending emails or invitations.
+- `full` — no restrictions. Use only against disposable environments.
+
+In `safe` and `read-only` modes, API tools marked `destructive: true` in your target config are removed from the agents' toolset. The mode can also be selected per run in the dashboard's start dialog.
 
 **Issue tracker variables** (set only what you need):
 

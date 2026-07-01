@@ -52,7 +52,16 @@
     "advanced": "Advanced",
     "llmBaseUrl": "LLM Base URL",
     "llmModel": "Model",
-    "llmApiKey": "API Key"
+    "llmApiKey": "API Key",
+    "mode": "Safety mode",
+    "modeReadOnly": "read-only — no writes",
+    "modeSafe": "safe — test data only (recommended)",
+    "modeFull": "full — no restrictions",
+    "modeHint": {
+      "read-only": "All writes are blocked at the network layer. For observing production.",
+      "safe": "Creating/editing data is allowed; irreversible actions (delete / pay / send) are avoided.",
+      "full": "No restrictions. Use only against disposable environments."
+    }
   },
   "duration": {
     "seconds": "{{count}}s",

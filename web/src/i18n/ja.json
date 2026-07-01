@@ -52,7 +52,16 @@
     "advanced": "詳細設定",
     "llmBaseUrl": "LLM Base URL",
     "llmModel": "モデル",
-    "llmApiKey": "API キー"
+    "llmApiKey": "API キー",
+    "mode": "セーフティモード",
+    "modeReadOnly": "read-only — 書き込みなし",
+    "modeSafe": "safe — テストデータのみ（推奨）",
+    "modeFull": "full — 制限なし",
+    "modeHint": {
+      "read-only": "全ての書き込みをネットワーク層でブロックします。本番環境の観察に。",
+      "safe": "データ作成・編集は許可し、削除・支払い・送信などの不可逆操作を抑止します。",
+      "full": "制限なし。使い捨て環境でのみ使用してください。"
+    }
   },
   "duration": {
     "seconds": "{{count}}s",
