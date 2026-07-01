@@ -9,6 +9,7 @@ import { activeSessions, spawnRun, cancelSession } from "./runner.js";
 import { loadSchedule, saveSchedule, startScheduler, type ScheduleConfig } from "./scheduler.js";
 import { generateDiary, getDiaryPath } from "../framework/diary.js";
 import { findCrossRunDuplicates } from "../framework/cross-run-dedup.js";
+import { computeExperienceScore } from "../framework/experience-score.js";
 import { isFinding, type Finding } from "../framework/types.js";
 
 function specFilePath(baseUrl: string): string {
@@ -91,6 +92,19 @@ app.get("/api/runs", (_req, res) => {
   });
 
   res.json(enriched);
+});
+
+// ----------------------------------------------------------------
+// API: experience score — run 横断の体験スコアトレンド
+// ----------------------------------------------------------------
+app.get("/api/experience", (_req, res) => {
+  try {
+    const score = computeExperienceScore();
+    if (!score) { res.status(404).json({ error: "no experience data yet" }); return; }
+    res.json(score);
+  } catch {
+    res.status(500).json({ error: "failed to compute experience score" });
+  }
 });
 
 // ----------------------------------------------------------------

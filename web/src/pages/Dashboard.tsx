@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { StartModal } from "../components/StartModal";
+import { ExperiencePanel } from "../components/ExperiencePanel";
 import { GoalsPanel } from "../components/GoalsPanel";
 import { SchedulePanel } from "../components/SchedulePanel";
 import { formatDuration, formatDate, formatCostUSD, CATEGORY_COLOR } from "../utils/format";
@@ -76,6 +77,7 @@ export function Dashboard() {
         </button>
       </div>
 
+      <ExperiencePanel />
       <GoalsPanel />
       <SchedulePanel />
 

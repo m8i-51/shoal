@@ -11,10 +11,12 @@ vi.mock("../runner.js", () => ({ activeSessions: new Map(), spawnRun: vi.fn(), c
 vi.mock("../runs.js", () => ({ listRuns: vi.fn(() => []), getReportPath: vi.fn(() => null) }));
 vi.mock("../scheduler.js", () => ({ loadSchedule: vi.fn(() => ({ enabled: false, dayOfWeek: 1, hour: 9, minute: 0, lastRunDate: null })), saveSchedule: vi.fn(), startScheduler: vi.fn() }));
 vi.mock("../../framework/diary.js", () => ({ generateDiary: vi.fn(), getDiaryPath: vi.fn(() => null) }));
+vi.mock("../../framework/experience-score.js", () => ({ computeExperienceScore: vi.fn(() => null) }));
 vi.mock("express-rate-limit", () => ({ rateLimit: () => (_req: unknown, _res: unknown, next: () => void) => next() }));
 
 import * as fs from "fs";
 import { generateDiary, getDiaryPath } from "../../framework/diary.js";
+import { computeExperienceScore } from "../../framework/experience-score.js";
 import { activeSessions, spawnRun, cancelSession } from "../runner.js";
 import { listRuns, getReportPath } from "../runs.js";
 import { loadSchedule } from "../scheduler.js";
@@ -81,6 +83,31 @@ beforeEach(() => {
 
 // ================================================================
 // GET /api/runs/:runId/diary
+// ================================================================
+describe("GET /api/experience", () => {
+  it("スコアデータがない → 404", async () => {
+    vi.mocked(computeExperienceScore).mockReturnValue(null);
+    const res = await request(app).get("/api/experience");
+    expect(res.status).toBe(404);
+  });
+
+  it("スコアがある → 200 + trend", async () => {
+    const runExp = { runId: "run_1", timestamp: new Date().toISOString(), score: 80, achievementRate: 0.8, avgIterations: 5, regressionRate: null };
+    vi.mocked(computeExperienceScore).mockReturnValue({ latest: runExp, delta: 10, trend: [runExp] });
+    const res = await request(app).get("/api/experience");
+    expect(res.status).toBe(200);
+    expect(res.body.latest.score).toBe(80);
+    expect(res.body.delta).toBe(10);
+    expect(res.body.trend).toHaveLength(1);
+  });
+
+  it("計算が例外を投げる → 500", async () => {
+    vi.mocked(computeExperienceScore).mockImplementation(() => { throw new Error("boom"); });
+    const res = await request(app).get("/api/experience");
+    expect(res.status).toBe(500);
+  });
+});
+
 // ================================================================
 describe("GET /api/runs/:runId/diary", () => {
   it("不正な runId → 400", async () => {

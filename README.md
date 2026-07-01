@@ -131,7 +131,9 @@ shoal gets smarter with each run.
 
 **Finding hotspots** — the persona designer has access to a `get_finding_hotspots` tool that aggregates findings by URL area across all past runs. It uses this to recruit agents toward under-investigated parts of the app, or to send specialists into zones where problems keep clustering.
 
-Both signals work passively — no configuration needed. They improve automatically as runs accumulate.
+**Experience Score** — a 0–100 health score of your app's user experience, tracked across runs. It blends three signals: scenario success rate (did agents accomplish realistic user tasks?), friction (how many steps it took), and regressions (did fixed bugs come back?). The score, its trend, and the delta against the previous run appear on the dashboard and at the top of each HTML report — so you can see at a glance whether the app is actually getting better.
+
+All signals work passively — no configuration needed. They improve automatically as runs accumulate.
 
 ---
 

@@ -18,6 +18,7 @@ export interface ScenarioOutcome {
   agentName: string;
   achieved: boolean;
   reason: string;
+  iterations?: number; // post_outcome 呼び出し時点のエージェントのイテレーション数（タスク完了までの手数）
 }
 
 const OUTPUT_SCENARIOS_TOOL: Anthropic.Tool = {

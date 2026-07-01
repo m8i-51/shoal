@@ -18,6 +18,7 @@ import { createMessageWithRetry, runAgentLoop, sleep, rateLimitRetries } from ".
 import { collectedFindings, initRunLog, saveRunLog, saveFinding, runLog } from "./framework/findings";
 import { loadAgents, addAgent, retireAgent } from "./framework/agent-store";
 import { updateCoverage, computeWeightedSummary, getLastRunPaths, getFindingHotspots } from "./framework/coverage";
+import { computeExperienceScore, formatExperienceLine } from "./framework/experience-score";
 import { loadPageHashes, updatePageHashes, hashContent } from "./framework/page-cache";
 import { loadPersonaPack, formatPackForPrompt, type PersonaPack } from "./framework/persona-pack";
 import { buildTrackers } from "./framework/trackers/index";
@@ -197,6 +198,7 @@ function makeExecutor(agentLog: AgentLog, scenarioOutcomes: ScenarioOutcome[], s
               agentName: agentLog.agentName,
               achieved: Boolean(achieved),
               reason: String(reason),
+              iterations: agentLog.iterations,
             };
             scenarioOutcomes.push(outcome);
             console.log(`  ${achieved ? "✓" : "✗"} [outcome] "${scenario.title}": ${achieved ? "achieved" : "NOT achieved"} — ${reason}`);
@@ -871,6 +873,7 @@ async function executeBrowserTool(
             agentName: agentLog.agentName,
             achieved: Boolean(achieved),
             reason: String(reason),
+            iterations: agentLog.iterations,
           };
           scenarioOutcomes.push(outcome);
           console.log(`  ${achieved ? "✓" : "✗"} [outcome] "${scenario.title}": ${achieved ? "achieved" : "NOT achieved"} — ${reason}`);
@@ -1282,12 +1285,20 @@ async function main() {
       console.error("[triage] error:", e);
     }
 
-    // 9. generate HTML report
-    const reportPath = generateReport(runLog, collectedFindings, triageResult, productSpec, scenarios, agentAssignments, scenarioOutcomes);
-    console.log(`\n[report] ${reportPath}`);
+    // 9. update coverage (report が最新スコアを含められるよう先に更新する)
+    updateCoverage(runLog.runId, collectedFindings, agentAssignments, allVisitedPaths, {
+      scenarioOutcomes,
+      regression: {
+        checked: runLog.summary.regressionChecked,
+        regressed: runLog.summary.regressionFailed,
+      },
+    });
 
-    // 10. update coverage
-    updateCoverage(runLog.runId, collectedFindings, agentAssignments, allVisitedPaths);
+    // 10. experience score + HTML report
+    const experience = computeExperienceScore();
+    if (experience) console.log(`\n[experience] ${formatExperienceLine(experience)}`);
+    const reportPath = generateReport(runLog, collectedFindings, triageResult, productSpec, scenarios, agentAssignments, scenarioOutcomes, experience);
+    console.log(`\n[report] ${reportPath}`);
 
   } finally {
     await browser.close();

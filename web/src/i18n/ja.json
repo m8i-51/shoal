@@ -95,5 +95,12 @@
     "placeholder": "例: ユーザーがサポートなしでオンボーディングを完了できる",
     "hint": "プロダクト理解エージェントが推論したゴールです。誤りがあれば修正してください。",
     "goalGapHint": "エージェントはこれらのゴール達成を妨げる問題を \"goal-gap\" として報告します。"
+  },
+  "experience": {
+    "title": "Experience Score",
+    "runCount": "直近 {{count}} run",
+    "achievement": "シナリオ達成率",
+    "friction": "平均手数",
+    "regression": "リグレッション率"
   }
 }
