@@ -15,7 +15,7 @@ import * as path from "path";
 import { createLLMClient } from "./framework/llm-client";
 import type { Tool } from "./framework/llm-client";
 import { createMessageWithRetry, runAgentLoop, sleep, rateLimitRetries } from "./framework/agent-loop";
-import { collectedFindings, initRunLog, saveRunLog, saveFinding, runLog } from "./framework/findings";
+import { collectedFindings, initRunLog, saveRunLog, saveFinding, getSwarmSignals, runLog } from "./framework/findings";
 import { loadAgents, addAgent, retireAgent, recordAgentMemories, formatAgentMemories, type Agent, type MemoryInput } from "./framework/agent-store";
 import { updateCoverage, computeWeightedSummary, getLastRunPaths, getFindingHotspots } from "./framework/coverage";
 import { computeExperienceScore, formatExperienceLine } from "./framework/experience-score";
@@ -169,6 +169,12 @@ const MARK_VERIFIED_TOOL: Tool = {
   },
 };
 
+const SWARM_SIGNALS_TOOL: Tool = {
+  name: "check_swarm_signals",
+  description: "See what OTHER agents exploring this app right now have reported. If a signal is relevant to your persona or the area you are in, try to reproduce it from your own perspective — a finding confirmed by multiple different personas becomes a much stronger issue. If you reproduce one, report it with post_feedback in your own words (your experience, not theirs). / 同じ run の他のエージェントが報告した発見を確認する。自分のペルソナで再現できた発見は post_feedback で自分の言葉で報告する",
+  input_schema: { type: "object", properties: {}, required: [] },
+};
+
 const POST_OUTCOME_TOOL: Tool = {
   name: "post_outcome",
   description: "Record whether you achieved your scenario goal. Call this at the end of your run if you were given a [Your Task for This Run] section. / [Your Task for This Run] セクションがある場合のみ、run の最後にゴール達成可否を記録する",
@@ -188,7 +194,7 @@ const POST_OUTCOME_TOOL: Tool = {
   },
 };
 
-const EXPLORER_TOOLS: Tool[] = [...APP_TOOLS, POST_FEEDBACK_TOOL, POST_OUTCOME_TOOL];
+const EXPLORER_TOOLS: Tool[] = [...APP_TOOLS, POST_FEEDBACK_TOOL, POST_OUTCOME_TOOL, SWARM_SIGNALS_TOOL];
 
 function goalsSection(spec: ProductSpec): string {
   if (!spec.appGoals?.length) return "";
@@ -202,6 +208,13 @@ function makeExecutor(agentLog: AgentLog, scenarioOutcomes: ScenarioOutcome[], s
     let result: unknown;
     try {
       switch (toolName) {
+        case "check_swarm_signals": {
+          const signals = getSwarmSignals(agentLog.agentId);
+          result = signals.length > 0
+            ? { signals, hint: "If any of these relate to your persona or area, try to reproduce them from your own perspective." }
+            : { signals: [], hint: "No reports from other agents yet — keep exploring." };
+          break;
+        }
         case "post_outcome": {
           const { achieved, reason } = input as { achieved: boolean; reason: string };
           if (scenario) {
@@ -661,6 +674,7 @@ const TOOLS_THAT_SEND_SCREENSHOT = new Set(["navigate", "post_feedback", "view_s
 
 const BROWSER_TOOLS: Anthropic.Tool[] = [
   ...(MAX_EXPLORERS > 0 ? APP_TOOLS.map((t) => ({ ...t, description: `[API check] ${t.description}` })) : []),
+  SWARM_SIGNALS_TOOL,
   {
     name: "view_screen",
     description: "Capture the current screen. / 現在の画面を確認する",
@@ -913,6 +927,13 @@ async function executeBrowserTool(
         resultText = "Outcome recorded.";
         break;
       }
+      case "check_swarm_signals": {
+        const signals = getSwarmSignals(agentId);
+        resultText = signals.length > 0
+          ? JSON.stringify({ signals, hint: "If any of these relate to your persona or the area you are in, try to reproduce them from your own perspective." })
+          : "(no reports from other agents yet — keep exploring)";
+        break;
+      }
       case "post_feedback": {
         const { title, body, category } = input as { title: string; body: string; category: string };
         const safeCategory = VALID_CATEGORIES.includes(String(category)) ? String(category) : "ux";
@@ -1030,6 +1051,11 @@ When writing the body, match the tone to the category:
 [Using view_screen]
 - Call it once right after navigate
 - Do not call it repeatedly on the same page
+
+[Using check_swarm_signals]
+- Call it once mid-session to see what other agents exploring this app have reported
+- If a signal matches the area you are in, try to reproduce it as YOUR persona — a finding confirmed by different personas becomes a stronger issue
+- Report reproductions with post_feedback in your own words; do not copy the other agent's report
 
 [Reference: Implemented Features]
 ${productSpec.features}

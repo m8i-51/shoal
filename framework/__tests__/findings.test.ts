@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("fs");
 
 import * as fs from "fs";
-import { saveFinding, initRunLog, saveRunLog, collectedFindings } from "../findings";
+import { saveFinding, initRunLog, saveRunLog, getSwarmSignals, collectedFindings } from "../findings";
 import type { Finding } from "../types";
 
 function makeFinding(overrides: Partial<Finding> = {}): Finding {
@@ -55,6 +55,35 @@ describe("saveFinding", () => {
     expect(filePath).toContain("f-write-test.json");
     expect(JSON.parse(content as string)).toEqual(finding);
     expect(encoding).toBe("utf-8");
+  });
+});
+
+describe("getSwarmSignals", () => {
+  beforeEach(() => {
+    collectedFindings.length = 0;
+  });
+
+  it("他のエージェントの findings だけを返す", () => {
+    saveFinding(makeFinding({ id: "s1", agentId: "a1", title: "Mine" }));
+    saveFinding(makeFinding({ id: "s2", agentId: "a2", agentName: "Bob", title: "Theirs" }));
+    const signals = getSwarmSignals("a1");
+    expect(signals).toHaveLength(1);
+    expect(signals[0].title).toBe("Theirs");
+    expect(signals[0].agentName).toBe("Bob");
+  });
+
+  it("findings がなければ空配列を返す", () => {
+    expect(getSwarmSignals("a1")).toEqual([]);
+  });
+
+  it("直近 limit 件に制限し、長い body は 200 文字に切り詰める", () => {
+    for (let i = 0; i < 10; i++) {
+      saveFinding(makeFinding({ id: `s${i}`, agentId: "a2", title: `Finding ${i}`, body: "x".repeat(300) }));
+    }
+    const signals = getSwarmSignals("a1", 3);
+    expect(signals).toHaveLength(3);
+    expect(signals[0].title).toBe("Finding 7"); // 直近3件（7,8,9）
+    expect(signals[0].excerpt.length).toBeLessThanOrEqual(201); // 200 + "…"
   });
 });
 
