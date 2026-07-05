@@ -10,3 +10,4 @@ coverage/
 .claude/
 shoal.config.ts
 test-accounts/
+cache/

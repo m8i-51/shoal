@@ -57,11 +57,21 @@ describe("fetchClosedIssues", () => {
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
       json: async () => [
-        { number: 1, title: "Bug A", body: "details", labels: [{ name: "bug" }, { name: "feedback-agent" }] },
+        { number: 1, title: "Bug A", body: "details", labels: [{ name: "bug" }, { name: "feedback-agent" }], html_url: "https://github.com/owner/repo/issues/1", state_reason: "completed" },
       ],
     } as Response);
     const result = await fetchClosedIssues({ token: "tok", repo: "owner/repo" });
-    expect(result).toEqual([{ number: 1, title: "Bug A", body: "details", labels: ["bug", "feedback-agent"] }]);
+    expect(result).toEqual([{ number: 1, title: "Bug A", body: "details", labels: ["bug", "feedback-agent"], url: "https://github.com/owner/repo/issues/1", stateReason: "completed" }]);
+  });
+
+  it("html_url / state_reason がない issue は url=undefined, stateReason=null になる", async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => [{ number: 2, title: "Bug B", body: "", labels: [] }],
+    } as Response);
+    const result = await fetchClosedIssues({ token: "tok", repo: "owner/repo" });
+    expect(result[0].url).toBeUndefined();
+    expect(result[0].stateReason).toBeNull();
   });
 
   it("body が null/undefined の場合は空文字にフォールバックする", async () => {

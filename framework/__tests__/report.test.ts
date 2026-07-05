@@ -118,6 +118,35 @@ describe("generateReport", () => {
     expect(getSavedHtml()).toContain("MySpecialApp");
   });
 
+  it("tracePath があり trace ファイルが存在する finding には再生ヒントを表示する", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    const finding = makeFinding({ tracePath: "logs/traces/run_test/a1.zip" });
+    generateReport(makeRunLog(), [finding], emptyTriage, makeProductSpec(), [], new Map());
+    const html = getSavedHtml();
+    expect(html).toContain("npx playwright show-trace logs/traces/run_test/a1.zip");
+  });
+
+  it("trace ファイルが存在しない場合はヒントを表示しない", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    const finding = makeFinding({ tracePath: "logs/traces/run_test/a1.zip" });
+    generateReport(makeRunLog(), [finding], emptyTriage, makeProductSpec(), [], new Map());
+    expect(getSavedHtml()).not.toContain("show-trace");
+  });
+
+  it("experience score が渡されるとスコアカードを表示する", () => {
+    const runExp = { runId: "run_test", timestamp: "2026-04-27T00:00:00.000Z", score: 82, achievementRate: 0.8, avgIterations: 5, regressionRate: null };
+    generateReport(makeRunLog(), [], emptyTriage, makeProductSpec(), [], new Map(), [], { latest: runExp, delta: 7, trend: [runExp] });
+    const html = getSavedHtml();
+    expect(html).toContain("experience score");
+    expect(html).toContain("82");
+    expect(html).toContain("▲7");
+  });
+
+  it("experience score が null のときはスコアカードを表示しない", () => {
+    generateReport(makeRunLog(), [], emptyTriage, makeProductSpec(), [], new Map(), [], null);
+    expect(getSavedHtml()).not.toContain("experience score");
+  });
+
   it("finding のタイトルが HTML エスケープされる", () => {
     const finding = makeFinding({ title: "XSS <script>alert(1)</script>" });
     generateReport(makeRunLog(), [finding], emptyTriage, makeProductSpec(), [], new Map());

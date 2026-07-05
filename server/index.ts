@@ -9,6 +9,7 @@ import { activeSessions, spawnRun, cancelSession } from "./runner.js";
 import { loadSchedule, saveSchedule, startScheduler, type ScheduleConfig } from "./scheduler.js";
 import { generateDiary, getDiaryPath } from "../framework/diary.js";
 import { findCrossRunDuplicates } from "../framework/cross-run-dedup.js";
+import { computeExperienceScore } from "../framework/experience-score.js";
 import { isFinding, type Finding } from "../framework/types.js";
 
 function specFilePath(baseUrl: string): string {
@@ -91,6 +92,19 @@ app.get("/api/runs", (_req, res) => {
   });
 
   res.json(enriched);
+});
+
+// ----------------------------------------------------------------
+// API: experience score — run 横断の体験スコアトレンド
+// ----------------------------------------------------------------
+app.get("/api/experience", (_req, res) => {
+  try {
+    const score = computeExperienceScore();
+    if (!score) { res.status(404).json({ error: "no experience data yet" }); return; }
+    res.json(score);
+  } catch {
+    res.status(500).json({ error: "failed to compute experience score" });
+  }
 });
 
 // ----------------------------------------------------------------
@@ -220,15 +234,20 @@ app.get("/api/runs/:runId/report", (req, res) => {
 // API: start a run
 // ----------------------------------------------------------------
 app.post("/api/runs/start", (req, res) => {
-  const { baseUrl, maxBrowsers, maxExplorers, llmBaseUrl, llmApiKey, llmModel } = req.body as {
+  const { baseUrl, maxBrowsers, maxExplorers, mode, llmBaseUrl, llmApiKey, llmModel } = req.body as {
     baseUrl?: string;
     maxBrowsers?: number;
     maxExplorers?: number;
+    mode?: string;
     llmBaseUrl?: string;
     llmApiKey?: string;
     llmModel?: string;
   };
-  const sessionId = spawnRun({ baseUrl, maxBrowsers, maxExplorers, llmBaseUrl, llmApiKey, llmModel });
+  if (mode !== undefined && !["read-only", "safe", "full"].includes(mode)) {
+    res.status(400).json({ error: "mode must be one of: read-only, safe, full" });
+    return;
+  }
+  const sessionId = spawnRun({ baseUrl, maxBrowsers, maxExplorers, mode, llmBaseUrl, llmApiKey, llmModel });
   res.json({ sessionId });
 });
 

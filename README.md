@@ -131,7 +131,21 @@ shoal gets smarter with each run.
 
 **Finding hotspots** — the persona designer has access to a `get_finding_hotspots` tool that aggregates findings by URL area across all past runs. It uses this to recruit agents toward under-investigated parts of the app, or to send specialists into zones where problems keep clustering.
 
-Both signals work passively — no configuration needed. They improve automatically as runs accumulate.
+**Agent memory** — each persona remembers its own experience from the last few runs: what it struggled with, what it reported, what it accomplished. On the next run it returns as a *returning user* — first revisiting what frustrated it (confirming improvements, or re-reporting with "still broken since my last visit"), then moving on to new areas. Findings gain the continuity of a real user relationship.
+
+**Returning-user sessions** — each browser agent's storage state (cookies, local storage) is saved per persona in `cache/sessions/` and restored on the next run. Agents come back to the app as the same user with the same session: still logged in, with the data they created last time. Scenario design includes one returning-user journey per run — resuming a draft, reviewing accumulated data — so lifecycle states (empty → populated, notifications, stale sessions) get tested the way real users hit them.
+
+**Multi-actor scenarios** — real concurrency bugs live where two users touch the same data at the same time. When the Account Manager discovers two or more roles, the scenario designer creates one two-actor scenario per run — an admin revoking access while a user is mid-flow, two users editing the same record — and two browser agents play it out *simultaneously*, each logged in as their actor's role, watching for stale data, silent overwrites, and permission changes that don't take effect mid-session.
+
+**Swarm signals** — agents in the same run share a blackboard. A `check_swarm_signals` tool shows each agent what the others have just reported; when a signal matches the area an agent is in, it tries to reproduce the problem from its own perspective. Findings corroborated by multiple different personas merge into much stronger issues at triage.
+
+**Environment personas** — a persona's environment is part of who they are. The persona designer can give recruits a real browsing environment — a phone (actual Playwright device emulation with touch and mobile viewport), a non-default locale, dark mode, reduced motion, or a slow 3G connection — matched to the persona's life. Mobile and accessibility findings come from actually experiencing the app in that environment, not from guessing. Browser agents also carry a `run_a11y_audit` tool (axe-core) that measures WCAG violations on the current page, so accessibility findings cite specific rules and elements as evidence.
+
+**Adoption feedback** — when triage files an issue, shoal remembers which perspectives (lenses / scenarios) produced it. On later runs it checks how your team closed those issues — fixed counts as *adopted*, closed as not-planned counts as *rejected* — and feeds the adoption rates back into persona recruitment and scenario design. Perspectives whose findings the team acts on get recruited more; ones that keep getting rejected fade (but never disappear — a rejected finding may just be low priority).
+
+**Experience Score** — a 0–100 health score of your app's user experience, tracked across runs. It blends three signals: scenario success rate (did agents accomplish realistic user tasks?), friction (how many steps it took), and regressions (did fixed bugs come back?). The score, its trend, and the delta against the previous run appear on the dashboard and at the top of each HTML report — so you can see at a glance whether the app is actually getting better.
+
+All signals work passively — no configuration needed. They improve automatically as runs accumulate.
 
 ---
 
@@ -145,7 +159,17 @@ Both signals work passively — no configuration needed. They improve automatica
 | `MAX_BROWSERS` | `2` | Browser agent count |
 | `ANTHROPIC_API_KEY` | — | Required |
 | `ISSUE_TRACKERS` | — | Comma-separated list of active trackers: `github`, `jira`, `notion`, `backlog`, `asana` |
+| `SHOAL_MODE` | `safe` | Safety mode: `read-only` \| `safe` \| `full` (see below) |
+| `SHOAL_TRACE` | `1` | Record Playwright traces of browser agent sessions (`0` to disable). Each finding links to its session trace — replay exactly what the agent saw with `npx playwright show-trace logs/traces/<run>/<agent>.zip` |
 | `REFRESH_SPEC` | — | Set to `1` to re-run product discovery |
+
+**Safety modes** — agents write data as they explore, so choose how much they're allowed to touch:
+
+- `read-only` — no writes at all. Mutation requests (POST/PUT/PATCH/DELETE) from browser agents are blocked at the network layer. Safe to point at production.
+- `safe` (default) — creating and editing test data is fine, but agents are instructed to stop before irreversible actions: deleting records, payments, sending emails or invitations.
+- `full` — no restrictions. Use only against disposable environments.
+
+In `safe` and `read-only` modes, API tools marked `destructive: true` in your target config are removed from the agents' toolset. The mode can also be selected per run in the dashboard's start dialog.
 
 **Issue tracker variables** (set only what you need):
 
@@ -205,6 +229,54 @@ Alternatively, copy `targets/example.ts`, register it in `targets/index.ts`, and
 
 ---
 
+## MCP server — close the fix loop
+
+shoal can act as an [MCP](https://modelcontextprotocol.io/) server, so coding agents like Claude Code can drive the full **find → fix → verify** loop:
+
+```bash
+shoal mcp   # stdio transport
+```
+
+Register it in your agent's MCP config (e.g. `.mcp.json`):
+
+```json
+{ "mcpServers": { "shoal": { "command": "shoal", "args": ["mcp"] } } }
+```
+
+Exposed tools:
+
+| Tool | Purpose |
+|---|---|
+| `start_run` | Launch an exploration run (URL, agent counts, safety mode) |
+| `get_run_status` | Poll progress: findings so far, regression results, log tail |
+| `list_findings` | Read findings across runs, filtered by run / category / text |
+| `verify_fix` | Spawn a single verifier agent that retraces one finding's flow and reports `fixed` / `still_broken` / `inconclusive` |
+| `get_experience_score` | Cross-run Experience Score trend — did the fix actually improve the experience? |
+
+A coding agent can pick a finding with `list_findings`, fix the code, redeploy, and call `verify_fix` to have an agent retrace the exact reported flow — closing the find → fix → verify loop without a human in the middle.
+
+---
+
+## PR Experience Diff
+
+Get per-PR feedback on how a change *feels* to users, not just whether tests pass:
+
+```bash
+shoal diff                    # diff vs origin/main
+shoal diff --base origin/dev  # diff vs any ref
+```
+
+`shoal diff` maps the PR's changed files to routes (Next.js pages/app router and `views/`/`routes/` conventions), sends a small focused swarm (2 browser agents by default) to those areas of your preview deployment, and posts a summary as a PR comment — findings, plus the Experience Score delta:
+
+> **Experience Score: 72/100** (▲5 vs previous run)
+> Agents focused on the areas this PR touches: `/checkout`
+> 🐛 **[bug] Checkout button unresponsive** — Nadia
+> I tapped the checkout button and nothing happened.
+
+If `GITHUB_TOKEN` isn't available the summary is saved to `logs/diff_<runId>.md` instead. For CI, `shoal init`'s example lives at `.github/workflows/shoal-diff.example.yml` — it runs on every PR against your `PREVIEW_URL`.
+
+---
+
 ## Scheduled runs
 
 To run shoal weekly against a staging environment, add a GitHub Actions workflow to your repo.
@@ -219,6 +291,28 @@ mv shoal-weekly.example.yml .github/workflows/shoal-weekly.yml
 Then add `ANTHROPIC_API_KEY` to your repo's **Actions secrets** (`Settings → Secrets and variables → Actions`).
 
 The workflow runs every Monday at 09:00 UTC and can also be triggered manually from the Actions tab. Findings are filed as GitHub Issues using the built-in `GITHUB_TOKEN`.
+
+---
+
+## shoal-bench
+
+How well does the swarm actually detect problems? `bench/` ships a tiny store app with **seven seeded bugs** — an unprotected admin page, a cart total that ignores quantities, a silent save failure, a missing alt attribute, an unreadable low-contrast button, delete-without-confirmation, and a broken nav link — each with ground-truth labels in `bench/labels.json`.
+
+```bash
+npm run bench                       # runs the swarm against the bench app and scores detection
+SHOAL_BENCH_MIN=60 npm run bench    # exit non-zero below 60% detection (CI regression gate)
+```
+
+The scorer matches findings to labels and prints a detection report:
+
+```
+Detection rate: 5/7 (71%)
+  ✓ cart-total-wrong
+      └ "Cart total doesn't match item quantities"
+  ✗ low-contrast — The Buy button text is nearly the same color as its background
+```
+
+Use it as a regression test when changing prompts, models, or exploration logic — and don't fix the seeded bugs (the app's test suite pins them in place).
 
 ---
 

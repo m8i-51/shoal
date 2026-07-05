@@ -5,6 +5,28 @@ import type { Finding, RunLog } from "./types";
 export const collectedFindings: Finding[] = [];
 export let runLog: RunLog;
 
+/**
+ * Swarm signals（スティグマジー）— 同じ run の他エージェントが残した発見を返す。
+ * エージェントは自分のペルソナ・環境で再現するか確かめられる。
+ * 複数ペルソナで再現した発見は triage でマージされ、確度の高い issue になる。
+ */
+export function getSwarmSignals(excludeAgentId: string, limit = 8): {
+  agentName: string;
+  category: string;
+  title: string;
+  excerpt: string;
+}[] {
+  return collectedFindings
+    .filter((f) => f.agentId !== excludeAgentId)
+    .slice(-limit)
+    .map((f) => ({
+      agentName: f.agentName,
+      category: f.category,
+      title: f.title,
+      excerpt: f.body.length > 200 ? `${f.body.slice(0, 200)}…` : f.body,
+    }));
+}
+
 export function saveFinding(finding: Finding): void {
   collectedFindings.push(finding);
   const findingsDir = path.join(process.cwd(), "findings", finding.runId);

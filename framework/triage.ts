@@ -5,6 +5,7 @@ import type { LLMClient } from "./llm-client";
 import type { Finding } from "./types";
 import { createMessageWithRetry } from "./agent-loop";
 import type { IssueTracker } from "./trackers/index";
+import { recordIssueLink } from "./adoption";
 
 const TRIAGE_TOOLS: Anthropic.Tool[] = [
   {
@@ -55,7 +56,9 @@ export async function runTriageAgent(
   findings: Finding[],
   client: LLMClient,
   model: string,
-  tracker: IssueTracker
+  tracker: IssueTracker,
+  // adoption 集計用: agentId → 担当 lens / scenario（省略時はリンク記録なし）
+  agentAssignments?: Map<string, { scenario?: { title: string }; lens?: string }>,
 ): Promise<TriageResult> {
   if (findings.length === 0) {
     console.log("\n[triage] no findings, skipping");
@@ -175,6 +178,24 @@ Organize feedback collected by multiple agents and post it as issue tickets.
         } else {
           mergedIds.forEach((id) => { pendingIds.delete(id); issuedIds.push(id); });
           issuesCreated++;
+          if (url && agentAssignments) {
+            const lenses = new Set<string>();
+            const scenarios = new Set<string>();
+            for (const f of mergedFindings) {
+              const assignment = agentAssignments.get(f.agentId);
+              if (assignment?.lens) lenses.add(assignment.lens.split(":")[0].trim());
+              if (assignment?.scenario) scenarios.add(assignment.scenario.title);
+            }
+            recordIssueLink({
+              url,
+              title: `[${category}] ${cleanTitle}`,
+              category,
+              lenses: [...lenses],
+              scenarios: [...scenarios],
+              runId: mergedFindings[0]?.runId ?? "",
+              createdAt: new Date().toISOString(),
+            });
+          }
           result = { created: true, url, mergedCount: mergedIds.length };
           console.log(`  [triage] issue created: "[${category}] ${cleanTitle}" (merged ${mergedIds.length})`);
         }

@@ -15,9 +15,15 @@ import * as path from "path";
 import { createLLMClient } from "./framework/llm-client";
 import type { Tool } from "./framework/llm-client";
 import { createMessageWithRetry, runAgentLoop, sleep, rateLimitRetries } from "./framework/agent-loop";
-import { collectedFindings, initRunLog, saveRunLog, saveFinding, runLog } from "./framework/findings";
-import { loadAgents, addAgent, retireAgent } from "./framework/agent-store";
+import { collectedFindings, initRunLog, saveRunLog, saveFinding, getSwarmSignals, runLog } from "./framework/findings";
+import { loadAgents, addAgent, retireAgent, recordAgentMemories, formatAgentMemories, type Agent, type MemoryInput } from "./framework/agent-store";
 import { updateCoverage, computeWeightedSummary, getLastRunPaths, getFindingHotspots } from "./framework/coverage";
+import { computeExperienceScore, formatExperienceLine } from "./framework/experience-score";
+import { updateAdoption } from "./framework/adoption";
+import { getShoalMode, filterAppTools, applyBrowserGuardrails, guardrailPrompt } from "./framework/guardrails";
+import { buildContextOptions, sanitizeEnvironment, describeEnvironment, applyNetworkThrottle, SUGGESTED_DEVICES, type EnvironmentProfile } from "./framework/environment";
+import { agentSessionPath, hasAgentSession, saveAgentSession, sessionContinuityPrompt } from "./framework/session-store";
+import { runA11yAudit, formatAuditForAgent } from "./framework/a11y-audit";
 import { loadPageHashes, updatePageHashes, hashContent } from "./framework/page-cache";
 import { loadPersonaPack, formatPackForPrompt, type PersonaPack } from "./framework/persona-pack";
 import { buildTrackers } from "./framework/trackers/index";
@@ -34,7 +40,7 @@ import {
 } from "./framework/observation";
 import { discoverProduct, loadCachedSpec, type ProductSpec } from "./framework/product-discovery";
 import { designOrg, UNIVERSAL_LENSES } from "./framework/org-designer";
-import { designScenarios, type Scenario, type ScenarioOutcome } from "./framework/scenario-designer";
+import { designScenarios, findMultiActorScenario, soloScenarios, type Scenario, type ScenarioActor, type ScenarioOutcome } from "./framework/scenario-designer";
 import { runTriageAgent } from "./framework/triage";
 import { generateReport } from "./framework/report";
 import type { AgentLog, Finding, RegressionCheck } from "./framework/types";
@@ -69,13 +75,62 @@ for (const name of ["shoal.config.ts", "shoal.config.js", "shoal.config.mjs"]) {
   }
 }
 
-// skip exploration when no API tools are configured
-const MAX_EXPLORERS = targetConfig.appTools.length > 0
+const SHOAL_MODE = getShoalMode();
+if (SHOAL_MODE !== "full") console.log(`[guardrails] mode: ${SHOAL_MODE}`);
+const APP_TOOLS = filterAppTools(targetConfig.appTools, SHOAL_MODE);
+
+// skip exploration when no API tools are configured (after guardrail filtering)
+const MAX_EXPLORERS = APP_TOOLS.length > 0
   ? parseInt(process.env.MAX_EXPLORERS ?? "4", 10)
   : 0;
 const MAX_BROWSERS = parseInt(process.env.MAX_BROWSERS ?? "2", 10);
 
 const { client, defaultModel, provider: llmProvider } = createLLMClient();
+
+// Playwright trace — ブラウザエージェントのセッションを丸ごと記録する（SHOAL_TRACE=0 で無効化）
+const TRACE_ENABLED = process.env.SHOAL_TRACE !== "0";
+
+// PR Experience Diff などで探索を特定パスに集中させる（カンマ区切り）
+const FOCUS_PATHS = (process.env.SHOAL_FOCUS_PATHS ?? "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+if (FOCUS_PATHS.length > 0) console.log(`[focus] exploration focused on: ${FOCUS_PATHS.join(", ")}`);
+
+// verify モード — 単一 finding の修正検証に特化した run（MCP の verify_fix から使う）
+// SHOAL_VERIFY_FINDING に finding の JSON（id/title/body/category）を渡す
+interface VerifyFinding { id: string; title: string; body: string; category?: string }
+function parseVerifyFinding(): VerifyFinding | null {
+  const raw = process.env.SHOAL_VERIFY_FINDING;
+  if (!raw) return null;
+  try {
+    const f = JSON.parse(raw) as VerifyFinding;
+    if (typeof f.id === "string" && typeof f.title === "string" && typeof f.body === "string") return f;
+  } catch { /* fallthrough */ }
+  console.error("[verify] SHOAL_VERIFY_FINDING must be JSON with id/title/body");
+  process.exit(1);
+}
+const VERIFY_FINDING = parseVerifyFinding();
+
+function focusPrompt(): string {
+  if (FOCUS_PATHS.length === 0) return "";
+  return `
+[Focus Paths for This Run]
+Recent code changes affect these areas — spend most of your session here:
+${FOCUS_PATHS.map((p) => `- ${p}`).join("\n")}
+Explore these paths first and in depth. Only wander elsewhere once they are exhausted.`;
+}
+
+function traceZipPath(runId: string, agentId: string): string {
+  return path.join(process.cwd(), "logs", "traces", runId, `${agentId}.zip`);
+}
+
+// エージェントへの割り当て。actor はマルチアクターシナリオで同時に動く役割
+type Assignment = {
+  scenario?: Scenario;
+  lens?: string;
+  actor?: ScenarioActor & { partnerRole: string };
+};
 
 // ================================================================
 // Screenshots
@@ -154,6 +209,12 @@ const MARK_VERIFIED_TOOL: Tool = {
   },
 };
 
+const SWARM_SIGNALS_TOOL: Tool = {
+  name: "check_swarm_signals",
+  description: "See what OTHER agents exploring this app right now have reported. If a signal is relevant to your persona or the area you are in, try to reproduce it from your own perspective — a finding confirmed by multiple different personas becomes a much stronger issue. If you reproduce one, report it with post_feedback in your own words (your experience, not theirs). / 同じ run の他のエージェントが報告した発見を確認する。自分のペルソナで再現できた発見は post_feedback で自分の言葉で報告する",
+  input_schema: { type: "object", properties: {}, required: [] },
+};
+
 const POST_OUTCOME_TOOL: Tool = {
   name: "post_outcome",
   description: "Record whether you achieved your scenario goal. Call this at the end of your run if you were given a [Your Task for This Run] section. / [Your Task for This Run] セクションがある場合のみ、run の最後にゴール達成可否を記録する",
@@ -173,13 +234,13 @@ const POST_OUTCOME_TOOL: Tool = {
   },
 };
 
-const EXPLORER_TOOLS: Tool[] = [...targetConfig.appTools, POST_FEEDBACK_TOOL, POST_OUTCOME_TOOL];
+const EXPLORER_TOOLS: Tool[] = [...APP_TOOLS, POST_FEEDBACK_TOOL, POST_OUTCOME_TOOL, SWARM_SIGNALS_TOOL];
 
 function goalsSection(spec: ProductSpec): string {
   if (!spec.appGoals?.length) return "";
   return `\n[App Goals]\nThis app is designed to achieve the following goals. If you find anything that prevents these goals from being met, use category "goal-gap" when posting feedback.\n${spec.appGoals.map((g) => `- ${g}`).join("\n")}\n`;
 }
-const REGRESSION_TOOLS: Tool[] = [...targetConfig.appTools, REPORT_REGRESSION_TOOL, MARK_VERIFIED_TOOL];
+const REGRESSION_TOOLS: Tool[] = [...APP_TOOLS, REPORT_REGRESSION_TOOL, MARK_VERIFIED_TOOL];
 
 function makeExecutor(agentLog: AgentLog, scenarioOutcomes: ScenarioOutcome[], scenario?: Scenario) {
   return async (toolName: string, input: Record<string, unknown>): Promise<string> => {
@@ -187,6 +248,13 @@ function makeExecutor(agentLog: AgentLog, scenarioOutcomes: ScenarioOutcome[], s
     let result: unknown;
     try {
       switch (toolName) {
+        case "check_swarm_signals": {
+          const signals = getSwarmSignals(agentLog.agentId);
+          result = signals.length > 0
+            ? { signals, hint: "If any of these relate to your persona or area, try to reproduce them from your own perspective." }
+            : { signals: [], hint: "No reports from other agents yet — keep exploring." };
+          break;
+        }
         case "post_outcome": {
           const { achieved, reason } = input as { achieved: boolean; reason: string };
           if (scenario) {
@@ -197,6 +265,7 @@ function makeExecutor(agentLog: AgentLog, scenarioOutcomes: ScenarioOutcome[], s
               agentName: agentLog.agentName,
               achieved: Boolean(achieved),
               reason: String(reason),
+              iterations: agentLog.iterations,
             };
             scenarioOutcomes.push(outcome);
             console.log(`  ${achieved ? "✓" : "✗"} [outcome] "${scenario.title}": ${achieved ? "achieved" : "NOT achieved"} — ${reason}`);
@@ -293,9 +362,9 @@ function makeExecutor(agentLog: AgentLog, scenarioOutcomes: ScenarioOutcome[], s
 // ================================================================
 
 async function runExplorer(
-  agent: { id: string; name: string; persona: string; role: string },
+  agent: Agent,
   productSpec: ProductSpec,
-  assignment: { scenario?: Scenario; lens?: string } = {},
+  assignment: Assignment = {},
   scenarioOutcomes: ScenarioOutcome[] = [],
 ) {
   const assignmentLabel = assignment.scenario
@@ -345,7 +414,7 @@ ${productSpec.uiFeatures ? `\n[UI-Only Features]\nThese features exist in the UI
     ? `\n[Your Task for This Run]\nTitle: ${assignment.scenario.title}\nYou are: ${assignment.scenario.context}\nGoal: ${assignment.scenario.goal}\nConstraints: ${assignment.scenario.constraints}\n\nFocus on completing this task naturally. Report any issues you encounter along the way.\nWhen done (or if you cannot complete the goal), call post_outcome with achieved=true/false and a brief reason.\n`
     : assignment.lens
     ? `\n[Focus Area for This Run]\n${assignment.lens}\nKeep this perspective in mind and prioritize reporting related issues.\n`
-    : ""}
+    : ""}${focusPrompt()}${formatAgentMemories(agent)}${guardrailPrompt(SHOAL_MODE)}
 Take 3–5 actions, then finish.`;
 
   await runAgentLoop(agentLog, systemPrompt, EXPLORER_TOOLS, client, defaultModel, makeExecutor(agentLog, scenarioOutcomes, assignment.scenario));
@@ -394,7 +463,7 @@ ${issueList}
 
 [Reference: Implemented Features]
 ${productSpec.features}
-${productSpec.uiFeatures ? `\n[UI-Only Features]\nThese features exist in the UI but may not be reflected in API responses.\n${productSpec.uiFeatures}\n` : ""}${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${goalsSection(productSpec)}`;
+${productSpec.uiFeatures ? `\n[UI-Only Features]\nThese features exist in the UI but may not be reflected in API responses.\n${productSpec.uiFeatures}\n` : ""}${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${goalsSection(productSpec)}${guardrailPrompt(SHOAL_MODE)}`;
 
   await runAgentLoop(agentLog, systemPrompt, REGRESSION_TOOLS, client, defaultModel, makeExecutor(agentLog, []));
   const checked = agentLog.regressionChecks.length;
@@ -451,6 +520,22 @@ const PERSONA_DESIGNER_TOOLS: Anthropic.Tool[] = [
         name: { type: "string" },
         role: { type: "string" },
         persona: { type: "string" },
+        environment: {
+          type: "object",
+          description: `Optional browsing environment — make it match the persona's life (e.g. a commuting sales rep browses on a phone over a slow connection). Give 1-2 recruits a non-desktop environment. Omit entirely for a standard desktop user.
+- device: Playwright device name, e.g. ${SUGGESTED_DEVICES.map((d) => `"${d}"`).join(", ")} (omit for desktop)
+- locale: BCP 47 locale like "ja-JP"
+- colorScheme: "dark" or "light"
+- reducedMotion: true for users who prefer reduced motion
+- networkThrottle: "slow-3g" or "fast-3g" for slow connections`,
+          properties: {
+            device: { type: "string" },
+            locale: { type: "string" },
+            colorScheme: { type: "string", enum: ["light", "dark"] },
+            reducedMotion: { type: "boolean" },
+            networkThrottle: { type: "string", enum: ["slow-3g", "fast-3g"] },
+          },
+        },
       },
       required: ["name", "role", "persona"],
     },
@@ -509,6 +594,7 @@ ${pathCoverageStep}
 6. Call get_scenarios to see the user test scenarios generated for this run — about 70% of agents will be assigned a scenario, so recruit personas whose background fits those scenarios
 7. Call get_agents to check the current agent roster
 8. Add 2–3 agents with add_agent — balance between scenario-fit personas (step 6), underrepresented lenses (step 1), unexplored paths (step 3), finding hotspots (step 4), and unexplored areas (step 5)${testAccounts.length > 0 ? "\n   — assign each agent a role that matches one of the available test accounts" : ""}
+   — give 1–2 recruits an "environment" (mobile device, dark mode, non-default locale, slow connection) that naturally fits their persona's life; leave the rest on desktop
 9. If there are agents with old createdAt dates (oldest 1–2), retire them with retire_agent`;
 
   try {
@@ -578,9 +664,10 @@ ${pathCoverageStep}
           result = agents.map((a) => ({ id: a.id, name: a.name, role: a.role, createdAt: a.createdAt }));
           console.log(`  [persona-designer] current agents: ${agents.length}`);
         } else if (toolUse.name === "add_agent") {
-          const { name, role, persona } = toolUse.input as { name: string; role: string; persona: string };
-          result = addAgent({ name, role, persona });
-          console.log(`  [persona-designer] created: ${name} (${role})`);
+          const { name, role, persona, environment } = toolUse.input as { name: string; role: string; persona: string; environment?: EnvironmentProfile };
+          const cleanEnv = sanitizeEnvironment(environment);
+          result = addAgent({ name, role, persona, environment: cleanEnv });
+          console.log(`  [persona-designer] created: ${name} (${role})${cleanEnv ? ` [env: ${Object.entries(cleanEnv).map(([k, v]) => `${k}=${v}`).join(", ")}]` : ""}`);
         } else if (toolUse.name === "retire_agent") {
           const { agentId, reason } = toolUse.input as { agentId: string; reason: string };
           result = { success: retireAgent(agentId) };
@@ -626,7 +713,13 @@ interface BrowserAgentLog {
 const TOOLS_THAT_SEND_SCREENSHOT = new Set(["navigate", "post_feedback", "view_screen"]);
 
 const BROWSER_TOOLS: Anthropic.Tool[] = [
-  ...(MAX_EXPLORERS > 0 ? targetConfig.appTools.map((t) => ({ ...t, description: `[API check] ${t.description}` })) : []),
+  ...(MAX_EXPLORERS > 0 ? APP_TOOLS.map((t) => ({ ...t, description: `[API check] ${t.description}` })) : []),
+  SWARM_SIGNALS_TOOL,
+  {
+    name: "run_a11y_audit",
+    description: "Run an automated WCAG accessibility audit (axe-core) on the CURRENT page. Returns measured violations (contrast, missing alt, labels, ARIA…) with impact levels and affected elements. Use it when your persona or lens involves accessibility, or when a page feels hard to read or navigate — then cite the specific rules and elements as evidence in post_feedback. / 現在のページで axe-core による WCAG 監査を実行し、実測の違反一覧を得る",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
   {
     name: "view_screen",
     description: "Capture the current screen. / 現在の画面を確認する",
@@ -871,11 +964,25 @@ async function executeBrowserTool(
             agentName: agentLog.agentName,
             achieved: Boolean(achieved),
             reason: String(reason),
+            iterations: agentLog.iterations,
           };
           scenarioOutcomes.push(outcome);
           console.log(`  ${achieved ? "✓" : "✗"} [outcome] "${scenario.title}": ${achieved ? "achieved" : "NOT achieved"} — ${reason}`);
         }
         resultText = "Outcome recorded.";
+        break;
+      }
+      case "run_a11y_audit": {
+        const audit = await runA11yAudit(page);
+        resultText = formatAuditForAgent(audit);
+        console.log(`  [a11y] ${audit.summary}`);
+        break;
+      }
+      case "check_swarm_signals": {
+        const signals = getSwarmSignals(agentId);
+        resultText = signals.length > 0
+          ? JSON.stringify({ signals, hint: "If any of these relate to your persona or the area you are in, try to reproduce them from your own perspective." })
+          : "(no reports from other agents yet — keep exploring)";
         break;
       }
       case "post_feedback": {
@@ -893,6 +1000,7 @@ async function executeBrowserTool(
           category: safeCategory,
           timestamp: new Date().toISOString(),
           screenshotPath: screenshot.filePath,
+          ...(TRACE_ENABLED ? { tracePath: traceZipPath(runLog.runId, agentId) } : {}),
         };
         saveFinding(finding);
         agentLog.feedbacksSaved.push({ title: String(title), category: safeCategory, findingId: finding.id });
@@ -927,10 +1035,10 @@ async function executeBrowserTool(
 }
 
 async function runBrowserAgent(
-  agent: { id: string; name: string; persona: string; role: string },
+  agent: Agent,
   page: Page,
   productSpec: ProductSpec,
-  assignment: { scenario?: Scenario; lens?: string } = {},
+  assignment: Assignment = {},
   scenarioOutcomes: ScenarioOutcome[] = [],
 ): Promise<BrowserAgentLog> {
   const assignmentLabel = assignment.scenario
@@ -995,13 +1103,20 @@ When writing the body, match the tone to the category:
 - Call it once right after navigate
 - Do not call it repeatedly on the same page
 
+[Using check_swarm_signals]
+- Call it once mid-session to see what other agents exploring this app have reported
+- If a signal matches the area you are in, try to reproduce it as YOUR persona — a finding confirmed by different personas becomes a stronger issue
+- Report reproductions with post_feedback in your own words; do not copy the other agent's report
+
 [Reference: Implemented Features]
 ${productSpec.features}
-${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${goalsSection(productSpec)}${assignment.scenario
+${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${goalsSection(productSpec)}${assignment.actor && assignment.scenario
+    ? `\n[Your Task for This Run — Two-User Scenario]\nTitle: ${assignment.scenario.title}\nSituation: ${assignment.scenario.context}\nYou are the "${assignment.actor.role}" actor. Your goal: ${assignment.actor.goal}\n\nRIGHT NOW another agent is using this app as "${assignment.actor.partnerRole}" — your actions and theirs may affect the same data at the same time.\nWhile completing your goal, pay special attention to concurrency and permission issues:\n- data that goes stale and never refreshes after the other user changes it\n- conflicting edits that silently overwrite each other\n- permission or status changes that do not take effect (or take effect inconsistently) mid-session\n- realtime updates, locks, or notifications that never arrive\nReport such issues with post_feedback (usually category "bug").\nWhen done (or if you cannot complete the goal), call post_outcome with achieved=true/false and a brief reason.`
+    : assignment.scenario
     ? `\n[Your Task for This Run]\nTitle: ${assignment.scenario.title}\nYou are: ${assignment.scenario.context}\nGoal: ${assignment.scenario.goal}\nConstraints: ${assignment.scenario.constraints}\n\nFocus on completing this task naturally as this user. Report any issues you encounter along the way.\nWhen done (or if you cannot complete the goal), call post_outcome with achieved=true/false and a brief reason.`
     : assignment.lens
     ? `\n[Focus Area for This Run]\n${assignment.lens}\nKeep this perspective in mind and prioritize reporting related issues.`
-    : ""}`;
+    : ""}${focusPrompt()}${describeEnvironment(agent.environment)}${sessionContinuityPrompt(hasAgentSession(agent.id))}${formatAgentMemories(agent)}${guardrailPrompt(SHOAL_MODE)}`;
 
   await page.goto(BASE_URL, { waitUntil: "networkidle" });
   await page.waitForTimeout(5000);
@@ -1120,12 +1235,63 @@ ${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\
 // Main
 // ================================================================
 
+// verify モード: 検証専用エージェント 1 体で finding の再現を試み、結果を JSON に書き出す
+async function runVerifyMode(
+  browser: Awaited<ReturnType<typeof chromium.launch>>,
+  productSpec: ProductSpec,
+  scenarioOutcomes: ScenarioOutcome[],
+  finding: VerifyFinding,
+): Promise<void> {
+  console.log(`\n[verify] verifying fix for: "${finding.title}"`);
+  runLog.summary.totalAgents = 1;
+
+  const verifier: Agent = {
+    id: "agent_verifier",
+    name: "Verifier",
+    role: "qa",
+    persona: "A meticulous QA engineer who verifies whether previously reported issues are actually fixed. Skeptical by nature — retraces the exact flow that caused the problem before concluding anything.",
+    createdAt: new Date().toISOString(),
+  };
+
+  const scenario: Scenario = {
+    id: "verify",
+    title: `Verify fix: ${finding.title}`,
+    context: "You are verifying whether a previously reported issue has been fixed in the current build.",
+    goal: `Try hard to reproduce this previously reported issue:\n---\nTitle: ${finding.title}\n${finding.body}\n---\nRetrace the same flow that caused it. If the issue NO LONGER occurs after a genuine attempt, the fix is verified — call post_outcome with achieved=true. If it still occurs (even partially), call post_outcome with achieved=false and describe exactly what still happens.`,
+    constraints: "Focus only on verifying this one issue. Do not explore unrelated areas.",
+  };
+
+  const context = await browser.newContext({ viewport: { width: 1024, height: 640 } });
+  await applyBrowserGuardrails(context, SHOAL_MODE);
+  const page = await context.newPage();
+  try {
+    await runBrowserAgent(verifier, page, productSpec, { scenario }, scenarioOutcomes);
+  } finally {
+    await context.close();
+  }
+
+  const outcome = scenarioOutcomes[0];
+  const result = {
+    findingId: finding.id,
+    findingTitle: finding.title,
+    runId: runLog.runId,
+    status: outcome ? (outcome.achieved ? "fixed" : "still_broken") : "inconclusive",
+    reason: outcome?.reason ?? "The verifier agent did not report an outcome.",
+    verifiedAt: new Date().toISOString(),
+  };
+  const outPath = path.join(process.cwd(), "logs", `verify_${runLog.runId}.json`);
+  fs.mkdirSync(path.dirname(outPath), { recursive: true });
+  fs.writeFileSync(outPath, JSON.stringify(result, null, 2), "utf-8");
+  console.log(`\n[verify] ${result.status}: ${result.reason}`);
+  console.log(`[verify] result saved: ${outPath}`);
+}
+
 function pickAgents<T>(agents: T[], count: number): T[] {
   return [...agents].sort(() => Math.random() - 0.5).slice(0, count);
 }
 
 // 7:3 ratio: indices where (idx % 10) < 7 get a scenario, rest get a lens
-function pickAssignment(idx: number, scenarios: Scenario[]): { scenario?: Scenario; lens?: string } {
+function pickAssignment(idx: number, scenarios: Scenario[]): Assignment {
   if (scenarios.length > 0 && idx % 10 < 7) {
     return { scenario: scenarios[idx % scenarios.length] };
   }
@@ -1158,16 +1324,30 @@ async function main() {
       await discoveryContext.close();
     }
 
-    // 2. org design (coverage-aware)
+    // verify モード: 単一 finding の検証だけを行い、通常のパイプラインはスキップ
+    if (VERIFY_FINDING) {
+      await runVerifyMode(browser, productSpec, scenarioOutcomes, VERIFY_FINDING);
+      return;
+    }
+
+    // 2. adoption feedback — 過去に起票した issue の close 状況を群れに還元する
+    const closedIssues = await trackers.fetchClosedIssues();
+    const adoptionSummary = updateAdoption(closedIssues);
+    if (adoptionSummary) console.log(`\n[adoption] ${adoptionSummary.split("\n")[1] ?? ""}`);
+
+    // 3. org design (coverage + adoption aware)
     const coverageSummary = computeWeightedSummary();
     console.log(`\n[coverage] ${coverageSummary.formatted.split("\n")[0]}`);
-    const orgDesign = await designOrg(productSpec, client, defaultModel, coverageSummary.formatted);
+    const designContext = adoptionSummary
+      ? `${coverageSummary.formatted}\n\n${adoptionSummary}`
+      : coverageSummary.formatted;
+    const orgDesign = await designOrg(productSpec, client, defaultModel, designContext);
 
-    // 3. open issues + scenario design (both feed into HR)
+    // 4. open issues
     const openIssues = await trackers.fetchOpenIssues();
-    const scenarios = await designScenarios(productSpec, openIssues, client, defaultModel, 5, coverageSummary.formatted);
 
-    // 3.5. Account Manager（credentials が設定されている場合のみ）
+    // 4.5. Account Manager（credentials が設定されている場合のみ）
+    // シナリオ設計より先に実行し、利用可能な role をマルチアクターシナリオ生成に渡す
     let testAccounts: TestAccount[] = [];
     if (targetConfig.credentials) {
       const accountContext = await browser.newContext({ viewport: { width: 1024, height: 640 } });
@@ -1186,30 +1366,41 @@ async function main() {
       }
     }
 
-    // 4. HR agent
+    // 4.8. scenario design（role が 2 つ以上あればマルチアクターシナリオも生成される）
+    const scenarioContext = FOCUS_PATHS.length > 0
+      ? `${designContext}\n\n[Focus Paths]\nRecent code changes affect: ${FOCUS_PATHS.join(", ")} — bias scenarios toward journeys that pass through these areas.`
+      : designContext;
+    const scenarios = await designScenarios(
+      productSpec, openIssues, client, defaultModel, 5, scenarioContext,
+      testAccounts.map((a) => a.role),
+    );
+
+    // 5. HR agent
     const lastRunPaths = getLastRunPaths();
     const personaPack = await loadPersonaPack();
     await runPersonaDesigner(productSpec, orgDesign.personaGuidance, openIssues, scenarios, testAccounts, lastRunPaths, personaPack);
 
-    // 5. load agents + closed issues
+    // 6. load agents (closed issues は step 2 で取得済み)
     const allAgents = loadAgents();
     if (allAgents.length === 0) {
       console.error("No agents found. Check agents.json.");
       process.exit(1);
     }
-    const closedIssues = await trackers.fetchClosedIssues();
 
-    // 5. エージェント数が確定したので totalAgents を更新
+    // 6.5. エージェント数が確定したので totalAgents を更新
     runLog.summary.totalAgents = allAgents.length;
 
-    // 6. API agents (exploration + regression)
+    // 7. API agents (exploration + regression)
     const allExplorers = allAgents.slice(0, -1);
     const explorerAgents = pickAgents(allExplorers, Math.min(MAX_EXPLORERS, allExplorers.length));
     const regressionAgent = allAgents[allAgents.length - 1];
     console.log(`\nexplorers: ${explorerAgents.length} (max: ${MAX_EXPLORERS}) / regression: 1`);
 
     // agentId → assignment（coverage 計算・レポート生成に使う）
-    const agentAssignments = new Map<string, { scenario?: Scenario; lens?: string }>();
+    const agentAssignments = new Map<string, Assignment>();
+
+    // 通常ディスパッチにはマルチアクターを除いた単独シナリオを使う
+    const dispatchScenarios = soloScenarios(scenarios);
 
     // シナリオ/レンズ割り当てのグローバルカウンタ（7:3 比率）
     let dispatchIdx = 0;
@@ -1218,7 +1409,7 @@ async function main() {
     for (let i = 0; i < explorerAgents.length; i += CONCURRENCY) {
       const batch = explorerAgents.slice(i, i + CONCURRENCY);
       await Promise.all(batch.map((agent) => {
-        const assignment = pickAssignment(dispatchIdx++, scenarios);
+        const assignment = pickAssignment(dispatchIdx++, dispatchScenarios);
         agentAssignments.set(agent.id, assignment);
         return runExplorer(agent, productSpec, assignment, scenarioOutcomes);
       }));
@@ -1235,59 +1426,125 @@ async function main() {
       await runRegressionAgent(regressionAgent, closedIssues, productSpec);
     } else {
       console.log("\n[regression] no closed issues — running as explorer");
-      const assignment = pickAssignment(dispatchIdx++, scenarios);
+      const assignment = pickAssignment(dispatchIdx++, dispatchScenarios);
       agentAssignments.set(regressionAgent.id, assignment);
       await runExplorer(regressionAgent, productSpec, assignment, scenarioOutcomes);
     }
 
-    // 7. browser agents
+    // 8. browser agents
     const browserAgents = pickAgents(allAgents, Math.min(MAX_BROWSERS, allAgents.length));
     console.log(`\nlaunching ${browserAgents.length} browser agents in parallel (max: ${MAX_BROWSERS})`);
     browserAgents.forEach((a) => console.log(`  - ${a.name} (${a.role})`));
 
+    // マルチアクターシナリオ: ブラウザエージェント 2 体を同一シナリオの同時アクターにする
+    const pairAssignments = new Map<string, Assignment>();
+    const multiScenario = findMultiActorScenario(scenarios);
+    if (multiScenario?.actors && browserAgents.length >= 2) {
+      const [actorA, actorB] = multiScenario.actors;
+      pairAssignments.set(browserAgents[0].id, { scenario: multiScenario, actor: { ...actorA, partnerRole: actorB.role } });
+      pairAssignments.set(browserAgents[1].id, { scenario: multiScenario, actor: { ...actorB, partnerRole: actorA.role } });
+      console.log(`[multi-actor] "${multiScenario.title}" — ${browserAgents[0].name} as ${actorA.role} × ${browserAgents[1].name} as ${actorB.role}`);
+    }
+
     await sleep(2000);
     const browserLogs = await Promise.all(
       browserAgents.map(async (agent) => {
-        const assignment = pickAssignment(dispatchIdx++, scenarios);
+        const assignment = pairAssignments.get(agent.id) ?? pickAssignment(dispatchIdx++, dispatchScenarios);
         agentAssignments.set(agent.id, assignment);
 
-        // ロールが一致する storageState があれば使う
-        const matchedAccount = testAccounts.find((a) => a.role === agent.role && a.storageStatePath);
-        const contextOptions: Parameters<typeof browser.newContext>[0] = {
+        // storageState の優先順位:
+        // 1. マルチアクターの場合は actor のロールに合うテストアカウント（権限が本質なので最優先）
+        // 2. 前回の run の自分のセッション（「再訪ユーザー」）
+        // 3. エージェントのロールに合うテストアカウント
+        const accountRole = assignment.actor?.role ?? agent.role;
+        const matchedAccount = testAccounts.find((a) => a.role === accountRole && a.storageStatePath);
+        const baseOptions: Parameters<typeof browser.newContext>[0] = {
           viewport: { width: 1024, height: 640 },
         };
-        if (matchedAccount?.storageStatePath) {
-          contextOptions.storageState = matchedAccount.storageStatePath;
+        if (assignment.actor && matchedAccount?.storageStatePath) {
+          baseOptions.storageState = matchedAccount.storageStatePath;
+        } else if (hasAgentSession(agent.id)) {
+          baseOptions.storageState = agentSessionPath(agent.id);
+          console.log(`[session] ${agent.name} returns with their previous session`);
+        } else if (matchedAccount?.storageStatePath) {
+          baseOptions.storageState = matchedAccount.storageStatePath;
         }
+        // ペルソナの環境プロファイル（デバイス・ロケール・配色）を重ねる
+        const contextOptions = buildContextOptions(agent.environment, baseOptions);
 
         const context = await browser.newContext(contextOptions);
+        await applyBrowserGuardrails(context, SHOAL_MODE);
+        if (TRACE_ENABLED) {
+          try {
+            await context.tracing.start({ screenshots: true, snapshots: true });
+          } catch (e) {
+            console.warn(`[trace] failed to start for ${agent.name}:`, e);
+          }
+        }
         const page = await context.newPage();
+        await applyNetworkThrottle(page, agent.environment?.networkThrottle);
         try {
           return await runBrowserAgent(agent, page, productSpec, assignment, scenarioOutcomes);
         } finally {
+          // 次の run で「再訪ユーザー」になれるようセッションを保存（close 前に呼ぶ）
+          await saveAgentSession(context, agent.id);
+          if (TRACE_ENABLED) {
+            const tracePath = traceZipPath(runLog.runId, agent.id);
+            try {
+              fs.mkdirSync(path.dirname(tracePath), { recursive: true });
+              await context.tracing.stop({ path: tracePath });
+            } catch (e) {
+              console.warn(`[trace] failed to save for ${agent.name}:`, e);
+            }
+          }
           await context.close();
         }
       })
     );
     const allVisitedPaths = browserLogs.flatMap((log) => log.visitedPaths);
 
-    // 8. triage (API + browser findings)
+    // 9. triage (API + browser findings)
     await sleep(2000);
     console.log(`\n[triage] collected findings: ${collectedFindings.length}`);
     let triageResult = { issued: [] as string[], skipped: [] as string[], unprocessed: [] as string[], issuesCreated: 0 };
     try {
-      triageResult = await runTriageAgent(collectedFindings, client, defaultModel, trackers);
+      triageResult = await runTriageAgent(collectedFindings, client, defaultModel, trackers, agentAssignments);
       runLog.summary.totalIssuesPosted += triageResult.issuesCreated;
     } catch (e) {
       console.error("[triage] error:", e);
     }
 
-    // 9. generate HTML report
-    const reportPath = generateReport(runLog, collectedFindings, triageResult, productSpec, scenarios, agentAssignments, scenarioOutcomes);
-    console.log(`\n[report] ${reportPath}`);
+    // 10. record each agent's personal memory (frustrations / achievements)
+    const memoryInputs = new Map<string, MemoryInput>();
+    for (const log of runLog.agents) {
+      const input: MemoryInput = { frustrations: [], achievements: [] };
+      for (const o of scenarioOutcomes) {
+        if (o.agentId !== log.agentId) continue;
+        if (o.achieved) input.achievements.push(`Completed "${o.scenarioTitle}"`);
+        else input.frustrations.push(`Could not complete "${o.scenarioTitle}" — ${o.reason}`);
+      }
+      for (const f of collectedFindings) {
+        if (f.agentId !== log.agentId) continue;
+        input.frustrations.push(`Reported [${f.category}] "${f.title}"`);
+      }
+      memoryInputs.set(log.agentId, input);
+    }
+    recordAgentMemories(runLog.runId, memoryInputs);
 
-    // 10. update coverage
-    updateCoverage(runLog.runId, collectedFindings, agentAssignments, allVisitedPaths);
+    // 11. update coverage (report が最新スコアを含められるよう先に更新する)
+    updateCoverage(runLog.runId, collectedFindings, agentAssignments, allVisitedPaths, {
+      scenarioOutcomes,
+      regression: {
+        checked: runLog.summary.regressionChecked,
+        regressed: runLog.summary.regressionFailed,
+      },
+    });
+
+    // 12. experience score + HTML report
+    const experience = computeExperienceScore();
+    if (experience) console.log(`\n[experience] ${formatExperienceLine(experience)}`);
+    const reportPath = generateReport(runLog, collectedFindings, triageResult, productSpec, scenarios, agentAssignments, scenarioOutcomes, experience);
+    console.log(`\n[report] ${reportPath}`);
 
   } finally {
     await browser.close();

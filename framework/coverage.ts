@@ -1,7 +1,18 @@
 import * as fs from "fs";
 import * as path from "path";
 import { isFinding, type Finding } from "./types";
-import type { Scenario } from "./scenario-designer";
+import type { Scenario, ScenarioOutcome } from "./scenario-designer";
+
+export interface OutcomeRecord {
+  scenarioTitle: string;
+  achieved: boolean;
+  iterations: number | null;
+}
+
+export interface RegressionRecord {
+  checked: number;
+  regressed: number;
+}
 
 export interface RunCoverage {
   runId: string;
@@ -11,6 +22,8 @@ export interface RunCoverage {
   byLens: Record<string, number>;
   byScenario: Record<string, number>;
   visitedPaths: string[];
+  scenarioOutcomes?: OutcomeRecord[];
+  regression?: RegressionRecord;
 }
 
 export interface Coverage {
@@ -58,6 +71,7 @@ export function updateCoverage(
   findings: Finding[],
   agentAssignments: Map<string, { scenario?: Scenario; lens?: string }>,
   visitedPaths: string[] = [],
+  extras?: { scenarioOutcomes?: ScenarioOutcome[]; regression?: RegressionRecord },
 ): void {
   const coverage = loadCoverage();
 
@@ -79,7 +93,7 @@ export function updateCoverage(
   }
 
   const uniquePaths = [...new Set(visitedPaths)].sort();
-  coverage.entries.push({
+  const entry: RunCoverage = {
     runId,
     timestamp: new Date().toISOString(),
     findingsCount: findings.length,
@@ -87,7 +101,18 @@ export function updateCoverage(
     byLens,
     byScenario,
     visitedPaths: uniquePaths,
-  });
+  };
+  if (extras?.scenarioOutcomes && extras.scenarioOutcomes.length > 0) {
+    entry.scenarioOutcomes = extras.scenarioOutcomes.map((o) => ({
+      scenarioTitle: o.scenarioTitle,
+      achieved: o.achieved,
+      iterations: typeof o.iterations === "number" ? o.iterations : null,
+    }));
+  }
+  if (extras?.regression && extras.regression.checked > 0) {
+    entry.regression = extras.regression;
+  }
+  coverage.entries.push(entry);
 
   if (coverage.entries.length > MAX_ENTRIES) {
     coverage.entries = coverage.entries.slice(-MAX_ENTRIES);

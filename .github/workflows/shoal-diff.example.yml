@@ -1,0 +1,48 @@
+# shoal PR Experience Diff — copy this to your own repo's .github/workflows/
+#
+# On every pull request, shoal infers which routes the PR touches, sends a
+# small focused swarm to experience them on your preview/staging deployment,
+# and posts the findings + Experience Score as a PR comment.
+#
+# Required secrets:   ANTHROPIC_API_KEY
+# Required variables: PREVIEW_URL (a deployment that includes the PR's changes,
+#                     e.g. a per-PR preview URL or a staging environment)
+
+name: shoal experience diff
+
+permissions:
+  contents: read
+  pull-requests: write
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  shoal-diff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # shoal diff needs the base branch for git diff
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install shoal
+        run: npm install -g @m8i-51/shoal
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+
+      - name: Run experience diff
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          BASE_URL: ${{ vars.PREVIEW_URL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPO: ${{ github.repository }}
+          SHOAL_DIFF_BASE: origin/${{ github.base_ref }}
+        run: shoal diff

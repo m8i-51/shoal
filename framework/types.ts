@@ -23,6 +23,8 @@ export interface Finding {
   category: string;
   timestamp: string;
   screenshotPath?: string;
+  /** Playwright trace zip (per agent session) — replay with `npx playwright show-trace <path>` */
+  tracePath?: string;
 }
 
 /**
@@ -84,9 +86,3 @@ export interface RunLog {
   };
 }
 
-export interface ClosedIssue {
-  number: number;
-  title: string;
-  body: string;
-  labels: string[];
-}

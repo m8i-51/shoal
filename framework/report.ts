@@ -4,6 +4,7 @@ import type { Finding, RunLog, RegressionCheck } from "./types";
 import type { ProductSpec } from "./product-discovery";
 import type { TriageResult } from "./triage";
 import type { Scenario, ScenarioOutcome } from "./scenario-designer";
+import type { ExperienceScore } from "./experience-score";
 
 function esc(s: string): string {
   return s
@@ -48,6 +49,7 @@ export function generateReport(
   scenarios: Scenario[],
   agentAssignments: Map<string, { scenario?: Scenario; lens?: string }>,
   scenarioOutcomes: ScenarioOutcome[] = [],
+  experience: ExperienceScore | null = null,
 ): string {
   const reportPath = path.join(process.cwd(), "logs", `report_${runLog.runId}.html`);
 
@@ -99,6 +101,7 @@ export function generateReport(
   <h3 class="finding-title">${esc(f.title)}</h3>
   <p class="finding-body">${esc(f.body).replace(/\n/g, "<br>")}</p>
   ${imgData ? `<details class="screenshot-toggle"><summary>スクリーンショット</summary><img src="${imgData}" alt="screenshot" class="screenshot"></details>` : ""}
+  ${f.tracePath && fs.existsSync(f.tracePath) ? `<div class="trace-hint">▶ replay this session: <code>npx playwright show-trace ${esc(f.tracePath)}</code></div>` : ""}
 </div>`;
   }).join("\n");
 
@@ -219,6 +222,8 @@ export function generateReport(
     .assignment-tag.lens{color:#0369a1;background:#e0f2fe}
     .finding-title{font-size:.95rem;font-weight:600;margin-bottom:.35rem}
     .finding-body{font-size:.85rem;color:#475569}
+    .trace-hint{margin-top:.6rem;font-size:.75rem;color:#64748b}
+    .trace-hint code{background:#f1f5f9;border:1px solid #e2e8f0;border-radius:4px;padding:.1rem .4rem;font-size:.72rem;user-select:all}
     .screenshot-toggle{margin-top:.75rem}
     .screenshot-toggle summary{font-size:.8rem;color:#64748b;cursor:pointer;user-select:none}
     .screenshot{max-width:100%;max-height:400px;object-fit:contain;border:1px solid #e2e8f0;border-radius:4px;margin-top:.5rem;display:block}
@@ -241,6 +246,14 @@ export function generateReport(
   <section>
     <h2>Summary</h2>
     <div class="summary-grid">
+      ${experience ? (() => {
+        const scoreColor = experience.latest.score >= 70 ? "#22c55e" : experience.latest.score >= 40 ? "#f59e0b" : "#ef4444";
+        const deltaBadge = experience.delta == null ? ""
+          : experience.delta > 0 ? `<span style="font-size:.8rem;color:#22c55e;font-weight:700"> ▲${experience.delta}</span>`
+          : experience.delta < 0 ? `<span style="font-size:.8rem;color:#ef4444;font-weight:700"> ▼${Math.abs(experience.delta)}</span>`
+          : `<span style="font-size:.8rem;color:#94a3b8;font-weight:700"> ±0</span>`;
+        return `<div class="stat-card"><div class="number" style="color:${scoreColor}">${experience.latest.score}${deltaBadge}</div><div class="label">experience score</div></div>`;
+      })() : ""}
       <div class="stat-card"><div class="number">${findings.length}</div><div class="label">findings</div></div>
       <div class="stat-card"><div class="number">${triageResult.issued.length}</div><div class="label">→ Issues</div></div>
       <div class="stat-card"><div class="number">${triageResult.skipped.length}</div><div class="label">skipped</div></div>

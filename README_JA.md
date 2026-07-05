@@ -133,7 +133,21 @@ shoal は run のたびに学習する。
 
 **群れの集合知** — ペルソナデザイナーは `get_finding_hotspots` ツールを使い、過去の全 run の findings を URL エリア別に集計する。問題が集中しているエリアと未探索のエリアを把握したうえで、次に送り込むエージェントの構成を決める。
 
-どちらの機能も設定不要。run を重ねるほど自動的に精度が上がる。
+**エージェントの個人記憶** — 各ペルソナは直近数 run 分の自分の体験（何に苦労したか・何を報告したか・何を達成したか）を覚えている。次の run では「再訪ユーザー」として戻ってきて、まず前回苦労した箇所を確認し（改善されていれば improvement として報告、直っていなければ「前回から変わっていない」と再報告）、それから新しいエリアの探索に移る。findings に実ユーザーの継続的な関係性が生まれる。
+
+**再訪ユーザーセッション** — 各ブラウザエージェントの storage state（cookie / localStorage）はペルソナごとに `cache/sessions/` に保存され、次の run で復元される。エージェントは同じユーザーとして同じセッションでアプリに戻ってくる — ログインしたまま、前回作ったデータとともに。シナリオ設計にも run ごとに 1 つ再訪ユーザーの旅程（下書きの再開、蓄積したデータの確認）が含まれるため、空→蓄積・通知・セッション失効といったライフサイクル状態が実ユーザーの遭遇の仕方でテストされる。
+
+**マルチアクターシナリオ** — 本物の並行性バグは、2 人のユーザーが同じデータを同時に触る場所に潜んでいる。アカウントマネージャーが 2 つ以上の role を発見すると、シナリオデザイナーは run ごとに 1 つ、2 アクターのシナリオを生成する — 管理者がユーザーの操作中に権限を剥奪する、2 人が同じレコードを同時編集する、など。2 体のブラウザエージェントがそれぞれのアクターの role でログインして*同時に*演じ、更新されないままの古いデータ・黙って上書きされる編集・セッション途中で効かない権限変更を監視する。
+
+**群れのシグナル** — 同じ run のエージェントは黒板を共有する。`check_swarm_signals` ツールで他のエージェントが直前に報告した発見を確認でき、自分のいるエリアに関係するシグナルがあれば自分のペルソナで再現を試みる。複数の異なるペルソナで再現された発見は、triage でマージされて確度の高い issue になる。
+
+**環境ペルソナ** — 環境はペルソナの人格の一部。ペルソナデザイナーは採用するエージェントに実際のブラウジング環境 — スマホ（Playwright のデバイスエミュレーションによる実際のタッチ操作とモバイル viewport）、ロケール、ダークモード、reduced motion、遅い 3G 回線 — をその人の生活に合わせて割り当てられる。モバイルやアクセシビリティの finding が「推測」ではなく、その環境でアプリを実際に体験した結果になる。さらにブラウザエージェントは `run_a11y_audit` ツール（axe-core）を持ち、現在のページの WCAG 違反を実測できる — アクセシビリティ finding が具体的なルールと要素を証拠として引用するようになる。
+
+**採用フィードバック** — triage が issue を起票するとき、どの観点（lens / シナリオ）から生まれた指摘かを記録しておく。以降の run でチームがその issue をどう close したかを確認し（修正済み = *採用*、not planned = *不採用*）、採用率をペルソナ採用とシナリオ設計に還元する。チームが実際に動く指摘を出す観点は多く採用され、不採用が続く観点は減っていく（ただし完全には消えない — 不採用は優先度が低いだけの場合もあるため）。
+
+**Experience Score** — アプリの体験の健康度を 0–100 のスコアとして run 横断で追跡する。シナリオ達成率（ユーザーは目的を果たせたか）・摩擦（何手かかったか）・リグレッション（直したバグが再発していないか）の 3 つのシグナルを合成し、スコアとトレンド、前回比をダッシュボードと HTML レポート冒頭に表示する。アプリが本当に良くなっているかが一目で分かる。
+
+どの機能も設定不要。run を重ねるほど自動的に精度が上がる。
 
 ---
 
@@ -147,7 +161,17 @@ shoal は run のたびに学習する。
 | `MAX_BROWSERS` | `2` | ブラウザエージェントの最大数 |
 | `ANTHROPIC_API_KEY` | — | 必須 |
 | `ISSUE_TRACKERS` | — | 有効にするトラッカーをカンマ区切りで指定: `github`, `jira`, `notion`, `backlog`, `asana` |
+| `SHOAL_MODE` | `safe` | セーフティモード: `read-only` \| `safe` \| `full`（下記参照） |
+| `SHOAL_TRACE` | `1` | ブラウザエージェントのセッションを Playwright trace として記録（`0` で無効化）。各 finding からセッションの trace に辿れ、`npx playwright show-trace logs/traces/<run>/<agent>.zip` でエージェントが見たものをそのまま再生できる |
 | `REFRESH_SPEC` | — | `1` を設定するとプロダクト仕様を再探索する |
+
+**セーフティモード** — エージェントは探索中にデータを書き込むため、どこまで許可するかを選べる:
+
+- `read-only` — 一切書き込まない。ブラウザエージェントの mutation リクエスト（POST/PUT/PATCH/DELETE）をネットワーク層でブロックする。本番環境に向けても安全。
+- `safe`（デフォルト） — テストデータの作成・編集は許可するが、レコード削除・支払い・メールや招待の送信など不可逆な操作の直前で止まるようエージェントに指示する。
+- `full` — 制限なし。使い捨て環境でのみ使用すること。
+
+`safe` と `read-only` では、ターゲット設定で `destructive: true` を付けた API ツールがエージェントのツールセットから除外される。モードはダッシュボードの実行開始ダイアログでも run ごとに選択できる。
 
 **トラッカー別の設定変数**（使うものだけ設定）:
 
@@ -207,6 +231,54 @@ export const target = {
 
 ---
 
+## MCP サーバー — 修正ループを閉じる
+
+shoal は [MCP](https://modelcontextprotocol.io/) サーバーとして動作でき、Claude Code などのコーディングエージェントが **発見 → 修正 → 検証** のループを丸ごと回せる:
+
+```bash
+shoal mcp   # stdio transport
+```
+
+エージェント側の MCP 設定（例: `.mcp.json`）に登録する:
+
+```json
+{ "mcpServers": { "shoal": { "command": "shoal", "args": ["mcp"] } } }
+```
+
+公開ツール:
+
+| ツール | 役割 |
+|---|---|
+| `start_run` | 探索 run を開始（URL・エージェント数・セーフティモード） |
+| `get_run_status` | 進行状況の確認: findings 件数、regression 結果、ログ末尾 |
+| `list_findings` | run 横断で findings を取得（run / カテゴリ / テキストで絞り込み） |
+| `verify_fix` | 検証専用エージェント 1 体が該当 finding のフローをなぞり直し、`fixed` / `still_broken` / `inconclusive` を返す |
+| `get_experience_score` | Experience Score のトレンド — 修正で体験は本当に良くなったか |
+
+コーディングエージェントは `list_findings` で finding を選んで修正し、再デプロイして `verify_fix` を呼べば、報告されたフローそのままをエージェントがなぞって検証する — 人間を挟まずに「発見 → 修正 → 検証」のループが閉じる。
+
+---
+
+## PR Experience Diff
+
+テストが通るかではなく「この変更がユーザーにどう*感じられる*か」を PR ごとにフィードバックする:
+
+```bash
+shoal diff                    # origin/main との diff
+shoal diff --base origin/dev  # 任意の ref との diff
+```
+
+`shoal diff` は PR の変更ファイルをルートにマッピングし（Next.js の pages / app router、`views/`・`routes/` 規約に対応）、プレビュー環境のそのエリアへ小さい群れ（デフォルト: ブラウザ 2 体）を集中投下して、findings と Experience Score の変化を PR コメントとして投稿する:
+
+> **Experience Score: 72/100** (▲5 vs previous run)
+> Agents focused on the areas this PR touches: `/checkout`
+> 🐛 **[bug] Checkout button unresponsive** — Nadia
+> I tapped the checkout button and nothing happened.
+
+`GITHUB_TOKEN` がない場合は `logs/diff_<runId>.md` に保存される。CI 用の example は `.github/workflows/shoal-diff.example.yml` — PR ごとに `PREVIEW_URL` に対して実行する。
+
+---
+
 ## 定期実行
 
 staging 環境に週次で shoal を当てるには、GitHub Actions workflow をリポジトリに追加する。
@@ -221,6 +293,28 @@ mv shoal-weekly.example.yml .github/workflows/shoal-weekly.yml
 その後、リポジトリの **Actions secrets** (`Settings → Secrets and variables → Actions`) に `ANTHROPIC_API_KEY` を追加する。
 
 workflow は毎週月曜 09:00 UTC に自動実行され、Actions タブから手動実行もできる。発見した問題は組み込みの `GITHUB_TOKEN` を使って GitHub Issues として起票される。
+
+---
+
+## shoal-bench
+
+群れは実際どれくらい問題を検出できるのか？ `bench/` には**7 つのバグを仕込んだ**小さなストアアプリが同梱されている — 認証なしの管理画面、数量を無視するカート合計、サイレント保存失敗、alt 欠落、読めない低コントラストボタン、確認なし削除、リンク切れ — それぞれ `bench/labels.json` の正解ラベルに対応する。
+
+```bash
+npm run bench                       # ベンチアプリに群れを放って検出率を採点
+SHOAL_BENCH_MIN=60 npm run bench    # 検出率 60% 未満で非ゼロ終了（CI の回帰ゲート）
+```
+
+スコアラーが findings をラベルと突合し、検出レポートを出力する:
+
+```
+Detection rate: 5/7 (71%)
+  ✓ cart-total-wrong
+      └ "Cart total doesn't match item quantities"
+  ✗ low-contrast — The Buy button text is nearly the same color as its background
+```
+
+プロンプト・モデル・探索ロジックを変更したときの回帰テストとして使える。仕込みバグは直さないこと（アプリのテストスイートがバグの存在を固定している）。
 
 ---
 

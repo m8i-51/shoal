@@ -344,6 +344,40 @@ describe("updateCoverage", () => {
     const saved = JSON.parse(written) as Coverage;
     expect(saved.entries[0].byScenario["New employee task"]).toBe(1);
   });
+
+  it("extras の scenarioOutcomes と regression を永続化する", () => {
+    const outcomes = [
+      { scenarioId: "s1", scenarioTitle: "Task A", agentId: "a1", agentName: "Alice", achieved: true, reason: "done", iterations: 5 },
+      { scenarioId: "s2", scenarioTitle: "Task B", agentId: "a2", agentName: "Bob", achieved: false, reason: "stuck" },
+    ];
+
+    updateCoverage("run_1", [], new Map(), [], {
+      scenarioOutcomes: outcomes,
+      regression: { checked: 3, regressed: 1 },
+    });
+
+    const calls = vi.mocked(fs.writeFileSync).mock.calls;
+    const written = calls[calls.length - 1][1] as string;
+    const saved = JSON.parse(written) as Coverage;
+    expect(saved.entries[0].scenarioOutcomes).toEqual([
+      { scenarioTitle: "Task A", achieved: true, iterations: 5 },
+      { scenarioTitle: "Task B", achieved: false, iterations: null },
+    ]);
+    expect(saved.entries[0].regression).toEqual({ checked: 3, regressed: 1 });
+  });
+
+  it("outcomes が空・regression が checked=0 のときはフィールドを省略する", () => {
+    updateCoverage("run_1", [], new Map(), [], {
+      scenarioOutcomes: [],
+      regression: { checked: 0, regressed: 0 },
+    });
+
+    const calls = vi.mocked(fs.writeFileSync).mock.calls;
+    const written = calls[calls.length - 1][1] as string;
+    const saved = JSON.parse(written) as Coverage;
+    expect(saved.entries[0].scenarioOutcomes).toBeUndefined();
+    expect(saved.entries[0].regression).toBeUndefined();
+  });
 });
 
 describe("getLastRunPaths", () => {

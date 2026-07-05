@@ -52,7 +52,16 @@
     "advanced": "詳細設定",
     "llmBaseUrl": "LLM Base URL",
     "llmModel": "モデル",
-    "llmApiKey": "API キー"
+    "llmApiKey": "API キー",
+    "mode": "セーフティモード",
+    "modeReadOnly": "read-only — 書き込みなし",
+    "modeSafe": "safe — テストデータのみ（推奨）",
+    "modeFull": "full — 制限なし",
+    "modeHint": {
+      "read-only": "全ての書き込みをネットワーク層でブロックします。本番環境の観察に。",
+      "safe": "データ作成・編集は許可し、削除・支払い・送信などの不可逆操作を抑止します。",
+      "full": "制限なし。使い捨て環境でのみ使用してください。"
+    }
   },
   "duration": {
     "seconds": "{{count}}s",
@@ -95,5 +104,12 @@
     "placeholder": "例: ユーザーがサポートなしでオンボーディングを完了できる",
     "hint": "プロダクト理解エージェントが推論したゴールです。誤りがあれば修正してください。",
     "goalGapHint": "エージェントはこれらのゴール達成を妨げる問題を \"goal-gap\" として報告します。"
+  },
+  "experience": {
+    "title": "Experience Score",
+    "runCount": "直近 {{count}} run",
+    "achievement": "シナリオ達成率",
+    "friction": "平均手数",
+    "regression": "リグレッション率"
   }
 }

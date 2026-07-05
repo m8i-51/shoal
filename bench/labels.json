@@ -1,0 +1,37 @@
+[
+  {
+    "id": "admin-unprotected",
+    "description": "/admin is reachable without any authentication and exposes destructive controls",
+    "keywords": ["admin", "auth", "unauthorized", "unprotected", "no login", "without logging in", "permission", "access control"]
+  },
+  {
+    "id": "cart-total-wrong",
+    "description": "/cart total ignores quantities — it sums unit prices only",
+    "keywords": ["total", "calculation", "quantity", "sum", "incorrect", "wrong amount", "does not match", "miscalculat"]
+  },
+  {
+    "id": "silent-save-failure",
+    "description": "Adding an item with a name longer than 20 characters silently fails while appearing to succeed",
+    "keywords": ["silently", "not saved", "was not added", "did not appear", "disappeared", "no error", "lost", "never showed", "missing from the list"]
+  },
+  {
+    "id": "missing-alt-text",
+    "description": "The home page image has no alt attribute",
+    "keywords": ["alt", "screen reader", "alternative text", "image without", "accessibility of the image"]
+  },
+  {
+    "id": "low-contrast",
+    "description": "The Buy button text is nearly the same color as its background",
+    "keywords": ["contrast", "hard to read", "barely visible", "illegible", "hard to see", "unreadable"]
+  },
+  {
+    "id": "delete-no-confirm",
+    "description": "Delete happens immediately with no confirmation dialog and no undo",
+    "keywords": ["confirm", "undo", "accidental", "without warning", "immediately deleted", "no way to recover"]
+  },
+  {
+    "id": "broken-help-link",
+    "description": "The Help link in the navigation returns a 404",
+    "keywords": ["help", "404", "broken link", "not found", "dead link", "page does not exist"]
+  }
+]

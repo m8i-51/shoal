@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("../agent-loop", () => ({ createMessageWithRetry: vi.fn() }));
 
 import { createMessageWithRetry } from "../agent-loop";
-import { designScenarios } from "../scenario-designer";
+import { designScenarios, findMultiActorScenario, soloScenarios } from "../scenario-designer";
 import type { ProductSpec } from "../product-discovery";
 import type { LLMClient } from "../llm-client";
 
@@ -123,5 +123,67 @@ describe("designScenarios", () => {
       usage: {},
     } as never);
     expect(await designScenarios(makeSpec(), [], {} as LLMClient, "m")).toEqual([]);
+  });
+});
+
+describe("multi-actor scenarios", () => {
+  it("accountRoles が 2 種以上あればマルチアクターのヒントをプロンプトに含める", async () => {
+    vi.mocked(createMessageWithRetry).mockResolvedValue(makeToolUseResponse([]) as never);
+    await designScenarios(makeSpec(), [], {} as LLMClient, "m", 5, undefined, ["admin", "user", "user"]);
+    const [, params] = vi.mocked(createMessageWithRetry).mock.calls[0];
+    const content = params.messages[0].content as string;
+    expect(content).toContain("[Available Test Account Roles]");
+    expect(content).toContain("multi-actor");
+  });
+
+  it("accountRoles が 1 種以下ならヒントを含めない", async () => {
+    vi.mocked(createMessageWithRetry).mockResolvedValue(makeToolUseResponse([]) as never);
+    await designScenarios(makeSpec(), [], {} as LLMClient, "m", 5, undefined, ["user"]);
+    const [, params] = vi.mocked(createMessageWithRetry).mock.calls[0];
+    expect(params.messages[0].content as string).not.toContain("[Available Test Account Roles]");
+  });
+
+  it("actors が 2 件揃ったシナリオだけ actors を保持する", async () => {
+    vi.mocked(createMessageWithRetry).mockResolvedValue(makeToolUseResponse([
+      { title: "Solo", context: "c", goal: "g", constraints: "x" },
+      { title: "Pair", context: "c", goal: "g", constraints: "x", actors: [
+        { role: "admin", goal: "revoke access" },
+        { role: "user", goal: "finish editing" },
+      ] },
+      { title: "Broken", context: "c", goal: "g", constraints: "x", actors: [{ role: "admin", goal: "solo actor" }] },
+    ]) as never);
+    const result = await designScenarios(makeSpec(), [], {} as LLMClient, "m", 3);
+    expect(result[0].actors).toBeUndefined();
+    expect(result[1].actors).toEqual([
+      { role: "admin", goal: "revoke access" },
+      { role: "user", goal: "finish editing" },
+    ]);
+    expect(result[2].actors).toBeUndefined();
+  });
+
+  it("actors が 3 件以上でも先頭 2 件に切り詰める", async () => {
+    vi.mocked(createMessageWithRetry).mockResolvedValue(makeToolUseResponse([
+      { title: "Trio", context: "c", goal: "g", constraints: "x", actors: [
+        { role: "a", goal: "1" }, { role: "b", goal: "2" }, { role: "c", goal: "3" },
+      ] },
+    ]) as never);
+    const result = await designScenarios(makeSpec(), [], {} as LLMClient, "m", 1);
+    expect(result[0].actors).toHaveLength(2);
+  });
+});
+
+describe("findMultiActorScenario / soloScenarios", () => {
+  const pair = { id: "s1", title: "Pair", context: "", goal: "", constraints: "", actors: [
+    { role: "admin", goal: "g1" }, { role: "user", goal: "g2" },
+  ] };
+  const solo = { id: "s2", title: "Solo", context: "", goal: "", constraints: "" };
+
+  it("マルチアクターシナリオを 1 件返す", () => {
+    expect(findMultiActorScenario([solo, pair])).toBe(pair);
+    expect(findMultiActorScenario([solo])).toBeUndefined();
+  });
+
+  it("soloScenarios はマルチアクターを除外する", () => {
+    expect(soloScenarios([solo, pair])).toEqual([solo]);
   });
 });

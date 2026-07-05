@@ -41,6 +41,8 @@ export const target = {
   /**
    * Tools the API explorer agents can call.
    * Each tool maps to one API call in execute() below.
+   * Mark irreversible tools (delete, pay, send) with `destructive: true` —
+   * they are excluded unless SHOAL_MODE=full.
    */
   appTools: [
     {

@@ -3,12 +3,29 @@ import type { LLMClient } from "./llm-client";
 import { createMessageWithRetry } from "./agent-loop";
 import type { ProductSpec } from "./product-discovery";
 
+export interface ScenarioActor {
+  role: string; // e.g. "admin", "user" — should match an available test account role
+  goal: string; // what THIS actor tries to accomplish
+}
+
 export interface Scenario {
   id: string;
   title: string;
   context: string;    // Who the user is and their situation
   goal: string;       // What they want to accomplish
   constraints: string; // Special conditions (first-time user, under pressure, etc.)
+  /** Multi-actor scenario: two users act on the same data at the same time (concurrency / permission testing) */
+  actors?: ScenarioActor[];
+}
+
+/** 2 アクター揃ったマルチアクターシナリオだけを返す */
+export function findMultiActorScenario(scenarios: Scenario[]): Scenario | undefined {
+  return scenarios.find((s) => (s.actors?.length ?? 0) >= 2);
+}
+
+/** 通常のディスパッチに使う単独シナリオ（マルチアクターを除外） */
+export function soloScenarios(scenarios: Scenario[]): Scenario[] {
+  return scenarios.filter((s) => (s.actors?.length ?? 0) < 2);
 }
 
 export interface ScenarioOutcome {
@@ -18,6 +35,7 @@ export interface ScenarioOutcome {
   agentName: string;
   achieved: boolean;
   reason: string;
+  iterations?: number; // post_outcome 呼び出し時点のエージェントのイテレーション数（タスク完了までの手数）
 }
 
 const OUTPUT_SCENARIOS_TOOL: Anthropic.Tool = {
@@ -48,6 +66,18 @@ const OUTPUT_SCENARIOS_TOOL: Anthropic.Tool = {
               type: "string",
               description: "Special conditions: e.g. first time using this feature, in a hurry, unfamiliar with the approval flow, etc.",
             },
+            actors: {
+              type: "array",
+              description: "ONLY for a multi-actor scenario: exactly 2 actors who use the app AT THE SAME TIME on the same data (e.g. an admin changing permissions while a user is mid-task, or two users editing the same record). Each actor's role should match an available test account role. Omit for normal single-user scenarios.",
+              items: {
+                type: "object",
+                properties: {
+                  role: { type: "string", description: "Actor's role — should match an available test account role" },
+                  goal: { type: "string", description: "What this actor tries to accomplish, concurrently with the other actor" },
+                },
+                required: ["role", "goal"],
+              },
+            },
           },
           required: ["title", "context", "goal", "constraints"],
         },
@@ -64,6 +94,7 @@ export async function designScenarios(
   model: string,
   count: number = 5,
   coverageSummary?: string,
+  accountRoles: string[] = [],
 ): Promise<Scenario[]> {
   console.log("\n[scenario-designer] generating scenarios...");
 
@@ -73,6 +104,11 @@ export async function designScenarios(
 
   const coverageHints = coverageSummary
     ? `\n[Coverage History — adjust scenarios to explore underrepresented areas]\n${coverageSummary}`
+    : "";
+
+  const distinctRoles = [...new Set(accountRoles)];
+  const multiActorHint = distinctRoles.length >= 2
+    ? `\n[Available Test Account Roles]\n${distinctRoles.map((r) => `- ${r}`).join("\n")}\nSince multiple roles are available, make EXACTLY ONE scenario a multi-actor scenario: set its "actors" field to 2 actors (roles from the list above) who use the app AT THE SAME TIME in a way that could conflict — e.g. an admin revoking access while a user is mid-flow, or two users editing the same record concurrently.`
     : "";
 
   const response = await createMessageWithRetry(client, {
@@ -94,7 +130,7 @@ ${spec.appDescription}
 ${spec.targetUsers}
 
 [Implemented Features]
-${spec.features}${spec.uiFeatures ? `\n\n[UI-Only Features]\n${spec.uiFeatures}` : ""}${issueHints}${coverageHints}
+${spec.features}${spec.uiFeatures ? `\n\n[UI-Only Features]\n${spec.uiFeatures}` : ""}${issueHints}${coverageHints}${multiActorHint}
 
 Guidelines:
 - Each scenario should be a realistic user task (not "find the bug")
@@ -103,6 +139,7 @@ Guidelines:
 - Make goals specific and actionable (not vague like "use the app")
 - If open issues hint at risky areas, design natural scenarios that pass through those areas
 - If coverage history shows underrepresented areas or lenses, bias scenarios toward those gaps
+- If coverage history shows previous runs (this is NOT the first run), include exactly one RETURNING-USER scenario: a user coming back to data they created before — resuming a draft, reviewing accumulated items, checking what changed since their last visit
 - Constraints should reflect realistic user states (first time, in a hurry, confused, etc.)
 
 Call output_scenarios with exactly ${count} scenarios.`,
@@ -119,23 +156,32 @@ Call output_scenarios with exactly ${count} scenarios.`,
     return [];
   }
 
-  const raw = toolUse.input as { scenarios: { title: string; context: string; goal: string; constraints: string }[] };
+  const raw = toolUse.input as { scenarios: { title: string; context: string; goal: string; constraints: string; actors?: { role: string; goal: string }[] }[] };
 
   if (!Array.isArray(raw.scenarios) || raw.scenarios.length === 0) {
     console.warn("[scenario-designer] empty scenarios array returned");
     return [];
   }
 
-  const scenarios: Scenario[] = raw.scenarios.map((s, i) => ({
-    id: `scenario_${i + 1}`,
-    title: String(s.title),
-    context: String(s.context),
-    goal: String(s.goal),
-    constraints: String(s.constraints),
-  }));
+  const scenarios: Scenario[] = raw.scenarios.map((s, i) => {
+    const actors = Array.isArray(s.actors)
+      ? s.actors
+          .filter((a) => a && typeof a.role === "string" && typeof a.goal === "string")
+          .slice(0, 2)
+          .map((a) => ({ role: String(a.role), goal: String(a.goal) }))
+      : [];
+    return {
+      id: `scenario_${i + 1}`,
+      title: String(s.title),
+      context: String(s.context),
+      goal: String(s.goal),
+      constraints: String(s.constraints),
+      ...(actors.length === 2 ? { actors } : {}),
+    };
+  });
 
   console.log(`[scenario-designer] generated ${scenarios.length} scenarios:`);
-  scenarios.forEach((s) => console.log(`  - [${s.id}] ${s.title}`));
+  scenarios.forEach((s) => console.log(`  - [${s.id}] ${s.title}${s.actors ? ` (multi-actor: ${s.actors.map((a) => a.role).join(" × ")})` : ""}`));
 
   return scenarios;
 }

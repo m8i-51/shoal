@@ -9,7 +9,7 @@ export interface OrgDesign {
 
 // Evaluation lenses always included regardless of app type / アプリ種別に関わらず常に含める観点
 export const UNIVERSAL_LENSES = [
-  "Accessibility: keyboard navigation, screen reader compatibility, error message clarity, non-color-dependent information, sufficient contrast, focus indicators / アクセシビリティ観点",
+  "Accessibility: keyboard navigation, screen reader compatibility, error message clarity, non-color-dependent information, sufficient contrast, focus indicators — browser agents should call the run_a11y_audit tool for measured WCAG evidence / アクセシビリティ観点",
   "Security: missing auth checks, input validation gaps, excessive error detail exposure, CSRF exposure, sensitive data in URLs / セキュリティ観点",
   "Business logic: calculation accuracy, status transitions, approval flow correctness, edge case handling in forms / ビジネスロジック観点",
   "Data integrity: UI reflects actual state after actions, silent save failures, optimistic update inconsistencies / データ整合性観点",

@@ -11,6 +11,7 @@ export function StartModal({ onClose, onStarted }: Props) {
   const [baseUrl, setBaseUrl] = useState("http://localhost:3000");
   const [maxBrowsers, setMaxBrowsers] = useState(2);
   const [maxExplorers, setMaxExplorers] = useState(0);
+  const [mode, setMode] = useState("safe");
   const [llmBaseUrl, setLlmBaseUrl] = useState("");
   const [llmApiKey, setLlmApiKey] = useState("");
   const [llmModel, setLlmModel] = useState("");
@@ -19,7 +20,7 @@ export function StartModal({ onClose, onStarted }: Props) {
 
   const handleStart = async () => {
     setLoading(true);
-    const body: Record<string, unknown> = { baseUrl, maxBrowsers, maxExplorers };
+    const body: Record<string, unknown> = { baseUrl, maxBrowsers, maxExplorers, mode };
     if (llmBaseUrl) body.llmBaseUrl = llmBaseUrl;
     if (llmApiKey) body.llmApiKey = llmApiKey;
     if (llmModel) body.llmModel = llmModel;
@@ -84,6 +85,16 @@ export function StartModal({ onClose, onStarted }: Props) {
               />
             </label>
           </div>
+
+          <label style={styles.label}>
+            {t("startModal.mode")}
+            <select value={mode} onChange={(e) => setMode(e.target.value)} style={styles.input}>
+              <option value="read-only">{t("startModal.modeReadOnly")}</option>
+              <option value="safe">{t("startModal.modeSafe")}</option>
+              <option value="full">{t("startModal.modeFull")}</option>
+            </select>
+            <span style={styles.modeHint}>{t(`startModal.modeHint.${mode}`)}</span>
+          </label>
 
           <button
             type="button"
@@ -194,6 +205,11 @@ const styles = {
     width: "100%",
     color: "#1e293b",
     background: "#fff",
+  },
+  modeHint: {
+    fontSize: "0.7rem",
+    fontWeight: 400,
+    color: "#94a3b8",
   },
   advancedToggle: {
     background: "none",

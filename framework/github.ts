@@ -1,4 +1,4 @@
-import type { ClosedIssue } from "./types";
+import type { ClosedIssue } from "./trackers/types";
 
 interface GitHubOptions {
   token: string;
@@ -39,11 +39,13 @@ export async function fetchClosedIssues({ token, repo }: GitHubOptions): Promise
   );
   const data = await res.json();
   if (!Array.isArray(data)) return [];
-  return data.map((issue: { number: number; title: string; body: string; labels: { name: string }[] }) => ({
+  return data.map((issue: { number: number; title: string; body: string; labels: { name: string }[]; html_url?: string; state_reason?: string | null }) => ({
     number: issue.number,
     title: issue.title,
     body: issue.body ?? "",
     labels: issue.labels.map((l) => l.name),
+    url: issue.html_url,
+    stateReason: issue.state_reason ?? null,
   }));
 }
 
