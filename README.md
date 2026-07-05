@@ -256,6 +256,26 @@ A coding agent can pick the top finding, fix the code, redeploy, run `start_run`
 
 ---
 
+## PR Experience Diff
+
+Get per-PR feedback on how a change *feels* to users, not just whether tests pass:
+
+```bash
+shoal diff                    # diff vs origin/main
+shoal diff --base origin/dev  # diff vs any ref
+```
+
+`shoal diff` maps the PR's changed files to routes (Next.js pages/app router and `views/`/`routes/` conventions), sends a small focused swarm (2 browser agents by default) to those areas of your preview deployment, and posts a summary as a PR comment — findings, plus the Experience Score delta:
+
+> **Experience Score: 72/100** (▲5 vs previous run)
+> Agents focused on the areas this PR touches: `/checkout`
+> 🐛 **[bug] Checkout button unresponsive** — Nadia
+> I tapped the checkout button and nothing happened.
+
+If `GITHUB_TOKEN` isn't available the summary is saved to `logs/diff_<runId>.md` instead. For CI, `shoal init`'s example lives at `.github/workflows/shoal-diff.example.yml` — it runs on every PR against your `PREVIEW_URL`.
+
+---
+
 ## Scheduled runs
 
 To run shoal weekly against a staging environment, add a GitHub Actions workflow to your repo.

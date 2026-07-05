@@ -9,6 +9,7 @@
  *   shoal          # run agents from the terminal
  *   shoal triage   # triage-only mode
  *   shoal mcp      # MCP server on stdio (for coding agents)
+ *   shoal diff     # focused run on PR-changed routes + summary comment
  */
 import { spawn, spawnSync } from "child_process";
 import { fileURLToPath } from "url";
@@ -57,6 +58,7 @@ async function main() {
     serve: "server/index.ts",
     triage: "triage-only.ts",
     mcp: "server/mcp.ts",
+    diff: "diff.ts",
   };
   const script = scriptMap[subcommand] ?? "run.ts";
 

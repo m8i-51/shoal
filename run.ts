@@ -89,6 +89,22 @@ const { client, defaultModel, provider: llmProvider } = createLLMClient();
 // Playwright trace — ブラウザエージェントのセッションを丸ごと記録する（SHOAL_TRACE=0 で無効化）
 const TRACE_ENABLED = process.env.SHOAL_TRACE !== "0";
 
+// PR Experience Diff などで探索を特定パスに集中させる（カンマ区切り）
+const FOCUS_PATHS = (process.env.SHOAL_FOCUS_PATHS ?? "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+if (FOCUS_PATHS.length > 0) console.log(`[focus] exploration focused on: ${FOCUS_PATHS.join(", ")}`);
+
+function focusPrompt(): string {
+  if (FOCUS_PATHS.length === 0) return "";
+  return `
+[Focus Paths for This Run]
+Recent code changes affect these areas — spend most of your session here:
+${FOCUS_PATHS.map((p) => `- ${p}`).join("\n")}
+Explore these paths first and in depth. Only wander elsewhere once they are exhausted.`;
+}
+
 function traceZipPath(runId: string, agentId: string): string {
   return path.join(process.cwd(), "logs", "traces", runId, `${agentId}.zip`);
 }
@@ -382,7 +398,7 @@ ${productSpec.uiFeatures ? `\n[UI-Only Features]\nThese features exist in the UI
     ? `\n[Your Task for This Run]\nTitle: ${assignment.scenario.title}\nYou are: ${assignment.scenario.context}\nGoal: ${assignment.scenario.goal}\nConstraints: ${assignment.scenario.constraints}\n\nFocus on completing this task naturally. Report any issues you encounter along the way.\nWhen done (or if you cannot complete the goal), call post_outcome with achieved=true/false and a brief reason.\n`
     : assignment.lens
     ? `\n[Focus Area for This Run]\n${assignment.lens}\nKeep this perspective in mind and prioritize reporting related issues.\n`
-    : ""}${formatAgentMemories(agent)}${guardrailPrompt(SHOAL_MODE)}
+    : ""}${focusPrompt()}${formatAgentMemories(agent)}${guardrailPrompt(SHOAL_MODE)}
 Take 3–5 actions, then finish.`;
 
   await runAgentLoop(agentLog, systemPrompt, EXPLORER_TOOLS, client, defaultModel, makeExecutor(agentLog, scenarioOutcomes, assignment.scenario));
@@ -1073,7 +1089,7 @@ ${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\
     ? `\n[Your Task for This Run]\nTitle: ${assignment.scenario.title}\nYou are: ${assignment.scenario.context}\nGoal: ${assignment.scenario.goal}\nConstraints: ${assignment.scenario.constraints}\n\nFocus on completing this task naturally as this user. Report any issues you encounter along the way.\nWhen done (or if you cannot complete the goal), call post_outcome with achieved=true/false and a brief reason.`
     : assignment.lens
     ? `\n[Focus Area for This Run]\n${assignment.lens}\nKeep this perspective in mind and prioritize reporting related issues.`
-    : ""}${describeEnvironment(agent.environment)}${sessionContinuityPrompt(hasAgentSession(agent.id))}${formatAgentMemories(agent)}${guardrailPrompt(SHOAL_MODE)}`;
+    : ""}${focusPrompt()}${describeEnvironment(agent.environment)}${sessionContinuityPrompt(hasAgentSession(agent.id))}${formatAgentMemories(agent)}${guardrailPrompt(SHOAL_MODE)}`;
 
   await page.goto(BASE_URL, { waitUntil: "networkidle" });
   await page.waitForTimeout(5000);
@@ -1267,8 +1283,11 @@ async function main() {
     }
 
     // 4.8. scenario design（role が 2 つ以上あればマルチアクターシナリオも生成される）
+    const scenarioContext = FOCUS_PATHS.length > 0
+      ? `${designContext}\n\n[Focus Paths]\nRecent code changes affect: ${FOCUS_PATHS.join(", ")} — bias scenarios toward journeys that pass through these areas.`
+      : designContext;
     const scenarios = await designScenarios(
-      productSpec, openIssues, client, defaultModel, 5, designContext,
+      productSpec, openIssues, client, defaultModel, 5, scenarioContext,
       testAccounts.map((a) => a.role),
     );
 

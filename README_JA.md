@@ -258,6 +258,26 @@ shoal mcp   # stdio transport
 
 ---
 
+## PR Experience Diff
+
+テストが通るかではなく「この変更がユーザーにどう*感じられる*か」を PR ごとにフィードバックする:
+
+```bash
+shoal diff                    # origin/main との diff
+shoal diff --base origin/dev  # 任意の ref との diff
+```
+
+`shoal diff` は PR の変更ファイルをルートにマッピングし（Next.js の pages / app router、`views/`・`routes/` 規約に対応）、プレビュー環境のそのエリアへ小さい群れ（デフォルト: ブラウザ 2 体）を集中投下して、findings と Experience Score の変化を PR コメントとして投稿する:
+
+> **Experience Score: 72/100** (▲5 vs previous run)
+> Agents focused on the areas this PR touches: `/checkout`
+> 🐛 **[bug] Checkout button unresponsive** — Nadia
+> I tapped the checkout button and nothing happened.
+
+`GITHUB_TOKEN` がない場合は `logs/diff_<runId>.md` に保存される。CI 用の example は `.github/workflows/shoal-diff.example.yml` — PR ごとに `PREVIEW_URL` に対して実行する。
+
+---
+
 ## 定期実行
 
 staging 環境に週次で shoal を当てるには、GitHub Actions workflow をリポジトリに追加する。
