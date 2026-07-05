@@ -39,7 +39,7 @@ import {
 } from "./framework/observation";
 import { discoverProduct, loadCachedSpec, type ProductSpec } from "./framework/product-discovery";
 import { designOrg, UNIVERSAL_LENSES } from "./framework/org-designer";
-import { designScenarios, type Scenario, type ScenarioOutcome } from "./framework/scenario-designer";
+import { designScenarios, findMultiActorScenario, soloScenarios, type Scenario, type ScenarioActor, type ScenarioOutcome } from "./framework/scenario-designer";
 import { runTriageAgent } from "./framework/triage";
 import { generateReport } from "./framework/report";
 import type { AgentLog, Finding, RegressionCheck } from "./framework/types";
@@ -92,6 +92,13 @@ const TRACE_ENABLED = process.env.SHOAL_TRACE !== "0";
 function traceZipPath(runId: string, agentId: string): string {
   return path.join(process.cwd(), "logs", "traces", runId, `${agentId}.zip`);
 }
+
+// エージェントへの割り当て。actor はマルチアクターシナリオで同時に動く役割
+type Assignment = {
+  scenario?: Scenario;
+  lens?: string;
+  actor?: ScenarioActor & { partnerRole: string };
+};
 
 // ================================================================
 // Screenshots
@@ -325,7 +332,7 @@ function makeExecutor(agentLog: AgentLog, scenarioOutcomes: ScenarioOutcome[], s
 async function runExplorer(
   agent: Agent,
   productSpec: ProductSpec,
-  assignment: { scenario?: Scenario; lens?: string } = {},
+  assignment: Assignment = {},
   scenarioOutcomes: ScenarioOutcome[] = [],
 ) {
   const assignmentLabel = assignment.scenario
@@ -988,7 +995,7 @@ async function runBrowserAgent(
   agent: Agent,
   page: Page,
   productSpec: ProductSpec,
-  assignment: { scenario?: Scenario; lens?: string } = {},
+  assignment: Assignment = {},
   scenarioOutcomes: ScenarioOutcome[] = [],
 ): Promise<BrowserAgentLog> {
   const assignmentLabel = assignment.scenario
@@ -1060,7 +1067,9 @@ When writing the body, match the tone to the category:
 
 [Reference: Implemented Features]
 ${productSpec.features}
-${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${goalsSection(productSpec)}${assignment.scenario
+${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${goalsSection(productSpec)}${assignment.actor && assignment.scenario
+    ? `\n[Your Task for This Run — Two-User Scenario]\nTitle: ${assignment.scenario.title}\nSituation: ${assignment.scenario.context}\nYou are the "${assignment.actor.role}" actor. Your goal: ${assignment.actor.goal}\n\nRIGHT NOW another agent is using this app as "${assignment.actor.partnerRole}" — your actions and theirs may affect the same data at the same time.\nWhile completing your goal, pay special attention to concurrency and permission issues:\n- data that goes stale and never refreshes after the other user changes it\n- conflicting edits that silently overwrite each other\n- permission or status changes that do not take effect (or take effect inconsistently) mid-session\n- realtime updates, locks, or notifications that never arrive\nReport such issues with post_feedback (usually category "bug").\nWhen done (or if you cannot complete the goal), call post_outcome with achieved=true/false and a brief reason.`
+    : assignment.scenario
     ? `\n[Your Task for This Run]\nTitle: ${assignment.scenario.title}\nYou are: ${assignment.scenario.context}\nGoal: ${assignment.scenario.goal}\nConstraints: ${assignment.scenario.constraints}\n\nFocus on completing this task naturally as this user. Report any issues you encounter along the way.\nWhen done (or if you cannot complete the goal), call post_outcome with achieved=true/false and a brief reason.`
     : assignment.lens
     ? `\n[Focus Area for This Run]\n${assignment.lens}\nKeep this perspective in mind and prioritize reporting related issues.`
@@ -1188,7 +1197,7 @@ function pickAgents<T>(agents: T[], count: number): T[] {
 }
 
 // 7:3 ratio: indices where (idx % 10) < 7 get a scenario, rest get a lens
-function pickAssignment(idx: number, scenarios: Scenario[]): { scenario?: Scenario; lens?: string } {
+function pickAssignment(idx: number, scenarios: Scenario[]): Assignment {
   if (scenarios.length > 0 && idx % 10 < 7) {
     return { scenario: scenarios[idx % scenarios.length] };
   }
@@ -1234,11 +1243,11 @@ async function main() {
       : coverageSummary.formatted;
     const orgDesign = await designOrg(productSpec, client, defaultModel, designContext);
 
-    // 4. open issues + scenario design (both feed into HR)
+    // 4. open issues
     const openIssues = await trackers.fetchOpenIssues();
-    const scenarios = await designScenarios(productSpec, openIssues, client, defaultModel, 5, designContext);
 
     // 4.5. Account Manager（credentials が設定されている場合のみ）
+    // シナリオ設計より先に実行し、利用可能な role をマルチアクターシナリオ生成に渡す
     let testAccounts: TestAccount[] = [];
     if (targetConfig.credentials) {
       const accountContext = await browser.newContext({ viewport: { width: 1024, height: 640 } });
@@ -1256,6 +1265,12 @@ async function main() {
         await accountContext.close();
       }
     }
+
+    // 4.8. scenario design（role が 2 つ以上あればマルチアクターシナリオも生成される）
+    const scenarios = await designScenarios(
+      productSpec, openIssues, client, defaultModel, 5, designContext,
+      testAccounts.map((a) => a.role),
+    );
 
     // 5. HR agent
     const lastRunPaths = getLastRunPaths();
@@ -1279,7 +1294,10 @@ async function main() {
     console.log(`\nexplorers: ${explorerAgents.length} (max: ${MAX_EXPLORERS}) / regression: 1`);
 
     // agentId → assignment（coverage 計算・レポート生成に使う）
-    const agentAssignments = new Map<string, { scenario?: Scenario; lens?: string }>();
+    const agentAssignments = new Map<string, Assignment>();
+
+    // 通常ディスパッチにはマルチアクターを除いた単独シナリオを使う
+    const dispatchScenarios = soloScenarios(scenarios);
 
     // シナリオ/レンズ割り当てのグローバルカウンタ（7:3 比率）
     let dispatchIdx = 0;
@@ -1288,7 +1306,7 @@ async function main() {
     for (let i = 0; i < explorerAgents.length; i += CONCURRENCY) {
       const batch = explorerAgents.slice(i, i + CONCURRENCY);
       await Promise.all(batch.map((agent) => {
-        const assignment = pickAssignment(dispatchIdx++, scenarios);
+        const assignment = pickAssignment(dispatchIdx++, dispatchScenarios);
         agentAssignments.set(agent.id, assignment);
         return runExplorer(agent, productSpec, assignment, scenarioOutcomes);
       }));
@@ -1305,7 +1323,7 @@ async function main() {
       await runRegressionAgent(regressionAgent, closedIssues, productSpec);
     } else {
       console.log("\n[regression] no closed issues — running as explorer");
-      const assignment = pickAssignment(dispatchIdx++, scenarios);
+      const assignment = pickAssignment(dispatchIdx++, dispatchScenarios);
       agentAssignments.set(regressionAgent.id, assignment);
       await runExplorer(regressionAgent, productSpec, assignment, scenarioOutcomes);
     }
@@ -1315,19 +1333,34 @@ async function main() {
     console.log(`\nlaunching ${browserAgents.length} browser agents in parallel (max: ${MAX_BROWSERS})`);
     browserAgents.forEach((a) => console.log(`  - ${a.name} (${a.role})`));
 
+    // マルチアクターシナリオ: ブラウザエージェント 2 体を同一シナリオの同時アクターにする
+    const pairAssignments = new Map<string, Assignment>();
+    const multiScenario = findMultiActorScenario(scenarios);
+    if (multiScenario?.actors && browserAgents.length >= 2) {
+      const [actorA, actorB] = multiScenario.actors;
+      pairAssignments.set(browserAgents[0].id, { scenario: multiScenario, actor: { ...actorA, partnerRole: actorB.role } });
+      pairAssignments.set(browserAgents[1].id, { scenario: multiScenario, actor: { ...actorB, partnerRole: actorA.role } });
+      console.log(`[multi-actor] "${multiScenario.title}" — ${browserAgents[0].name} as ${actorA.role} × ${browserAgents[1].name} as ${actorB.role}`);
+    }
+
     await sleep(2000);
     const browserLogs = await Promise.all(
       browserAgents.map(async (agent) => {
-        const assignment = pickAssignment(dispatchIdx++, scenarios);
+        const assignment = pairAssignments.get(agent.id) ?? pickAssignment(dispatchIdx++, dispatchScenarios);
         agentAssignments.set(agent.id, assignment);
 
-        // 前回の run の自分のセッション（cookie / localStorage）があれば「再訪ユーザー」として復元する。
-        // なければロールが一致するテストアカウントの storageState を使う
-        const matchedAccount = testAccounts.find((a) => a.role === agent.role && a.storageStatePath);
+        // storageState の優先順位:
+        // 1. マルチアクターの場合は actor のロールに合うテストアカウント（権限が本質なので最優先）
+        // 2. 前回の run の自分のセッション（「再訪ユーザー」）
+        // 3. エージェントのロールに合うテストアカウント
+        const accountRole = assignment.actor?.role ?? agent.role;
+        const matchedAccount = testAccounts.find((a) => a.role === accountRole && a.storageStatePath);
         const baseOptions: Parameters<typeof browser.newContext>[0] = {
           viewport: { width: 1024, height: 640 },
         };
-        if (hasAgentSession(agent.id)) {
+        if (assignment.actor && matchedAccount?.storageStatePath) {
+          baseOptions.storageState = matchedAccount.storageStatePath;
+        } else if (hasAgentSession(agent.id)) {
           baseOptions.storageState = agentSessionPath(agent.id);
           console.log(`[session] ${agent.name} returns with their previous session`);
         } else if (matchedAccount?.storageStatePath) {
