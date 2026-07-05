@@ -270,7 +270,7 @@ run 単位の HTML レポート (`framework/report.ts`) に使われるだけで
 | 9 | 時間旅行ペルソナ (案7) | ✅ 実装済み（セッション継続 + 再訪シナリオ） | 案2の記憶基盤の上に載せる |
 | 10 | shoal-bench (案10) | ✅ 実装済み（`npm run bench`） | いつでも着手可能だが、機能が揃うほど価値が上がる |
 
-ロードマップの全項目が実装済み。今後の発展候補:
-- axe-core による a11y 実測監査（環境ペルソナの段階投入分）
-- `verify_fix(findingId)` — 単一 finding 特化の検証 run（MCP ツール追加）
-- shoal-bench のバグバリエーション拡充とモデル別スコアの README 掲示
+ロードマップの全項目が実装済み。発展候補も以下の通り消化:
+- ✅ axe-core による a11y 実測監査 — ブラウザエージェントの `run_a11y_audit` ツール
+- ✅ `verify_fix(findingId)` — 単一 finding 特化の検証 run（MCP ツール）
+- 未着手: shoal-bench のバグバリエーション拡充とモデル別スコアの README 掲示
