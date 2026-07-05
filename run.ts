@@ -23,6 +23,7 @@ import { updateAdoption } from "./framework/adoption";
 import { getShoalMode, filterAppTools, applyBrowserGuardrails, guardrailPrompt } from "./framework/guardrails";
 import { buildContextOptions, sanitizeEnvironment, describeEnvironment, applyNetworkThrottle, SUGGESTED_DEVICES, type EnvironmentProfile } from "./framework/environment";
 import { agentSessionPath, hasAgentSession, saveAgentSession, sessionContinuityPrompt } from "./framework/session-store";
+import { runA11yAudit, formatAuditForAgent } from "./framework/a11y-audit";
 import { loadPageHashes, updatePageHashes, hashContent } from "./framework/page-cache";
 import { loadPersonaPack, formatPackForPrompt, type PersonaPack } from "./framework/persona-pack";
 import { buildTrackers } from "./framework/trackers/index";
@@ -700,6 +701,11 @@ const BROWSER_TOOLS: Anthropic.Tool[] = [
   ...(MAX_EXPLORERS > 0 ? APP_TOOLS.map((t) => ({ ...t, description: `[API check] ${t.description}` })) : []),
   SWARM_SIGNALS_TOOL,
   {
+    name: "run_a11y_audit",
+    description: "Run an automated WCAG accessibility audit (axe-core) on the CURRENT page. Returns measured violations (contrast, missing alt, labels, ARIA…) with impact levels and affected elements. Use it when your persona or lens involves accessibility, or when a page feels hard to read or navigate — then cite the specific rules and elements as evidence in post_feedback. / 現在のページで axe-core による WCAG 監査を実行し、実測の違反一覧を得る",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
     name: "view_screen",
     description: "Capture the current screen. / 現在の画面を確認する",
     input_schema: { type: "object", properties: {}, required: [] },
@@ -949,6 +955,12 @@ async function executeBrowserTool(
           console.log(`  ${achieved ? "✓" : "✗"} [outcome] "${scenario.title}": ${achieved ? "achieved" : "NOT achieved"} — ${reason}`);
         }
         resultText = "Outcome recorded.";
+        break;
+      }
+      case "run_a11y_audit": {
+        const audit = await runA11yAudit(page);
+        resultText = formatAuditForAgent(audit);
+        console.log(`  [a11y] ${audit.summary}`);
         break;
       }
       case "check_swarm_signals": {
