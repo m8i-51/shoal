@@ -225,6 +225,33 @@ Alternatively, copy `targets/example.ts`, register it in `targets/index.ts`, and
 
 ---
 
+## MCP server — close the fix loop
+
+shoal can act as an [MCP](https://modelcontextprotocol.io/) server, so coding agents like Claude Code can drive the full **find → fix → verify** loop:
+
+```bash
+shoal mcp   # stdio transport
+```
+
+Register it in your agent's MCP config (e.g. `.mcp.json`):
+
+```json
+{ "mcpServers": { "shoal": { "command": "shoal", "args": ["mcp"] } } }
+```
+
+Exposed tools:
+
+| Tool | Purpose |
+|---|---|
+| `start_run` | Launch an exploration run (URL, agent counts, safety mode) |
+| `get_run_status` | Poll progress: findings so far, regression results, log tail |
+| `list_findings` | Read findings across runs, filtered by run / category / text |
+| `get_experience_score` | Cross-run Experience Score trend — did the fix actually improve the experience? |
+
+A coding agent can pick the top finding, fix the code, redeploy, run `start_run` again, and confirm the regression agent verifies the fix and the Experience Score moves up.
+
+---
+
 ## Scheduled runs
 
 To run shoal weekly against a staging environment, add a GitHub Actions workflow to your repo.

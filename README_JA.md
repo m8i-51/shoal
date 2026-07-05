@@ -227,6 +227,33 @@ export const target = {
 
 ---
 
+## MCP サーバー — 修正ループを閉じる
+
+shoal は [MCP](https://modelcontextprotocol.io/) サーバーとして動作でき、Claude Code などのコーディングエージェントが **発見 → 修正 → 検証** のループを丸ごと回せる:
+
+```bash
+shoal mcp   # stdio transport
+```
+
+エージェント側の MCP 設定（例: `.mcp.json`）に登録する:
+
+```json
+{ "mcpServers": { "shoal": { "command": "shoal", "args": ["mcp"] } } }
+```
+
+公開ツール:
+
+| ツール | 役割 |
+|---|---|
+| `start_run` | 探索 run を開始（URL・エージェント数・セーフティモード） |
+| `get_run_status` | 進行状況の確認: findings 件数、regression 結果、ログ末尾 |
+| `list_findings` | run 横断で findings を取得（run / カテゴリ / テキストで絞り込み） |
+| `get_experience_score` | Experience Score のトレンド — 修正で体験は本当に良くなったか |
+
+コーディングエージェントは top finding を選んで修正し、再デプロイして `start_run` を再実行すれば、regression agent による修正の検証と Experience Score の変化を確認できる。
+
+---
+
 ## 定期実行
 
 staging 環境に週次で shoal を当てるには、GitHub Actions workflow をリポジトリに追加する。

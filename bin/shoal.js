@@ -8,6 +8,7 @@
  *   shoal serve    # web dashboard at http://localhost:4000
  *   shoal          # run agents from the terminal
  *   shoal triage   # triage-only mode
+ *   shoal mcp      # MCP server on stdio (for coding agents)
  */
 import { spawn, spawnSync } from "child_process";
 import { fileURLToPath } from "url";
@@ -55,6 +56,7 @@ async function main() {
   const scriptMap = {
     serve: "server/index.ts",
     triage: "triage-only.ts",
+    mcp: "server/mcp.ts",
   };
   const script = scriptMap[subcommand] ?? "run.ts";
 
