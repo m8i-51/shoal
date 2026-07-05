@@ -252,9 +252,10 @@ shoal mcp   # stdio transport
 | `start_run` | 探索 run を開始（URL・エージェント数・セーフティモード） |
 | `get_run_status` | 進行状況の確認: findings 件数、regression 結果、ログ末尾 |
 | `list_findings` | run 横断で findings を取得（run / カテゴリ / テキストで絞り込み） |
+| `verify_fix` | 検証専用エージェント 1 体が該当 finding のフローをなぞり直し、`fixed` / `still_broken` / `inconclusive` を返す |
 | `get_experience_score` | Experience Score のトレンド — 修正で体験は本当に良くなったか |
 
-コーディングエージェントは top finding を選んで修正し、再デプロイして `start_run` を再実行すれば、regression agent による修正の検証と Experience Score の変化を確認できる。
+コーディングエージェントは `list_findings` で finding を選んで修正し、再デプロイして `verify_fix` を呼べば、報告されたフローそのままをエージェントがなぞって検証する — 人間を挟まずに「発見 → 修正 → 検証」のループが閉じる。
 
 ---
 

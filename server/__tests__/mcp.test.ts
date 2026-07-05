@@ -16,7 +16,7 @@ import { listRuns, type RunSummary } from "../runs.js";
 import { computeExperienceScore } from "../../framework/experience-score.js";
 
 // NODE_ENV=test なので stdio transport には接続しない
-const { handleStartRun, handleGetRunStatus, handleListFindings, handleGetExperienceScore, buildMcpServer } = await import("../mcp.js");
+const { handleStartRun, handleGetRunStatus, handleListFindings, handleGetExperienceScore, handleVerifyFix, buildMcpServer } = await import("../mcp.js");
 
 function makeSession(overrides: Partial<Session> = {}): Session {
   return {
@@ -173,8 +173,64 @@ describe("handleGetExperienceScore", () => {
   });
 });
 
+describe("handleVerifyFix", () => {
+  function mockFinding(overrides = {}) {
+    return {
+      id: "f1",
+      runId: "run_1",
+      agentId: "a1",
+      agentName: "Alice",
+      role: "tester",
+      title: "Login broken",
+      body: "The login button does nothing",
+      category: "bug",
+      timestamp: "2026-07-01T00:00:00.000Z",
+      ...overrides,
+    };
+  }
+
+  function setupVerifyFs(finding: object, verifyResult: object | null) {
+    vi.mocked(fs.existsSync).mockImplementation((p: unknown) => {
+      const s = String(p);
+      if (s.includes("verify_")) return verifyResult !== null;
+      return s.endsWith("findings") || s.endsWith("run_1");
+    });
+    vi.mocked(fs.readdirSync).mockImplementation(((p: unknown) => {
+      const s = String(p);
+      if (s.endsWith("findings")) return ["run_1"];
+      return ["f0.json"];
+    }) as unknown as typeof fs.readdirSync);
+    vi.mocked(fs.readFileSync).mockImplementation(((p: unknown) => {
+      const s = String(p);
+      if (s.includes("verify_")) return JSON.stringify(verifyResult);
+      return JSON.stringify(finding);
+    }) as unknown as typeof fs.readFileSync);
+  }
+
+  it("finding を検証 run に渡し、結果 JSON を返す", async () => {
+    const verifyResult = { findingId: "f1", findingTitle: "Login broken", runId: "run_x", status: "fixed", reason: "Could not reproduce", verifiedAt: "t" };
+    setupVerifyFs(mockFinding(), verifyResult);
+    const runVerify = vi.fn().mockResolvedValue(0);
+
+    const result = await handleVerifyFix({ findingId: "f1", baseUrl: "http://localhost:9999" }, runVerify);
+
+    expect(runVerify).toHaveBeenCalledWith(expect.stringMatching(/^run_\d+$/), expect.objectContaining({ id: "f1" }), "http://localhost:9999");
+    expect(result.status).toBe("fixed");
+  });
+
+  it("存在しない findingId はエラー", async () => {
+    setupVerifyFs(mockFinding({ id: "other" }), null);
+    await expect(handleVerifyFix({ findingId: "nope" }, vi.fn())).rejects.toThrow(/not found/);
+  });
+
+  it("検証 run が結果を出さなかったらエラー", async () => {
+    setupVerifyFs(mockFinding(), null);
+    await expect(handleVerifyFix({ findingId: "f1" }, vi.fn().mockResolvedValue(1))).rejects.toThrow(/no result/);
+  });
+});
+
 describe("buildMcpServer", () => {
-  it("4 つのツールを登録したサーバーを構築できる", () => {
+  it("5 つのツールを登録したサーバーを構築できる", () => {
     const server = buildMcpServer();
     expect(server).toBeDefined();
   });

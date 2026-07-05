@@ -97,6 +97,21 @@ const FOCUS_PATHS = (process.env.SHOAL_FOCUS_PATHS ?? "")
   .filter(Boolean);
 if (FOCUS_PATHS.length > 0) console.log(`[focus] exploration focused on: ${FOCUS_PATHS.join(", ")}`);
 
+// verify モード — 単一 finding の修正検証に特化した run（MCP の verify_fix から使う）
+// SHOAL_VERIFY_FINDING に finding の JSON（id/title/body/category）を渡す
+interface VerifyFinding { id: string; title: string; body: string; category?: string }
+function parseVerifyFinding(): VerifyFinding | null {
+  const raw = process.env.SHOAL_VERIFY_FINDING;
+  if (!raw) return null;
+  try {
+    const f = JSON.parse(raw) as VerifyFinding;
+    if (typeof f.id === "string" && typeof f.title === "string" && typeof f.body === "string") return f;
+  } catch { /* fallthrough */ }
+  console.error("[verify] SHOAL_VERIFY_FINDING must be JSON with id/title/body");
+  process.exit(1);
+}
+const VERIFY_FINDING = parseVerifyFinding();
+
 function focusPrompt(): string {
   if (FOCUS_PATHS.length === 0) return "";
   return `
@@ -1220,6 +1235,57 @@ ${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\
 // Main
 // ================================================================
 
+// verify モード: 検証専用エージェント 1 体で finding の再現を試み、結果を JSON に書き出す
+async function runVerifyMode(
+  browser: Awaited<ReturnType<typeof chromium.launch>>,
+  productSpec: ProductSpec,
+  scenarioOutcomes: ScenarioOutcome[],
+  finding: VerifyFinding,
+): Promise<void> {
+  console.log(`\n[verify] verifying fix for: "${finding.title}"`);
+  runLog.summary.totalAgents = 1;
+
+  const verifier: Agent = {
+    id: "agent_verifier",
+    name: "Verifier",
+    role: "qa",
+    persona: "A meticulous QA engineer who verifies whether previously reported issues are actually fixed. Skeptical by nature — retraces the exact flow that caused the problem before concluding anything.",
+    createdAt: new Date().toISOString(),
+  };
+
+  const scenario: Scenario = {
+    id: "verify",
+    title: `Verify fix: ${finding.title}`,
+    context: "You are verifying whether a previously reported issue has been fixed in the current build.",
+    goal: `Try hard to reproduce this previously reported issue:\n---\nTitle: ${finding.title}\n${finding.body}\n---\nRetrace the same flow that caused it. If the issue NO LONGER occurs after a genuine attempt, the fix is verified — call post_outcome with achieved=true. If it still occurs (even partially), call post_outcome with achieved=false and describe exactly what still happens.`,
+    constraints: "Focus only on verifying this one issue. Do not explore unrelated areas.",
+  };
+
+  const context = await browser.newContext({ viewport: { width: 1024, height: 640 } });
+  await applyBrowserGuardrails(context, SHOAL_MODE);
+  const page = await context.newPage();
+  try {
+    await runBrowserAgent(verifier, page, productSpec, { scenario }, scenarioOutcomes);
+  } finally {
+    await context.close();
+  }
+
+  const outcome = scenarioOutcomes[0];
+  const result = {
+    findingId: finding.id,
+    findingTitle: finding.title,
+    runId: runLog.runId,
+    status: outcome ? (outcome.achieved ? "fixed" : "still_broken") : "inconclusive",
+    reason: outcome?.reason ?? "The verifier agent did not report an outcome.",
+    verifiedAt: new Date().toISOString(),
+  };
+  const outPath = path.join(process.cwd(), "logs", `verify_${runLog.runId}.json`);
+  fs.mkdirSync(path.dirname(outPath), { recursive: true });
+  fs.writeFileSync(outPath, JSON.stringify(result, null, 2), "utf-8");
+  console.log(`\n[verify] ${result.status}: ${result.reason}`);
+  console.log(`[verify] result saved: ${outPath}`);
+}
+
 function pickAgents<T>(agents: T[], count: number): T[] {
   return [...agents].sort(() => Math.random() - 0.5).slice(0, count);
 }
@@ -1256,6 +1322,12 @@ async function main() {
       const discoveryPage = await discoveryContext.newPage();
       productSpec = await discoverProduct(BASE_URL, discoveryPage, client, defaultModel, targetConfig.projectPath);
       await discoveryContext.close();
+    }
+
+    // verify モード: 単一 finding の検証だけを行い、通常のパイプラインはスキップ
+    if (VERIFY_FINDING) {
+      await runVerifyMode(browser, productSpec, scenarioOutcomes, VERIFY_FINDING);
+      return;
     }
 
     // 2. adoption feedback — 過去に起票した issue の close 状況を群れに還元する

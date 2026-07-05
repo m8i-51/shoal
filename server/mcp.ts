@@ -14,6 +14,8 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
+import { spawn } from "child_process";
+import { fileURLToPath } from "url";
 import { spawnRun, activeSessions } from "./runner.js";
 import { listRuns } from "./runs.js";
 import { computeExperienceScore } from "../framework/experience-score.js";
@@ -109,6 +111,58 @@ export function handleGetExperienceScore(): unknown {
   return score ?? { message: "No experience data yet — complete a run with scenarios first." };
 }
 
+// ---- verify_fix ----
+
+export interface VerifyFixResult {
+  findingId: string;
+  findingTitle: string;
+  runId: string;
+  status: "fixed" | "still_broken" | "inconclusive";
+  reason: string;
+  verifiedAt: string;
+}
+
+/** run.ts を verify モードで起動し、終了を待つ（テストで差し替え可能） */
+export function spawnVerifyRun(runId: string, finding: Finding, baseUrl?: string): Promise<number> {
+  const packageRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const tsxBin = path.join(packageRoot, "node_modules", ".bin", "tsx");
+  const bin = fs.existsSync(tsxBin) ? tsxBin : "tsx";
+  return new Promise((resolve) => {
+    const child = spawn(bin, [path.join(packageRoot, "run.ts")], {
+      cwd: process.cwd(),
+      stdio: ["ignore", "pipe", "pipe"], // stdout は MCP の JSON-RPC を汚さない
+      env: {
+        ...process.env,
+        SHOAL_RUN_ID: runId,
+        SHOAL_VERIFY_FINDING: JSON.stringify({ id: finding.id, title: finding.title, body: finding.body, category: finding.category }),
+        ...(baseUrl ? { BASE_URL: baseUrl } : {}),
+      },
+    });
+    child.stdout?.on("data", () => { /* discard */ });
+    child.stderr?.on("data", () => { /* discard */ });
+    child.on("exit", (code) => resolve(code ?? 0));
+  });
+}
+
+export async function handleVerifyFix(
+  input: { findingId: string; baseUrl?: string },
+  runVerify: typeof spawnVerifyRun = spawnVerifyRun,
+): Promise<VerifyFixResult> {
+  const finding = handleListFindings({ limit: 200 }).find((f) => f.id === input.findingId);
+  if (!finding) {
+    throw new Error(`finding "${input.findingId}" not found — use list_findings to get valid ids`);
+  }
+
+  const runId = `run_${Date.now()}`;
+  await runVerify(runId, finding, input.baseUrl);
+
+  const resultPath = path.join(process.cwd(), "logs", `verify_${runId}.json`);
+  if (!fs.existsSync(resultPath)) {
+    throw new Error(`verification run ${runId} produced no result — check the run logs`);
+  }
+  return JSON.parse(fs.readFileSync(resultPath, "utf-8")) as VerifyFixResult;
+}
+
 // ================================================================
 // MCP wiring
 // ================================================================
@@ -161,6 +215,20 @@ export function buildMcpServer(): McpServer {
     },
     async (input) => {
       try { return asText(handleListFindings(input)); } catch (e) { return asError(e); }
+    },
+  );
+
+  server.registerTool(
+    "verify_fix",
+    {
+      description: "Verify whether a specific finding has been fixed. Spawns a single verifier agent that retraces the reported issue's flow against the (re)deployed app and returns status: fixed / still_broken / inconclusive with the agent's reasoning. Call this after fixing code and redeploying. Takes a few minutes.",
+      inputSchema: {
+        findingId: z.string().describe("The finding id (from list_findings) to verify"),
+        baseUrl: z.string().optional().describe("URL of the deployment containing the fix (defaults to BASE_URL from .env)"),
+      },
+    },
+    async (input) => {
+      try { return asText(await handleVerifyFix(input)); } catch (e) { return asError(e); }
     },
   );
 

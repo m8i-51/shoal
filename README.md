@@ -250,9 +250,10 @@ Exposed tools:
 | `start_run` | Launch an exploration run (URL, agent counts, safety mode) |
 | `get_run_status` | Poll progress: findings so far, regression results, log tail |
 | `list_findings` | Read findings across runs, filtered by run / category / text |
+| `verify_fix` | Spawn a single verifier agent that retraces one finding's flow and reports `fixed` / `still_broken` / `inconclusive` |
 | `get_experience_score` | Cross-run Experience Score trend — did the fix actually improve the experience? |
 
-A coding agent can pick the top finding, fix the code, redeploy, run `start_run` again, and confirm the regression agent verifies the fix and the Experience Score moves up.
+A coding agent can pick a finding with `list_findings`, fix the code, redeploy, and call `verify_fix` to have an agent retrace the exact reported flow — closing the find → fix → verify loop without a human in the middle.
 
 ---
 
