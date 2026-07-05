@@ -86,9 +86,3 @@ export interface RunLog {
   };
 }
 
-export interface ClosedIssue {
-  number: number;
-  title: string;
-  body: string;
-  labels: string[];
-}

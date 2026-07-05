@@ -9,6 +9,10 @@ export interface ClosedIssue {
   title: string;
   body: string;
   labels: string[];
+  /** Issue URL, when the tracker provides one */
+  url?: string;
+  /** Close reason: "completed" | "not_planned" (GitHub) — undefined for trackers without the concept */
+  stateReason?: string | null;
 }
 
 export interface IssueTracker {

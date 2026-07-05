@@ -19,6 +19,7 @@ import { collectedFindings, initRunLog, saveRunLog, saveFinding, runLog } from "
 import { loadAgents, addAgent, retireAgent, recordAgentMemories, formatAgentMemories, type Agent, type MemoryInput } from "./framework/agent-store";
 import { updateCoverage, computeWeightedSummary, getLastRunPaths, getFindingHotspots } from "./framework/coverage";
 import { computeExperienceScore, formatExperienceLine } from "./framework/experience-score";
+import { updateAdoption } from "./framework/adoption";
 import { getShoalMode, filterAppTools, applyBrowserGuardrails, guardrailPrompt } from "./framework/guardrails";
 import { loadPageHashes, updatePageHashes, hashContent } from "./framework/page-cache";
 import { loadPersonaPack, formatPackForPrompt, type PersonaPack } from "./framework/persona-pack";
@@ -1174,16 +1175,24 @@ async function main() {
       await discoveryContext.close();
     }
 
-    // 2. org design (coverage-aware)
+    // 2. adoption feedback — 過去に起票した issue の close 状況を群れに還元する
+    const closedIssues = await trackers.fetchClosedIssues();
+    const adoptionSummary = updateAdoption(closedIssues);
+    if (adoptionSummary) console.log(`\n[adoption] ${adoptionSummary.split("\n")[1] ?? ""}`);
+
+    // 3. org design (coverage + adoption aware)
     const coverageSummary = computeWeightedSummary();
     console.log(`\n[coverage] ${coverageSummary.formatted.split("\n")[0]}`);
-    const orgDesign = await designOrg(productSpec, client, defaultModel, coverageSummary.formatted);
+    const designContext = adoptionSummary
+      ? `${coverageSummary.formatted}\n\n${adoptionSummary}`
+      : coverageSummary.formatted;
+    const orgDesign = await designOrg(productSpec, client, defaultModel, designContext);
 
-    // 3. open issues + scenario design (both feed into HR)
+    // 4. open issues + scenario design (both feed into HR)
     const openIssues = await trackers.fetchOpenIssues();
-    const scenarios = await designScenarios(productSpec, openIssues, client, defaultModel, 5, coverageSummary.formatted);
+    const scenarios = await designScenarios(productSpec, openIssues, client, defaultModel, 5, designContext);
 
-    // 3.5. Account Manager（credentials が設定されている場合のみ）
+    // 4.5. Account Manager（credentials が設定されている場合のみ）
     let testAccounts: TestAccount[] = [];
     if (targetConfig.credentials) {
       const accountContext = await browser.newContext({ viewport: { width: 1024, height: 640 } });
@@ -1202,23 +1211,22 @@ async function main() {
       }
     }
 
-    // 4. HR agent
+    // 5. HR agent
     const lastRunPaths = getLastRunPaths();
     const personaPack = await loadPersonaPack();
     await runPersonaDesigner(productSpec, orgDesign.personaGuidance, openIssues, scenarios, testAccounts, lastRunPaths, personaPack);
 
-    // 5. load agents + closed issues
+    // 6. load agents (closed issues は step 2 で取得済み)
     const allAgents = loadAgents();
     if (allAgents.length === 0) {
       console.error("No agents found. Check agents.json.");
       process.exit(1);
     }
-    const closedIssues = await trackers.fetchClosedIssues();
 
-    // 5. エージェント数が確定したので totalAgents を更新
+    // 6.5. エージェント数が確定したので totalAgents を更新
     runLog.summary.totalAgents = allAgents.length;
 
-    // 6. API agents (exploration + regression)
+    // 7. API agents (exploration + regression)
     const allExplorers = allAgents.slice(0, -1);
     const explorerAgents = pickAgents(allExplorers, Math.min(MAX_EXPLORERS, allExplorers.length));
     const regressionAgent = allAgents[allAgents.length - 1];
@@ -1256,7 +1264,7 @@ async function main() {
       await runExplorer(regressionAgent, productSpec, assignment, scenarioOutcomes);
     }
 
-    // 7. browser agents
+    // 8. browser agents
     const browserAgents = pickAgents(allAgents, Math.min(MAX_BROWSERS, allAgents.length));
     console.log(`\nlaunching ${browserAgents.length} browser agents in parallel (max: ${MAX_BROWSERS})`);
     browserAgents.forEach((a) => console.log(`  - ${a.name} (${a.role})`));
@@ -1304,18 +1312,18 @@ async function main() {
     );
     const allVisitedPaths = browserLogs.flatMap((log) => log.visitedPaths);
 
-    // 8. triage (API + browser findings)
+    // 9. triage (API + browser findings)
     await sleep(2000);
     console.log(`\n[triage] collected findings: ${collectedFindings.length}`);
     let triageResult = { issued: [] as string[], skipped: [] as string[], unprocessed: [] as string[], issuesCreated: 0 };
     try {
-      triageResult = await runTriageAgent(collectedFindings, client, defaultModel, trackers);
+      triageResult = await runTriageAgent(collectedFindings, client, defaultModel, trackers, agentAssignments);
       runLog.summary.totalIssuesPosted += triageResult.issuesCreated;
     } catch (e) {
       console.error("[triage] error:", e);
     }
 
-    // 9. record each agent's personal memory (frustrations / achievements)
+    // 10. record each agent's personal memory (frustrations / achievements)
     const memoryInputs = new Map<string, MemoryInput>();
     for (const log of runLog.agents) {
       const input: MemoryInput = { frustrations: [], achievements: [] };
@@ -1332,7 +1340,7 @@ async function main() {
     }
     recordAgentMemories(runLog.runId, memoryInputs);
 
-    // 10. update coverage (report が最新スコアを含められるよう先に更新する)
+    // 11. update coverage (report が最新スコアを含められるよう先に更新する)
     updateCoverage(runLog.runId, collectedFindings, agentAssignments, allVisitedPaths, {
       scenarioOutcomes,
       regression: {
@@ -1341,7 +1349,7 @@ async function main() {
       },
     });
 
-    // 11. experience score + HTML report
+    // 12. experience score + HTML report
     const experience = computeExperienceScore();
     if (experience) console.log(`\n[experience] ${formatExperienceLine(experience)}`);
     const reportPath = generateReport(runLog, collectedFindings, triageResult, productSpec, scenarios, agentAssignments, scenarioOutcomes, experience);
