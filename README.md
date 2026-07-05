@@ -293,6 +293,28 @@ The workflow runs every Monday at 09:00 UTC and can also be triggered manually f
 
 ---
 
+## shoal-bench
+
+How well does the swarm actually detect problems? `bench/` ships a tiny store app with **seven seeded bugs** — an unprotected admin page, a cart total that ignores quantities, a silent save failure, a missing alt attribute, an unreadable low-contrast button, delete-without-confirmation, and a broken nav link — each with ground-truth labels in `bench/labels.json`.
+
+```bash
+npm run bench                       # runs the swarm against the bench app and scores detection
+SHOAL_BENCH_MIN=60 npm run bench    # exit non-zero below 60% detection (CI regression gate)
+```
+
+The scorer matches findings to labels and prints a detection report:
+
+```
+Detection rate: 5/7 (71%)
+  ✓ cart-total-wrong
+      └ "Cart total doesn't match item quantities"
+  ✗ low-contrast — The Buy button text is nearly the same color as its background
+```
+
+Use it as a regression test when changing prompts, models, or exploration logic — and don't fix the seeded bugs (the app's test suite pins them in place).
+
+---
+
 ## Account Manager
 
 For apps that require login, shoal includes an Account Manager agent that autonomously discovers and tests authentication. It finds login pages, tests credentials from `test-accounts/` (gitignored), and injects session state into explorer agents so they can reach authenticated routes.

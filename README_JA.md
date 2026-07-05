@@ -295,6 +295,28 @@ workflow は毎週月曜 09:00 UTC に自動実行され、Actions タブから�
 
 ---
 
+## shoal-bench
+
+群れは実際どれくらい問題を検出できるのか？ `bench/` には**7 つのバグを仕込んだ**小さなストアアプリが同梱されている — 認証なしの管理画面、数量を無視するカート合計、サイレント保存失敗、alt 欠落、読めない低コントラストボタン、確認なし削除、リンク切れ — それぞれ `bench/labels.json` の正解ラベルに対応する。
+
+```bash
+npm run bench                       # ベンチアプリに群れを放って検出率を採点
+SHOAL_BENCH_MIN=60 npm run bench    # 検出率 60% 未満で非ゼロ終了（CI の回帰ゲート）
+```
+
+スコアラーが findings をラベルと突合し、検出レポートを出力する:
+
+```
+Detection rate: 5/7 (71%)
+  ✓ cart-total-wrong
+      └ "Cart total doesn't match item quantities"
+  ✗ low-contrast — The Buy button text is nearly the same color as its background
+```
+
+プロンプト・モデル・探索ロジックを変更したときの回帰テストとして使える。仕込みバグは直さないこと（アプリのテストスイートがバグの存在を固定している）。
+
+---
+
 ## アカウントマネージャー
 
 ログインが必要なアプリには、Account Manager エージェントが認証を自律的に発見・テストする。ログインページを探し、`test-accounts/`（gitignore 済み）の認証情報をテストし、セッション状態をエクスプローラーエージェントに渡すことで認証後のルートにもアクセスできる。

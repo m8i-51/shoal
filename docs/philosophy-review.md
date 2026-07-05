@@ -266,10 +266,11 @@ run 単位の HTML レポート (`framework/report.ts`) に使われるだけで
 | 5 | 採用率フィードバック (案3) | ✅ 実装済み | 案1の集計基盤を再利用。自然選択ループが閉じる |
 | 6 | 環境ペルソナ (案4) | ✅ 実装済み（axe-core による a11y 実証は未着手） | context 生成の変更が中心。a11y 実証は段階投入 |
 | 7 | スティグマジー → ペアシナリオ (案6) | ✅ 実装済み（Phase A / B とも） | Phase A は小さく、B は大きい。分けて出す |
-| 8 | MCP 化 (案8) → Experience Diff (案9) | ✅ MCP 化実装済み / Experience Diff は未着手 | ループを閉じる本丸。案1・regression 機構に依存 |
+| 8 | MCP 化 (案8) → Experience Diff (案9) | ✅ 実装済み（`shoal mcp` / `shoal diff`） | ループを閉じる本丸。案1・regression 機構に依存 |
 | 9 | 時間旅行ペルソナ (案7) | ✅ 実装済み（セッション継続 + 再訪シナリオ） | 案2の記憶基盤の上に載せる |
-| 10 | shoal-bench (案10) | 未着手 | いつでも着手可能だが、機能が揃うほど価値が上がる |
+| 10 | shoal-bench (案10) | ✅ 実装済み（`npm run bench`） | いつでも着手可能だが、機能が揃うほど価値が上がる |
 
-残タスクは **PR ごとの Experience Diff (案9)** と **shoal-bench (案10)** の 2 つ。
-Experience Diff は `shoal diff` エントリポイント（変更ルート推定 + 小規模 run + PR コメント）、
-shoal-bench はバグを仕込んだサンプルアプリ群と検出率スコアラーが主な構成要素になる。
+ロードマップの全項目が実装済み。今後の発展候補:
+- axe-core による a11y 実測監査（環境ペルソナの段階投入分）
+- `verify_fix(findingId)` — 単一 finding 特化の検証 run（MCP ツール追加）
+- shoal-bench のバグバリエーション拡充とモデル別スコアの README 掲示

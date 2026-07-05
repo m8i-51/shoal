@@ -31,6 +31,7 @@
     "dev:web": "vite web",
     "build:web": "vite build web",
     "auth:codex": "tsx scripts/auth-codex.ts",
+    "bench": "tsx bench/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
