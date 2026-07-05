@@ -104,6 +104,7 @@ Guidelines:
 - Make goals specific and actionable (not vague like "use the app")
 - If open issues hint at risky areas, design natural scenarios that pass through those areas
 - If coverage history shows underrepresented areas or lenses, bias scenarios toward those gaps
+- If coverage history shows previous runs (this is NOT the first run), include exactly one RETURNING-USER scenario: a user coming back to data they created before — resuming a draft, reviewing accumulated items, checking what changed since their last visit
 - Constraints should reflect realistic user states (first time, in a hurry, confused, etc.)
 
 Call output_scenarios with exactly ${count} scenarios.`,

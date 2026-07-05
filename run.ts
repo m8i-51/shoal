@@ -22,6 +22,7 @@ import { computeExperienceScore, formatExperienceLine } from "./framework/experi
 import { updateAdoption } from "./framework/adoption";
 import { getShoalMode, filterAppTools, applyBrowserGuardrails, guardrailPrompt } from "./framework/guardrails";
 import { buildContextOptions, sanitizeEnvironment, describeEnvironment, applyNetworkThrottle, SUGGESTED_DEVICES, type EnvironmentProfile } from "./framework/environment";
+import { agentSessionPath, hasAgentSession, saveAgentSession, sessionContinuityPrompt } from "./framework/session-store";
 import { loadPageHashes, updatePageHashes, hashContent } from "./framework/page-cache";
 import { loadPersonaPack, formatPackForPrompt, type PersonaPack } from "./framework/persona-pack";
 import { buildTrackers } from "./framework/trackers/index";
@@ -1063,7 +1064,7 @@ ${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\
     ? `\n[Your Task for This Run]\nTitle: ${assignment.scenario.title}\nYou are: ${assignment.scenario.context}\nGoal: ${assignment.scenario.goal}\nConstraints: ${assignment.scenario.constraints}\n\nFocus on completing this task naturally as this user. Report any issues you encounter along the way.\nWhen done (or if you cannot complete the goal), call post_outcome with achieved=true/false and a brief reason.`
     : assignment.lens
     ? `\n[Focus Area for This Run]\n${assignment.lens}\nKeep this perspective in mind and prioritize reporting related issues.`
-    : ""}${describeEnvironment(agent.environment)}${formatAgentMemories(agent)}${guardrailPrompt(SHOAL_MODE)}`;
+    : ""}${describeEnvironment(agent.environment)}${sessionContinuityPrompt(hasAgentSession(agent.id))}${formatAgentMemories(agent)}${guardrailPrompt(SHOAL_MODE)}`;
 
   await page.goto(BASE_URL, { waitUntil: "networkidle" });
   await page.waitForTimeout(5000);
@@ -1320,12 +1321,16 @@ async function main() {
         const assignment = pickAssignment(dispatchIdx++, scenarios);
         agentAssignments.set(agent.id, assignment);
 
-        // ロールが一致する storageState があれば使う
+        // 前回の run の自分のセッション（cookie / localStorage）があれば「再訪ユーザー」として復元する。
+        // なければロールが一致するテストアカウントの storageState を使う
         const matchedAccount = testAccounts.find((a) => a.role === agent.role && a.storageStatePath);
         const baseOptions: Parameters<typeof browser.newContext>[0] = {
           viewport: { width: 1024, height: 640 },
         };
-        if (matchedAccount?.storageStatePath) {
+        if (hasAgentSession(agent.id)) {
+          baseOptions.storageState = agentSessionPath(agent.id);
+          console.log(`[session] ${agent.name} returns with their previous session`);
+        } else if (matchedAccount?.storageStatePath) {
           baseOptions.storageState = matchedAccount.storageStatePath;
         }
         // ペルソナの環境プロファイル（デバイス・ロケール・配色）を重ねる
@@ -1345,6 +1350,8 @@ async function main() {
         try {
           return await runBrowserAgent(agent, page, productSpec, assignment, scenarioOutcomes);
         } finally {
+          // 次の run で「再訪ユーザー」になれるようセッションを保存（close 前に呼ぶ）
+          await saveAgentSession(context, agent.id);
           if (TRACE_ENABLED) {
             const tracePath = traceZipPath(runLog.runId, agent.id);
             try {

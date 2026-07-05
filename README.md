@@ -133,6 +133,8 @@ shoal gets smarter with each run.
 
 **Agent memory** — each persona remembers its own experience from the last few runs: what it struggled with, what it reported, what it accomplished. On the next run it returns as a *returning user* — first revisiting what frustrated it (confirming improvements, or re-reporting with "still broken since my last visit"), then moving on to new areas. Findings gain the continuity of a real user relationship.
 
+**Returning-user sessions** — each browser agent's storage state (cookies, local storage) is saved per persona in `cache/sessions/` and restored on the next run. Agents come back to the app as the same user with the same session: still logged in, with the data they created last time. Scenario design includes one returning-user journey per run — resuming a draft, reviewing accumulated data — so lifecycle states (empty → populated, notifications, stale sessions) get tested the way real users hit them.
+
 **Swarm signals** — agents in the same run share a blackboard. A `check_swarm_signals` tool shows each agent what the others have just reported; when a signal matches the area an agent is in, it tries to reproduce the problem from its own perspective. Findings corroborated by multiple different personas merge into much stronger issues at triage.
 
 **Environment personas** — a persona's environment is part of who they are. The persona designer can give recruits a real browsing environment — a phone (actual Playwright device emulation with touch and mobile viewport), a non-default locale, dark mode, reduced motion, or a slow 3G connection — matched to the persona's life. Mobile and accessibility findings come from actually experiencing the app in that environment, not from guessing.
