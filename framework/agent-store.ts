@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import type { EnvironmentProfile } from "./environment";
 
 /** 1 run 分のエージェント個人の体験記録 */
 export interface AgentMemory {
@@ -16,6 +17,7 @@ export interface Agent {
   persona: string;
   createdAt: string;
   memories?: AgentMemory[]; // 直近 MAX_MEMORIES run 分のみ保持
+  environment?: EnvironmentProfile; // ブラウザエージェントとして走るときの環境
 }
 
 const STORE_PATH = path.join(process.cwd(), "agents.json");
@@ -33,7 +35,7 @@ function saveAgents(agents: Agent[]): void {
   fs.writeFileSync(STORE_PATH, JSON.stringify(agents, null, 2), "utf-8");
 }
 
-export function addAgent(input: { name: string; role: string; persona: string }): Agent {
+export function addAgent(input: { name: string; role: string; persona: string; environment?: EnvironmentProfile }): Agent {
   const agents = loadAgents();
   const agent: Agent = {
     id: `agent_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
@@ -41,6 +43,7 @@ export function addAgent(input: { name: string; role: string; persona: string })
     role: input.role,
     persona: input.persona,
     createdAt: new Date().toISOString(),
+    ...(input.environment ? { environment: input.environment } : {}),
   };
   agents.push(agent);
   saveAgents(agents);

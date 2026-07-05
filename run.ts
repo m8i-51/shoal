@@ -21,6 +21,7 @@ import { updateCoverage, computeWeightedSummary, getLastRunPaths, getFindingHots
 import { computeExperienceScore, formatExperienceLine } from "./framework/experience-score";
 import { updateAdoption } from "./framework/adoption";
 import { getShoalMode, filterAppTools, applyBrowserGuardrails, guardrailPrompt } from "./framework/guardrails";
+import { buildContextOptions, sanitizeEnvironment, describeEnvironment, applyNetworkThrottle, SUGGESTED_DEVICES, type EnvironmentProfile } from "./framework/environment";
 import { loadPageHashes, updatePageHashes, hashContent } from "./framework/page-cache";
 import { loadPersonaPack, formatPackForPrompt, type PersonaPack } from "./framework/persona-pack";
 import { buildTrackers } from "./framework/trackers/index";
@@ -466,6 +467,22 @@ const PERSONA_DESIGNER_TOOLS: Anthropic.Tool[] = [
         name: { type: "string" },
         role: { type: "string" },
         persona: { type: "string" },
+        environment: {
+          type: "object",
+          description: `Optional browsing environment — make it match the persona's life (e.g. a commuting sales rep browses on a phone over a slow connection). Give 1-2 recruits a non-desktop environment. Omit entirely for a standard desktop user.
+- device: Playwright device name, e.g. ${SUGGESTED_DEVICES.map((d) => `"${d}"`).join(", ")} (omit for desktop)
+- locale: BCP 47 locale like "ja-JP"
+- colorScheme: "dark" or "light"
+- reducedMotion: true for users who prefer reduced motion
+- networkThrottle: "slow-3g" or "fast-3g" for slow connections`,
+          properties: {
+            device: { type: "string" },
+            locale: { type: "string" },
+            colorScheme: { type: "string", enum: ["light", "dark"] },
+            reducedMotion: { type: "boolean" },
+            networkThrottle: { type: "string", enum: ["slow-3g", "fast-3g"] },
+          },
+        },
       },
       required: ["name", "role", "persona"],
     },
@@ -524,6 +541,7 @@ ${pathCoverageStep}
 6. Call get_scenarios to see the user test scenarios generated for this run — about 70% of agents will be assigned a scenario, so recruit personas whose background fits those scenarios
 7. Call get_agents to check the current agent roster
 8. Add 2–3 agents with add_agent — balance between scenario-fit personas (step 6), underrepresented lenses (step 1), unexplored paths (step 3), finding hotspots (step 4), and unexplored areas (step 5)${testAccounts.length > 0 ? "\n   — assign each agent a role that matches one of the available test accounts" : ""}
+   — give 1–2 recruits an "environment" (mobile device, dark mode, non-default locale, slow connection) that naturally fits their persona's life; leave the rest on desktop
 9. If there are agents with old createdAt dates (oldest 1–2), retire them with retire_agent`;
 
   try {
@@ -593,9 +611,10 @@ ${pathCoverageStep}
           result = agents.map((a) => ({ id: a.id, name: a.name, role: a.role, createdAt: a.createdAt }));
           console.log(`  [persona-designer] current agents: ${agents.length}`);
         } else if (toolUse.name === "add_agent") {
-          const { name, role, persona } = toolUse.input as { name: string; role: string; persona: string };
-          result = addAgent({ name, role, persona });
-          console.log(`  [persona-designer] created: ${name} (${role})`);
+          const { name, role, persona, environment } = toolUse.input as { name: string; role: string; persona: string; environment?: EnvironmentProfile };
+          const cleanEnv = sanitizeEnvironment(environment);
+          result = addAgent({ name, role, persona, environment: cleanEnv });
+          console.log(`  [persona-designer] created: ${name} (${role})${cleanEnv ? ` [env: ${Object.entries(cleanEnv).map(([k, v]) => `${k}=${v}`).join(", ")}]` : ""}`);
         } else if (toolUse.name === "retire_agent") {
           const { agentId, reason } = toolUse.input as { agentId: string; reason: string };
           result = { success: retireAgent(agentId) };
@@ -1018,7 +1037,7 @@ ${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\
     ? `\n[Your Task for This Run]\nTitle: ${assignment.scenario.title}\nYou are: ${assignment.scenario.context}\nGoal: ${assignment.scenario.goal}\nConstraints: ${assignment.scenario.constraints}\n\nFocus on completing this task naturally as this user. Report any issues you encounter along the way.\nWhen done (or if you cannot complete the goal), call post_outcome with achieved=true/false and a brief reason.`
     : assignment.lens
     ? `\n[Focus Area for This Run]\n${assignment.lens}\nKeep this perspective in mind and prioritize reporting related issues.`
-    : ""}${formatAgentMemories(agent)}${guardrailPrompt(SHOAL_MODE)}`;
+    : ""}${describeEnvironment(agent.environment)}${formatAgentMemories(agent)}${guardrailPrompt(SHOAL_MODE)}`;
 
   await page.goto(BASE_URL, { waitUntil: "networkidle" });
   await page.waitForTimeout(5000);
@@ -1277,12 +1296,14 @@ async function main() {
 
         // ロールが一致する storageState があれば使う
         const matchedAccount = testAccounts.find((a) => a.role === agent.role && a.storageStatePath);
-        const contextOptions: Parameters<typeof browser.newContext>[0] = {
+        const baseOptions: Parameters<typeof browser.newContext>[0] = {
           viewport: { width: 1024, height: 640 },
         };
         if (matchedAccount?.storageStatePath) {
-          contextOptions.storageState = matchedAccount.storageStatePath;
+          baseOptions.storageState = matchedAccount.storageStatePath;
         }
+        // ペルソナの環境プロファイル（デバイス・ロケール・配色）を重ねる
+        const contextOptions = buildContextOptions(agent.environment, baseOptions);
 
         const context = await browser.newContext(contextOptions);
         await applyBrowserGuardrails(context, SHOAL_MODE);
@@ -1294,6 +1315,7 @@ async function main() {
           }
         }
         const page = await context.newPage();
+        await applyNetworkThrottle(page, agent.environment?.networkThrottle);
         try {
           return await runBrowserAgent(agent, page, productSpec, assignment, scenarioOutcomes);
         } finally {
