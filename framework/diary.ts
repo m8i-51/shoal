@@ -3,7 +3,12 @@ import * as path from "path";
 import { createLLMClient } from "./llm-client.js";
 import { isFinding, type Finding } from "./types.js";
 
+function isSafeRunId(runId: string): boolean {
+  return /^run_\d+$/.test(runId);
+}
+
 function loadFindings(runId: string): Finding[] {
+  if (!isSafeRunId(runId)) return [];
   const dir = path.join(process.cwd(), "findings", runId);
   if (!fs.existsSync(dir)) return [];
   const out: Finding[] = [];
@@ -36,6 +41,7 @@ function extractEvents(lines: string[]): string[] {
 }
 
 export async function generateDiary(runId: string, logLines: string[]): Promise<string> {
+  if (!isSafeRunId(runId)) throw new Error("invalid run id");
   const findings = loadFindings(runId);
   const events = extractEvents(logLines);
 
