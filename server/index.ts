@@ -189,22 +189,30 @@ app.get("/api/findings/export", (_req, res) => {
 app.post("/api/findings/proxy-url", async (req, res) => {
   const { url } = req.body as { url?: string };
   if (!url || typeof url !== "string") { res.status(400).json({ error: "url required" }); return; }
+
+  // Restrict proxy targets to server-controlled hosts to prevent SSRF.
+  const ALLOWED_PROXY_HOSTS = new Set<string>([
+    "example.com",
+    "api.example.com",
+  ]);
+
   let parsed: URL;
   try {
     parsed = new URL(url);
     if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("invalid protocol");
-    const h = parsed.hostname;
-    const bare = h.replace(/^\[|\]$/g, ""); // IPv6 brackets: [::1] → ::1
-    if (bare === "localhost" || bare === "127.0.0.1" || bare === "::1" || bare.startsWith("192.168.") || bare.startsWith("10.") || bare.endsWith(".local")) {
-      res.status(400).json({ error: "private urls not allowed" });
+
+    const hostname = parsed.hostname.toLowerCase();
+    if (!ALLOWED_PROXY_HOSTS.has(hostname)) {
+      res.status(400).json({ error: "host not allowed" });
       return;
     }
   } catch {
     res.status(400).json({ error: "invalid url" });
     return;
   }
+
   try {
-    const upstream = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+    const upstream = await fetch(parsed.toString(), { signal: AbortSignal.timeout(10_000) });
     if (!upstream.ok) { res.status(502).json({ error: "upstream error" }); return; }
     const data = await upstream.json();
     res.json(data);
