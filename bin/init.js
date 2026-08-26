@@ -50,20 +50,21 @@ export async function runInit(cwd) {
     }));
   } else if (provider === "bedrock") {
     env.LLM_PROVIDER = "bedrock";
-    env.AWS_ACCESS_KEY_ID = guard(await text({
-      message: "AWS_ACCESS_KEY_ID",
-      placeholder: "AKIA...",
-      validate: (v) => v?.trim() ? undefined : "Required",
+    const accessKey = guard(await text({
+      message: "AWS_ACCESS_KEY_ID (leave blank to use existing profile keys / default credential chain)",
+      placeholder: "AKIA... or blank",
     }));
-    env.AWS_SECRET_ACCESS_KEY = guard(await text({
-      message: "AWS_SECRET_ACCESS_KEY",
-      placeholder: "...",
-      validate: (v) => v?.trim() ? undefined : "Required",
+    if (accessKey.trim()) env.AWS_ACCESS_KEY_ID = accessKey.trim();
+    const secretKey = guard(await text({
+      message: "AWS_SECRET_ACCESS_KEY (leave blank to use the default credential chain)",
+      placeholder: "leave blank if using a profile / SSO / instance role",
     }));
-    env.AWS_REGION = guard(await text({
-      message: "AWS region",
-      defaultValue: "us-east-1",
+    if (secretKey.trim()) env.AWS_SECRET_ACCESS_KEY = secretKey.trim();
+    const region = guard(await text({
+      message: "AWS region (leave blank to use the profile / default region)",
+      placeholder: "ap-northeast-1",
     }));
+    if (region.trim()) env.AWS_REGION = region.trim();
   } else if (provider === "ollama") {
     env.LLM_PROVIDER = "ollama";
     const baseUrl = guard(await text({

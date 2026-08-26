@@ -69,11 +69,11 @@ npm install -g @m8i-51/shoal
 npx playwright install chromium
 ```
 
-Move to the project you want to explore, then run:
+Move to the directory that should hold shoal's config, then run:
 
 ```bash
-cd your-project
-shoal init     # creates .env with all available options
+cd your-project          # or a subdirectory — see [Where config lives](#where-config-lives)
+shoal init               # creates .env with all available options
 ```
 
 Open `.env` and set at minimum:
@@ -83,13 +83,15 @@ ANTHROPIC_API_KEY=sk-ant-...
 BASE_URL=http://localhost:3000   # URL of the app to explore
 ```
 
-Then run:
+Then run **from that same directory**:
 
 ```bash
 shoal serve    # open web dashboard at http://localhost:4000
 shoal          # or run agents directly from the terminal
 shoal config   # update settings in existing .env (e.g. issue trackers)
 ```
+
+On startup shoal prints which `.env` it loaded (or that it found none). If you see `0 variables injected`, you are not in the directory that contains `.env`.
 
 **Or clone and develop locally:**
 
@@ -149,6 +151,46 @@ All signals work passively — no configuration needed. They improve automatical
 
 ---
 
+## Where config lives
+
+shoal reads `.env`, `test-accounts/`, `shoal.config.ts`, and writes `logs/` / `findings/` from the **current working directory** — not from the global install location, and not automatically from a monorepo root.
+
+On startup:
+
+```
+[env] working directory: /path/you/ran/from
+[env] loaded /path/you/ran/from/.env (12 variables)
+```
+
+If that directory has no `.env`:
+
+```
+[env] no .env found at /path/you/ran/from/.env (0 variables injected)
+```
+
+With 0 injected variables, shoal falls back to the default LLM provider (Anthropic) with no API key, which then fails. Logs also go to the working directory, so it is easy to miss that a subdirectory config was never read.
+
+**Putting config in a subdirectory** (typical in a monorepo):
+
+```bash
+mkdir -p apps/shoal
+cd apps/shoal
+shoal init                 # writes apps/shoal/.env
+# add test-accounts/accounts.json here too
+shoal serve                # dashboard; logs and findings land in apps/shoal/
+```
+
+Or stay at the repo root and point shoal at that directory:
+
+```bash
+shoal serve --dir apps/shoal
+shoal --dir apps/shoal
+# load a specific file but keep cwd for logs:
+shoal serve --env-file apps/shoal/.env
+```
+
+`--dir` also changes where `test-accounts/`, `logs/`, `findings/`, and `shoal.config.ts` are resolved. `SHOAL_DIR` and `SHOAL_ENV_FILE` are the env-var equivalents.
+
 ## Configuration
 
 | Variable | Default | Description |
@@ -184,6 +226,8 @@ In `safe` and `read-only` modes, API tools marked `destructive: true` in your ta
 ¹ The Notion database must have `Name` (title), `Labels` (multi_select), and `Status` (select) properties.
 
 Multiple trackers can be active at the same time — findings are posted to all of them. If `ISSUE_TRACKERS` is not set but `GITHUB_TOKEN` and `GITHUB_REPO` are present, GitHub is used automatically (backward compatible).
+
+Backlog projects do not share issue type or priority IDs. On each filing, shoal fetches the project's type and priority lists, matches shoal categories (`bug` / `ux` / `feature-request` / `goal-gap`) to names such as バグ・要望・タスク / 高・中・低, and asks the LLM only when no name matches. The chosen type and priority are logged (`[backlog] selected issueType "バグ" (id=…) for category=bug`).
 
 ---
 
@@ -338,7 +382,7 @@ shoal defaults to Anthropic Claude. To use a different provider, set these varia
 | Provider | Variables |
 |---|---|
 | Anthropic (default) | `ANTHROPIC_API_KEY` |
-| Amazon Bedrock | `LLM_PROVIDER=bedrock`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` |
+| Amazon Bedrock | `LLM_PROVIDER=bedrock`, `AWS_REGION` (keys optional — default credential chain) |
 | OpenAI | `LLM_PROVIDER=openai`, `LLM_API_KEY`, `LLM_MODEL` |
 | OpenRouter | `LLM_PROVIDER=openrouter`, `LLM_API_KEY`, `LLM_MODEL` |
 | Groq | `LLM_PROVIDER=groq`, `LLM_API_KEY`, `LLM_MODEL` |
@@ -347,9 +391,25 @@ shoal defaults to Anthropic Claude. To use a different provider, set these varia
 | Ollama | `LLM_BASE_URL=http://localhost:11434/v1`, `LLM_MODEL` |
 | LM Studio | `LLM_BASE_URL=http://localhost:1234/v1`, `LLM_MODEL` |
 
-For Bedrock, set `LLM_MODEL` to a Bedrock model ID such as `anthropic.claude-3-5-sonnet-20241022-v2:0`. Cross-region inference profiles (e.g. `us.anthropic.claude-3-5-sonnet-20241022-v2:0`) are also supported.
+### Amazon Bedrock
 
-See `.env.example` for full examples.
+Leave `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` **unset** to use the default AWS credential chain (shared credentials file, named profile, SSO cache, or instance role). You do not have to run `aws sso login` if the machine already has long-lived keys in the default profile — short-lived SSO login is often rejected in that situation. Use the existing keys (or a dedicated profile) instead.
+
+**Do not** put empty `AWS_ACCESS_KEY_ID=` / `AWS_SECRET_ACCESS_KEY=` lines in `.env`. An empty value overrides the credential chain and authentication fails. shoal strips empty AWS keys at startup and logs a warning.
+
+Set `LLM_MODEL` to a Bedrock model ID **or** an inference profile ID. Not every model generation is available for in-region invoke or for every geographic profile. If you need data to stay in-country, pick a generation that exists as a geo profile in that region:
+
+| Scope | Example `LLM_MODEL` | Typical `AWS_REGION` |
+|---|---|---|
+| Foundation model (on-demand, when offered) | `anthropic.claude-3-5-haiku-20241022-v1:0` | region that hosts the model |
+| US cross-region | `us.anthropic.claude-sonnet-4-5-20250929-v1:0` | `us-east-1` |
+| EU cross-region | `eu.anthropic.claude-sonnet-4-5-20250929-v1:0` | `eu-central-1` |
+| APAC cross-region | `apac.anthropic.claude-sonnet-4-5-20250929-v1:0` | `ap-northeast-1` |
+| Japan (Tokyo + Osaka only) | `jp.anthropic.claude-sonnet-4-5-20250929-v1:0` | `ap-northeast-1` |
+| Japan | `jp.anthropic.claude-haiku-4-5-20251001-v1:0` | `ap-northeast-1` |
+| Japan | `jp.anthropic.claude-sonnet-4-6` | `ap-northeast-1` |
+
+List profiles in your account with `aws bedrock list-inference-profiles`. Copy-paste examples live in `.env.example`.
 
 ---
 

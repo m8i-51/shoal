@@ -7,7 +7,8 @@
  *   (RUN_ID省略時は最新のrunを使用)
  */
 
-import "dotenv/config";
+import { loadShoalEnv } from "./framework/load-env";
+loadShoalEnv({ quiet: process.env.NODE_ENV === "test" });
 import * as fs from "fs";
 import * as path from "path";
 import { createLLMClient } from "./framework/llm-client";
