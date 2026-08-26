@@ -16,7 +16,7 @@ import { createLLMClient } from "./framework/llm-client";
 import type { Tool } from "./framework/llm-client";
 import { createMessageWithRetry, runAgentLoop, sleep, rateLimitRetries } from "./framework/agent-loop";
 import { collectedFindings, initRunLog, saveRunLog, saveFinding, getSwarmSignals, runLog } from "./framework/findings";
-import { loadAgents, addAgent, retireAgent, recordAgentMemories, formatAgentMemories, type Agent, type MemoryInput } from "./framework/agent-store";
+import { loadAgents, addAgent, retireAgent, recordAgentMemories, formatAgentMemories, buildMemoryInputs, type Agent } from "./framework/agent-store";
 import { updateCoverage, computeWeightedSummary, getLastRunPaths, getFindingHotspots } from "./framework/coverage";
 import { computeExperienceScore, formatExperienceLine } from "./framework/experience-score";
 import { updateAdoption } from "./framework/adoption";
@@ -709,6 +709,47 @@ interface BrowserAgentLog {
   error: string | null;
 }
 
+function browserLogToAgentLog(agent: Agent, log: BrowserAgentLog): AgentLog {
+  return {
+    agentType: "browser",
+    agentId: agent.id,
+    agentName: log.agentName,
+    role: agent.role,
+    startedAt: log.startedAt,
+    completedAt: log.completedAt,
+    status: log.status,
+    iterations: log.iterations,
+    actions: log.actions.map((a) => ({
+      timestamp: a.timestamp,
+      tool: a.tool,
+      input: a.input,
+      result: null,
+      durationMs: a.durationMs,
+    })),
+    visitedPaths: log.visitedPaths,
+    issuesPosted: log.feedbacksSaved.map((f) => ({
+      title: f.title,
+      category: f.category,
+      url: null,
+    })),
+    regressionChecks: [],
+    error: log.error,
+  };
+}
+
+function applyAgentSummary(agentLog: AgentLog): void {
+  runLog.summary.totalActions += agentLog.actions.length;
+  if (agentLog.status === "completed") runLog.summary.completed++;
+  else if (agentLog.status === "error") runLog.summary.errors++;
+  if (agentLog.status === "iteration_limit") runLog.summary.iterationLimitReached++;
+}
+
+function recordBrowserAgentRun(agent: Agent, browserLog: BrowserAgentLog): void {
+  const agentLog = browserLogToAgentLog(agent, browserLog);
+  runLog.agents.push(agentLog);
+  applyAgentSummary(agentLog);
+}
+
 const TOOLS_THAT_SEND_SCREENSHOT = new Set(["navigate", "post_feedback", "view_screen"]);
 
 const BROWSER_TOOLS: Anthropic.Tool[] = [
@@ -1283,7 +1324,8 @@ async function runVerifyMode(
   await applyBrowserGuardrails(context, SHOAL_MODE);
   const page = await context.newPage();
   try {
-    await runBrowserAgent(verifier, page, productSpec, { scenario }, scenarioOutcomes);
+    const browserLog = await runBrowserAgent(verifier, page, productSpec, { scenario }, scenarioOutcomes);
+    recordBrowserAgentRun(verifier, browserLog);
   } finally {
     await context.close();
   }
@@ -1420,7 +1462,7 @@ async function main() {
       process.exit(1);
     }
 
-    // 6.5. エージェント数が確定したので totalAgents を更新
+    // 6.5. roster サイズを記録（実際に走った agent 数は run 終了時に runLog.agents.length で確定）
     runLog.summary.totalAgents = allAgents.length;
 
     // 7. API agents (exploration + regression)
@@ -1536,6 +1578,10 @@ async function main() {
       })
     );
     const allVisitedPaths = browserLogs.flatMap((log) => log.visitedPaths);
+    for (let i = 0; i < browserAgents.length; i++) {
+      recordBrowserAgentRun(browserAgents[i], browserLogs[i]);
+    }
+    runLog.summary.totalAgents = runLog.agents.length;
 
     // 9. triage (API + browser findings)
     await sleep(2000);
@@ -1549,20 +1595,11 @@ async function main() {
     }
 
     // 10. record each agent's personal memory (frustrations / achievements)
-    const memoryInputs = new Map<string, MemoryInput>();
-    for (const log of runLog.agents) {
-      const input: MemoryInput = { frustrations: [], achievements: [] };
-      for (const o of scenarioOutcomes) {
-        if (o.agentId !== log.agentId) continue;
-        if (o.achieved) input.achievements.push(`Completed "${o.scenarioTitle}"`);
-        else input.frustrations.push(`Could not complete "${o.scenarioTitle}" — ${o.reason}`);
-      }
-      for (const f of collectedFindings) {
-        if (f.agentId !== log.agentId) continue;
-        input.frustrations.push(`Reported [${f.category}] "${f.title}"`);
-      }
-      memoryInputs.set(log.agentId, input);
-    }
+    const memoryInputs = buildMemoryInputs(
+      runLog.agents.map((log) => log.agentId),
+      scenarioOutcomes,
+      collectedFindings,
+    );
     recordAgentMemories(runLog.runId, memoryInputs);
 
     // 11. update coverage (report が最新スコアを含められるよう先に更新する)

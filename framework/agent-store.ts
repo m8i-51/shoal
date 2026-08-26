@@ -70,6 +70,42 @@ export interface MemoryInput {
   achievements: string[];
 }
 
+export interface MemoryScenarioOutcome {
+  agentId: string;
+  scenarioTitle: string;
+  achieved: boolean;
+  reason: string;
+}
+
+export interface MemoryFindingRef {
+  agentId: string;
+  category: string;
+  title: string;
+}
+
+/** run 終了時の scenario outcome / finding から agent ごとの memory 入力を組み立てる */
+export function buildMemoryInputs(
+  agentIds: Iterable<string>,
+  scenarioOutcomes: MemoryScenarioOutcome[],
+  findings: MemoryFindingRef[],
+): Map<string, MemoryInput> {
+  const memoryInputs = new Map<string, MemoryInput>();
+  for (const agentId of agentIds) {
+    const input: MemoryInput = { frustrations: [], achievements: [] };
+    for (const o of scenarioOutcomes) {
+      if (o.agentId !== agentId) continue;
+      if (o.achieved) input.achievements.push(`Completed "${o.scenarioTitle}"`);
+      else input.frustrations.push(`Could not complete "${o.scenarioTitle}" — ${o.reason}`);
+    }
+    for (const f of findings) {
+      if (f.agentId !== agentId) continue;
+      input.frustrations.push(`Reported [${f.category}] "${f.title}"`);
+    }
+    memoryInputs.set(agentId, input);
+  }
+  return memoryInputs;
+}
+
 /** run 終了時に各エージェントの体験を記録する。何も体験していないエージェントはスキップ */
 export function recordAgentMemories(runId: string, inputs: Map<string, MemoryInput>): void {
   const agents = loadAgents();

@@ -252,6 +252,12 @@ describe("generateReport", () => {
     expect(getSavedHtml()).toContain("regression");
   });
 
+  it("browser エージェントに browser バッジが付く", () => {
+    const agent = makeAgentLog({ agentType: "browser" });
+    generateReport(makeRunLog({ agents: [agent] }), [], emptyTriage, makeProductSpec(), [], new Map());
+    expect(getSavedHtml()).toContain("browser");
+  });
+
   it("regression checks がある場合 Progress セクションが表示される", () => {
     const checks: RegressionCheck[] = [
       { issueNumber: 42, issueTitle: "Login button broken", status: "fixed", note: "", regressionUrl: null },
