@@ -7,7 +7,7 @@ vi.mock("../findings", () => ({ saveFinding: vi.fn() }));
 import * as fs from "fs";
 import { createMessageWithRetry } from "../agent-loop";
 import { saveFinding } from "../findings";
-import { loadTestAccounts, inspectAccountsFile, resolveAccountSetup, runAccountManager, type TestAccount } from "../account-manager";
+import { loadTestAccounts, inspectAccountsFile, resolveAccountSetup, runAccountManager, loginCandidateUrls, resolveLoginUrl, planBrowserAuth, authPrompt, describeAuthPlan, type TestAccount } from "../account-manager";
 import type { ProductSpec } from "../product-discovery";
 import type { LLMClient } from "../llm-client";
 import type { Page, BrowserContext } from "playwright";
@@ -215,12 +215,12 @@ describe("resolveAccountSetup", () => {
 });
 
 describe("runAccountManager", () => {
-  it("ログインに失敗した場合は空配列を返しページを閉じる", async () => {
+  it("ログインに失敗した場合は資格情報を残して返し、ページを閉じる", async () => {
     // performLogin: email セレクタが一つも visible にならない -> false
     const page = makeFakePage();
     const context = makeFakeContext(page);
     const result = await runAccountManager("https://example.com", credentials, makeSpec(), context, {} as LLMClient, "m", "run_1");
-    expect(result).toEqual([]);
+    expect(result).toEqual([{ email: "seed@example.com", password: "pw", role: "user", storageStatePath: "" }]);
     expect(page.close).toHaveBeenCalled();
     expect(createMessageWithRetry).not.toHaveBeenCalled();
   });
@@ -485,5 +485,178 @@ describe("runAccountManager", () => {
     expect(result.map((a) => a.email)).toEqual(["seed@example.com", "member@example.com"]);
     expect(result.every((a) => a.storageStatePath)).toBe(true);
     expect(context.storageState).toHaveBeenCalledTimes(2);
+  });
+
+  it("spec.loginPath があれば BASE_URL より先にそこにログインする", async () => {
+    const page = makeLoggedInPage();
+    const context = makeFakeContext(page);
+    vi.mocked(createMessageWithRetry).mockResolvedValueOnce(toolUseResponse("done", {}) as never);
+
+    await runAccountManager(
+      "https://example.com",
+      credentials,
+      makeSpec({ loginPath: "/signin" }),
+      context,
+      {} as LLMClient,
+      "m",
+      "run_1",
+    );
+    expect(page.goto).toHaveBeenNthCalledWith(1, "https://example.com/signin", expect.any(Object));
+  });
+
+  it("トップにフォームが無くても loginPath でログインできる", async () => {
+    let currentUrl = "";
+    const page = makeFakePage({
+      goto: vi.fn(async (url: string) => { currentUrl = url; }),
+      locator: vi.fn(() => {
+        const onLogin = currentUrl.includes("/signin");
+        return makeFakeLocator({ isVisible: vi.fn().mockResolvedValue(onLogin) });
+      }),
+    });
+    const context = makeFakeContext(page);
+    vi.mocked(createMessageWithRetry).mockResolvedValueOnce(toolUseResponse("done", {}) as never);
+
+    const result = await runAccountManager(
+      "https://example.com",
+      credentials,
+      makeSpec({ loginPath: "/signin" }),
+      context,
+      {} as LLMClient,
+      "m",
+      "run_1",
+    );
+    expect(page.goto).toHaveBeenCalledWith("https://example.com/signin", expect.any(Object));
+    expect(result[0].storageStatePath).not.toBe("");
+  });
+
+  it("loginPath にフォームが無ければ BASE_URL を試す", async () => {
+    let currentUrl = "";
+    const page = makeFakePage({
+      goto: vi.fn(async (url: string) => { currentUrl = url; }),
+      locator: vi.fn(() => {
+        const onRoot = currentUrl === "https://example.com" || currentUrl === "https://example.com/";
+        return makeFakeLocator({ isVisible: vi.fn().mockResolvedValue(onRoot) });
+      }),
+    });
+    const context = makeFakeContext(page);
+    vi.mocked(createMessageWithRetry).mockResolvedValueOnce(toolUseResponse("done", {}) as never);
+
+    const result = await runAccountManager(
+      "https://example.com",
+      credentials,
+      makeSpec({ loginPath: "/missing" }),
+      context,
+      {} as LLMClient,
+      "m",
+      "run_1",
+    );
+    expect(page.goto).toHaveBeenCalledWith("https://example.com/missing", expect.any(Object));
+    expect(page.goto).toHaveBeenCalledWith("https://example.com", expect.any(Object));
+    expect(result[0].storageStatePath).not.toBe("");
+  });
+});
+
+describe("loginCandidateUrls / resolveLoginUrl", () => {
+  it("loginPath を BASE_URL より先に置く", () => {
+    expect(loginCandidateUrls("https://example.com", "/login")).toEqual([
+      "https://example.com/login",
+      "https://example.com",
+    ]);
+  });
+
+  it("同じ URL は重複しない", () => {
+    expect(loginCandidateUrls("https://example.com/", "/")).toEqual(["https://example.com/"]);
+    expect(loginCandidateUrls("https://example.com")).toEqual(["https://example.com"]);
+  });
+
+  it("絶対 URL の loginPath をそのまま使う", () => {
+    expect(resolveLoginUrl("https://example.com", "https://example.com/auth/login")).toBe("https://example.com/auth/login");
+  });
+});
+
+describe("planBrowserAuth / authPrompt", () => {
+  const sessionAccount: TestAccount = { email: "a@x.com", password: "secret", role: "admin", storageStatePath: "/states/admin.json" };
+  const credsOnly: TestAccount = { email: "b@x.com", password: "secret2", role: "member", storageStatePath: "" };
+
+  it("セッションがあるロールは注入する", () => {
+    const plan = planBrowserAuth({
+      testAccounts: [sessionAccount],
+      accountRole: "admin",
+      preferAccountSession: false,
+    });
+    expect(plan.handoff.kind).toBe("session");
+    expect(plan.storageStatePath).toBe("/states/admin.json");
+    expect(authPrompt(plan.handoff)).toContain("already logged in as a@x.com");
+    expect(authPrompt(plan.handoff)).not.toContain("secret");
+  });
+
+  it("再訪セッションはアカウントより優先する（マルチアクターでなければ）", () => {
+    const plan = planBrowserAuth({
+      testAccounts: [sessionAccount],
+      accountRole: "admin",
+      returningSessionPath: "/cache/sessions/agent.json",
+      preferAccountSession: false,
+    });
+    expect(plan.handoff).toEqual({ kind: "session" });
+    expect(plan.storageStatePath).toBe("/cache/sessions/agent.json");
+    expect(authPrompt(plan.handoff)).toBe("");
+  });
+
+  it("マルチアクターはアカウントセッションを再訪より優先する", () => {
+    const plan = planBrowserAuth({
+      testAccounts: [sessionAccount],
+      accountRole: "admin",
+      returningSessionPath: "/cache/sessions/agent.json",
+      preferAccountSession: true,
+    });
+    expect(plan.storageStatePath).toBe("/states/admin.json");
+  });
+
+  it("セッションが無いときは accounts.json の値と loginPath を渡す", () => {
+    const plan = planBrowserAuth({
+      testAccounts: [credsOnly],
+      accountRole: "member",
+      loginPath: "/signin",
+      preferAccountSession: false,
+    });
+    expect(plan.handoff).toEqual({
+      kind: "credentials",
+      email: "b@x.com",
+      password: "secret2",
+      role: "member",
+      loginPath: "/signin",
+    });
+    expect(plan.startPath).toBe("/signin");
+    const prompt = authPrompt(plan.handoff);
+    expect(prompt).toContain("b@x.com");
+    expect(prompt).toContain("secret2");
+    expect(prompt).toContain("/signin");
+    expect(prompt).toMatch(/do NOT invent/i);
+    expect(describeAuthPlan("Ada", plan)).toContain("handing off credentials");
+  });
+
+  it("ロール不一致でも既知の資格情報があれば推測させない", () => {
+    const plan = planBrowserAuth({
+      testAccounts: [credsOnly],
+      accountRole: "explorer",
+      loginPath: "/login",
+      preferAccountSession: false,
+    });
+    expect(plan.handoff.kind).toBe("credentials");
+    if (plan.handoff.kind !== "credentials") return;
+    expect(plan.handoff.email).toBe("b@x.com");
+  });
+
+  it("資格情報が無いときはゲストにして推測を禁ずる", () => {
+    const plan = planBrowserAuth({
+      testAccounts: [],
+      accountRole: "user",
+      preferAccountSession: false,
+    });
+    expect(plan.handoff).toEqual({ kind: "guest" });
+    const prompt = authPrompt(plan.handoff);
+    expect(prompt).toMatch(/Do NOT invent, guess/i);
+    expect(prompt).not.toContain("Password:");
+    expect(describeAuthPlan("Bea", plan)).toContain("guest");
   });
 });

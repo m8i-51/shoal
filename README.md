@@ -375,7 +375,9 @@ Create `test-accounts/accounts.json` (gitignored) with your test credentials. Th
 ]
 ```
 
-On startup shoal reads this file and runs Account Manager: it logs in with each account, saves Playwright session state, and passes those sessions to browser agents. If a seed admin is available (from `accounts.json` or `target.credentials`), it also explores user management and tries to create one test account per role.
+On startup shoal reads this file and runs Account Manager: it logs in with each account **on the login URL found during product discovery** (not only `BASE_URL`), saves Playwright session state, and passes those sessions to browser agents. If a seed admin is available (from `accounts.json` or `target.credentials`), it also explores user management and tries to create one test account per role.
+
+If session injection fails, browser agents are **not** left to invent logins. They either receive the `accounts.json` credentials and the discovered login path, or they explore as a guest with an explicit instruction not to guess usernames or passwords.
 
 Startup logs always report whether `accounts.json` was found, whether config credentials were set, and why Account Manager started or was skipped.
 

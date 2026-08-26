@@ -88,6 +88,103 @@ export interface ProductSpec {
   confidence: "high" | "medium" | "low";
   sources: string[];
   discoveredAt?: string;
+  /** Path of the login / sign-in page when one was observed (e.g. `/login`). */
+  loginPath?: string;
+}
+
+const LOGIN_SEGMENT = /^(?:log[-_]?in|sign[-_]?in|sign[-_]?on|logon)$/i;
+const AUTH_PREFIX = /^(?:auth|account|accounts|session|sessions|users)$/i;
+
+/** True when a URL pathname looks like a login / sign-in page. */
+export function isLoginPath(pathname: string): boolean {
+  const parts = pathname.split("/").filter(Boolean);
+  if (parts.length === 0) return false;
+  if (LOGIN_SEGMENT.test(parts[0])) return true;
+  if (parts.length >= 2 && AUTH_PREFIX.test(parts[0]) && LOGIN_SEGMENT.test(parts[1])) return true;
+  return false;
+}
+
+/** Normalize a login path or absolute URL to a same-origin pathname. */
+export function normalizeLoginPath(raw: string, baseUrl: string): string | undefined {
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  try {
+    const url = new URL(trimmed, baseUrl);
+    const base = new URL(baseUrl);
+    if (url.origin !== base.origin) return undefined;
+    const pathname = url.pathname || "/";
+    return pathname;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Pull a login path out of free-form spec text (features, sources, etc.). */
+export function inferLoginPathFromText(text: string): string | undefined {
+  const matches = text.match(/\/[A-Za-z0-9_./-]*/g) ?? [];
+  for (const match of matches) {
+    const pathname = match.split("?")[0].split("#")[0];
+    if (isLoginPath(pathname)) return pathname;
+  }
+  return undefined;
+}
+
+/**
+ * Login path to use for Account Manager / credential handoff.
+ * Prefers an explicit `spec.loginPath`, then infers from features/sources
+ * (so cached specs from before this field still work when discovery already saw /login).
+ */
+export function resolveLoginPath(spec: ProductSpec): string | undefined {
+  const explicit = spec.loginPath ? spec.loginPath.trim() : "";
+  if (explicit && explicit !== "/") {
+    if (/^https?:\/\//i.test(explicit)) {
+      try {
+        const pathname = new URL(explicit).pathname;
+        if (pathname && pathname !== "/") return pathname;
+      } catch {
+        // fall through to slash-prefix
+      }
+    }
+    return explicit.startsWith("/") ? explicit.split("?")[0] : `/${explicit}`;
+  }
+  const blob = [spec.features, spec.uiFeatures, ...(spec.sources ?? [])].join("\n");
+  return inferLoginPathFromText(blob);
+}
+
+type LoginDetection = { formPath?: string; linkPath?: string };
+
+/**
+ * Observe the current page for a login form or a link to one.
+ * Form pages win over mere links — the form is where credentials get typed.
+ */
+export async function detectLoginPath(page: Page, currentPath: string, baseUrl: string): Promise<LoginDetection> {
+  const result: LoginDetection = {};
+  try {
+    const passwordVisible = await page.locator('input[type="password"]').first().isVisible({ timeout: 500 }).catch(() => false);
+    if (passwordVisible) {
+      result.formPath = currentPath || "/";
+    }
+  } catch {
+    // page mocks / closed pages — skip
+  }
+
+  try {
+    const raw = await page.evaluate(() =>
+      Array.from(document.querySelectorAll("a[href]"), (a) => (a as HTMLAnchorElement).getAttribute("href") || "")
+    );
+    const hrefs = Array.isArray(raw) ? raw : [];
+    for (const href of hrefs) {
+      const path = normalizeLoginPath(href, baseUrl);
+      if (path && isLoginPath(path)) {
+        result.linkPath = path;
+        break;
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  return result;
 }
 
 function specCachePath(baseUrl: string): string {
@@ -126,6 +223,7 @@ function printSpec(spec: ProductSpec): void {
   console.log(`  users: ${spec.targetUsers}`);
   console.log(`  features:\n${spec.features.split("\n").map((l) => `    ${l}`).join("\n")}`);
   console.log(`  confidence: ${spec.confidence} / sources: ${spec.sources.join(", ")}`);
+  if (spec.loginPath) console.log(`  login: ${spec.loginPath}`);
   console.log(`${"─".repeat(60)}\n`);
 }
 
@@ -169,6 +267,10 @@ const DISCOVERY_TOOLS: Anthropic.Tool[] = [
         uiFeatures: {
           type: "string",
           description: "UI-only interactions and features that are NOT visible from API responses alone — things only discoverable by looking at the actual screen. List per screen. Examples: client-side filters, view mode toggles (card/compact), warning modals, inline validation messages, hover states, keyboard shortcuts, drag-and-drop, collapsible panels, tabs that switch without navigation, tooltips, empty-state messages, loading skeletons. Format: 'Screen: feature 1 · feature 2 · feature 3'",
+        },
+        loginPath: {
+          type: "string",
+          description: "Path of the login / sign-in page if you found one (e.g. /login, /signin, /auth/login). Empty string if the app has no login.",
         },
         appGoals: {
           type: "array",
@@ -215,6 +317,7 @@ Guidelines for output_spec:
 - features: list per screen as "Screen name: feature 1 · feature 2 · feature 3"
 - designContext: note the UI framework (look for class names like "tw-", "MuiButton", "btn btn-"), visual style, and what design conventions apply for this app type
 - uiFeatures: list UI-only features per screen that are invisible from API responses (filters, toggles, modals, validation messages, empty states, etc.)
+- loginPath: if you saw a login / sign-in form or a link to one, record that path (e.g. /login)
 - confidence: high if README/official docs obtained, low if UI observation only
 - appGoals: 3–6 concrete goals this app is designed to achieve (user + business perspective)`;
 
@@ -229,6 +332,8 @@ Guidelines for output_spec:
 
   let spec: ProductSpec | null = null;
   let iterations = 0;
+  let observedFormPath: string | undefined;
+  let observedLinkPath: string | undefined;
 
   while (iterations < 8 && !spec) {
     iterations++;
@@ -264,6 +369,15 @@ Guidelines for output_spec:
           ]);
           result = `[${path} text]\n${text}\n\n[ARIA tree]\n${aria}`;
           console.log(`  [product-discovery] observed: ${path}`);
+          const detected = await detectLoginPath(page, path, baseUrl);
+          if (detected.formPath && !observedFormPath) {
+            observedFormPath = detected.formPath;
+            console.log(`  [product-discovery] login form at: ${observedFormPath}`);
+          }
+          if (detected.linkPath && !observedLinkPath) {
+            observedLinkPath = detected.linkPath;
+            console.log(`  [product-discovery] login link: ${observedLinkPath}`);
+          }
         } catch (e) {
           result = `fetch failed: ${String(e)}`;
         }
@@ -282,6 +396,12 @@ Guidelines for output_spec:
 
       } else if (toolUse.name === "output_spec") {
         const input = toolUse.input as ProductSpec;
+        const fromLlm = typeof input.loginPath === "string"
+          ? normalizeLoginPath(input.loginPath, baseUrl)
+          : undefined;
+        const loginPath = observedFormPath
+          ?? (fromLlm && fromLlm !== "/" ? fromLlm : undefined)
+          ?? observedLinkPath;
         spec = {
           appName: String(input.appName),
           appDescription: String(input.appDescription),
@@ -292,6 +412,7 @@ Guidelines for output_spec:
           appGoals: Array.isArray(input.appGoals) ? input.appGoals.map(String) : [],
           confidence: input.confidence,
           sources: Array.isArray(input.sources) ? input.sources.map(String) : [],
+          ...(loginPath ? { loginPath } : {}),
         };
         result = "product spec finalized";
         console.log(`  [product-discovery] spec confirmed (confidence: ${spec.confidence})`);
@@ -308,6 +429,7 @@ Guidelines for output_spec:
 
   if (!spec) {
     console.log("  [product-discovery] spec not confirmed, using fallback");
+    const loginPath = observedFormPath ?? observedLinkPath;
     spec = {
       appName: new URL(baseUrl).hostname,
       appDescription: "(auto-discovery failed)",
@@ -318,6 +440,7 @@ Guidelines for output_spec:
       appGoals: [],
       confidence: "low",
       sources: [],
+      ...(loginPath ? { loginPath } : {}),
     };
   }
 

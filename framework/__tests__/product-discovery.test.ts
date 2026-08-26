@@ -6,16 +6,22 @@ vi.stubGlobal("fetch", vi.fn());
 
 import * as fs from "fs";
 import { createMessageWithRetry } from "../agent-loop";
-import { discoverProduct, loadCachedSpec, type ProductSpec } from "../product-discovery";
+import { discoverProduct, loadCachedSpec, isLoginPath, inferLoginPathFromText, normalizeLoginPath, resolveLoginPath, detectLoginPath, type ProductSpec } from "../product-discovery";
 import type { LLMClient } from "../llm-client";
 import type { Page } from "playwright";
 
-function makeFakePage(): Page {
+function makeFakePage(overrides: Record<string, unknown> = {}): Page {
+  const locator = {
+    first: () => locator,
+    isVisible: vi.fn().mockResolvedValue(false),
+  };
   return {
     goto: vi.fn().mockResolvedValue(undefined),
     waitForTimeout: vi.fn().mockResolvedValue(undefined),
     evaluate: vi.fn().mockResolvedValue("page text"),
     ariaSnapshot: vi.fn().mockResolvedValue("aria tree"),
+    locator: vi.fn(() => locator),
+    ...overrides,
   } as unknown as Page;
 }
 
@@ -224,5 +230,96 @@ describe("discoverProduct", () => {
     await discoverProduct("https://example.com", makeFakePage(), {} as LLMClient, "m");
     const mdCall = vi.mocked(fs.writeFileSync).mock.calls.find(([p]) => String(p).includes("_UI_FEATURES.md"));
     expect(mdCall).toBeUndefined();
+  });
+});
+
+describe("login path helpers", () => {
+  it("isLoginPath はログインらしいパスだけを認める", () => {
+    expect(isLoginPath("/login")).toBe(true);
+    expect(isLoginPath("/signin")).toBe(true);
+    expect(isLoginPath("/sign-in")).toBe(true);
+    expect(isLoginPath("/auth/login")).toBe(true);
+    expect(isLoginPath("/users/sign_in")).toBe(true);
+    expect(isLoginPath("/")).toBe(false);
+    expect(isLoginPath("/logout")).toBe(false);
+    expect(isLoginPath("/login-history")).toBe(false);
+    expect(isLoginPath("/dashboard")).toBe(false);
+  });
+
+  it("normalizeLoginPath は同一オリジンの pathname を返す", () => {
+    expect(normalizeLoginPath("/login", "https://example.com")).toBe("/login");
+    expect(normalizeLoginPath("https://example.com/signin", "https://example.com")).toBe("/signin");
+    expect(normalizeLoginPath("https://other.com/login", "https://example.com")).toBeUndefined();
+    expect(normalizeLoginPath("", "https://example.com")).toBeUndefined();
+  });
+
+  it("inferLoginPathFromText は sources/features から /login を拾う", () => {
+    expect(inferLoginPathFromText("/ (top page)\n/login (UI)")).toBe("/login");
+    expect(inferLoginPathFromText("Screen: Dashboard · /signin form")).toBe("/signin");
+    expect(inferLoginPathFromText("no auth here")).toBeUndefined();
+  });
+
+  it("resolveLoginPath は明示フィールドを優先し、無ければテキストから推論する", () => {
+    expect(resolveLoginPath(makeOutputSpecInput({ loginPath: "/signin" }))).toBe("/signin");
+    expect(resolveLoginPath(makeOutputSpecInput({ loginPath: "https://example.com/auth/login" }))).toBe("/auth/login");
+    expect(resolveLoginPath(makeOutputSpecInput({ sources: ["/login (UI)"] }))).toBe("/login");
+    expect(resolveLoginPath(makeOutputSpecInput())).toBeUndefined();
+  });
+});
+
+describe("detectLoginPath / discoverProduct loginPath", () => {
+  it("password フィールドがあるページを loginPath として記録する", async () => {
+    const locator = {
+      first: () => locator,
+      isVisible: vi.fn().mockResolvedValue(true),
+    };
+    const page = makeFakePage({ locator: vi.fn(() => locator) });
+    vi.mocked(createMessageWithRetry)
+      .mockResolvedValueOnce(toolUseResponse("navigate_and_read", { path: "/signin" }) as never)
+      .mockResolvedValueOnce(toolUseResponse("output_spec", makeOutputSpecInput()) as never);
+    const result = await discoverProduct("https://example.com", page, {} as LLMClient, "m");
+    expect(result.loginPath).toBe("/signin");
+  });
+
+  it("フォーム未観測なら output_spec の loginPath を使う", async () => {
+    vi.mocked(createMessageWithRetry)
+      .mockResolvedValueOnce(toolUseResponse("output_spec", makeOutputSpecInput({ loginPath: "/auth/login" })) as never);
+    const result = await discoverProduct("https://example.com", makeFakePage(), {} as LLMClient, "m");
+    expect(result.loginPath).toBe("/auth/login");
+  });
+
+  it("観測したフォームは LLM の loginPath より優先する", async () => {
+    const locator = {
+      first: () => locator,
+      isVisible: vi.fn().mockResolvedValue(true),
+    };
+    const page = makeFakePage({ locator: vi.fn(() => locator) });
+    vi.mocked(createMessageWithRetry)
+      .mockResolvedValueOnce(toolUseResponse("navigate_and_read", { path: "/login" }) as never)
+      .mockResolvedValueOnce(toolUseResponse("output_spec", makeOutputSpecInput({ loginPath: "/wrong" })) as never);
+    const result = await discoverProduct("https://example.com", page, {} as LLMClient, "m");
+    expect(result.loginPath).toBe("/login");
+  });
+
+  it("ログインリンクの href を loginPath にする", async () => {
+    const page = makeFakePage({
+      evaluate: vi.fn()
+        .mockResolvedValueOnce("Welcome")
+        .mockResolvedValueOnce(["/docs", "/signin"]),
+    });
+    vi.mocked(createMessageWithRetry)
+      .mockResolvedValueOnce(toolUseResponse("navigate_and_read", { path: "/" }) as never)
+      .mockResolvedValueOnce(toolUseResponse("output_spec", makeOutputSpecInput()) as never);
+    const result = await discoverProduct("https://example.com", page, {} as LLMClient, "m");
+    expect(result.loginPath).toBe("/signin");
+  });
+
+  it("detectLoginPath は password が見えるページを formPath にする", async () => {
+    const locator = {
+      first: () => locator,
+      isVisible: vi.fn().mockResolvedValue(true),
+    };
+    const page = makeFakePage({ locator: vi.fn(() => locator) });
+    await expect(detectLoginPath(page, "/login", "https://example.com")).resolves.toEqual({ formPath: "/login" });
   });
 });
