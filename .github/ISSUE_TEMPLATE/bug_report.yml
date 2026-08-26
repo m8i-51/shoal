@@ -1,0 +1,65 @@
+name: Bug report
+description: Report a problem with shoal
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug! Please fill out the sections below so we can
+        reproduce and fix it. Redact any secrets (API keys, tokens) from logs.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Include the exact command(s) you ran.
+      placeholder: |
+        1. Configure .env with ...
+        2. Run `shoal ...`
+        3. See error ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: shoal version
+      description: "From package.json, or `npm ls -g @m8i-51/shoal` for a global install."
+    validations:
+      required: false
+  - type: dropdown
+    id: provider
+    attributes:
+      label: LLM provider
+      options:
+        - Anthropic
+        - OpenAI
+        - Amazon Bedrock
+        - Groq
+        - Gemini
+        - OpenRouter
+        - Ollama
+        - LM Studio
+        - Other / not applicable
+    validations:
+      required: false
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: "OS and Node.js version (`node -v`), plus anything else relevant."
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste any relevant output. Secrets will be rendered verbatim, so redact them first.
+      render: shell
+    validations:
+      required: false

@@ -18,6 +18,7 @@
     "web/dist/",
     "run.ts",
     "triage-only.ts",
+    "diff.ts",
     ".env.example",
     "!**/__tests__/**"
   ],
