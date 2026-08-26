@@ -27,7 +27,7 @@ jobs:
 
       - name: Verify CLI entrypoints are packaged
         run: |
-          files=$(npm pack --dry-run --json | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d[0].files.map(f=>f.path).join('\n'))")
+          files=$(npm pack --dry-run --json | node scripts/list-pack-files.js)
           missing=0
           for f in run.ts diff.ts triage-only.ts server/index.ts server/mcp.ts; do
             if ! printf '%s\n' "$files" | grep -qx "$f"; then
