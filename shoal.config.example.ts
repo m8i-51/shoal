@@ -32,7 +32,10 @@ export const target = {
    *   4. Run each browser agent in an authenticated session matching their role
    *
    * UX difficulties encountered during user management are recorded as findings.
-   * If omitted, shoal runs without authentication.
+   *
+   * This field is optional when `test-accounts/accounts.json` already has
+   * usable email/password entries — Account Manager will seed from that file.
+   * appTools / execute are only required for API explorer agents, not for login.
    *
    * Example:
    *   credentials: { email: "admin@example.com", password: "yourpassword" },

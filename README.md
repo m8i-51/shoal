@@ -253,7 +253,7 @@ cp shoal.config.example.ts shoal.config.ts
 npm start
 ```
 
-`shoal.config.ts` must export a `target` object with two fields:
+`shoal.config.ts` exports a `target` object. For API explorer agents, include `appTools` and `execute`:
 
 ```typescript
 // shoal.config.ts
@@ -270,6 +270,8 @@ export const target = {
 ```
 
 Alternatively, copy `targets/example.ts`, register it in `targets/index.ts`, and set `TARGET=my-app`.
+
+`appTools` and `execute` are required only for API explorer agents. Login does not depend on them: `test-accounts/accounts.json` is enough, and a config that only sets `credentials` (or `projectPath`) is still applied.
 
 ---
 
@@ -362,9 +364,9 @@ Use it as a regression test when changing prompts, models, or exploration logic 
 
 ## Account Manager
 
-For apps that require login, shoal includes an Account Manager agent that autonomously discovers and tests authentication. It finds login pages, tests credentials from `test-accounts/` (gitignored), and injects session state into explorer agents so they can reach authenticated routes.
+For apps that require login, shoal includes an Account Manager agent that tests credentials and injects session state into explorer agents so they can reach authenticated routes.
 
-Create `test-accounts/accounts.json` with your test credentials:
+Create `test-accounts/accounts.json` (gitignored) with your test credentials. That file alone is enough — `target.credentials` in `shoal.config.ts` is optional:
 
 ```json
 [
@@ -372,6 +374,12 @@ Create `test-accounts/accounts.json` with your test credentials:
   { "email": "admin@example.com", "password": "adminpassword", "role": "admin" }
 ]
 ```
+
+On startup shoal reads this file and runs Account Manager: it logs in with each account, saves Playwright session state, and passes those sessions to browser agents. If a seed admin is available (from `accounts.json` or `target.credentials`), it also explores user management and tries to create one test account per role.
+
+Startup logs always report whether `accounts.json` was found, whether config credentials were set, and why Account Manager started or was skipped.
+
+`shoal.config.ts` `appTools` and `execute` are required only for API explorer agents, not for login. A config that has `credentials` (or `projectPath`) but no tools still applies those fields.
 
 ---
 

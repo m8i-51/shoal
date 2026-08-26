@@ -7,7 +7,7 @@ vi.mock("../findings", () => ({ saveFinding: vi.fn() }));
 import * as fs from "fs";
 import { createMessageWithRetry } from "../agent-loop";
 import { saveFinding } from "../findings";
-import { loadTestAccounts, runAccountManager, type TestAccount } from "../account-manager";
+import { loadTestAccounts, inspectAccountsFile, resolveAccountSetup, runAccountManager, type TestAccount } from "../account-manager";
 import type { ProductSpec } from "../product-discovery";
 import type { LLMClient } from "../llm-client";
 import type { Page, BrowserContext } from "playwright";
@@ -56,6 +56,7 @@ function makeFakeContext(page: Page): BrowserContext {
   return {
     newPage: vi.fn().mockResolvedValue(page),
     storageState: vi.fn().mockResolvedValue({}),
+    clearCookies: vi.fn().mockResolvedValue(undefined),
   } as unknown as BrowserContext;
 }
 
@@ -99,10 +100,117 @@ describe("loadTestAccounts", () => {
     expect(loadTestAccounts()).toEqual(accounts);
   });
 
+  it("storageStatePath や role が無くても正規化する", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify([{ email: "a@x.com", password: "p" }]) as unknown as ReturnType<typeof fs.readFileSync>,
+    );
+    expect(loadTestAccounts()).toEqual([{ email: "a@x.com", password: "p", role: "user", storageStatePath: "" }]);
+  });
+
   it("壊れた JSON の場合は空配列を返す", () => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
     vi.mocked(fs.readFileSync).mockReturnValue("not json" as unknown as ReturnType<typeof fs.readFileSync>);
     expect(loadTestAccounts()).toEqual([]);
+  });
+});
+
+describe("inspectAccountsFile", () => {
+  it("ファイルが無い場合は missing", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    expect(inspectAccountsFile().state).toBe("missing");
+  });
+
+  it("壊れた JSON は invalid-json", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue("{" as unknown as ReturnType<typeof fs.readFileSync>);
+    const result = inspectAccountsFile();
+    expect(result.state).toBe("invalid-json");
+  });
+
+  it("配列でない JSON は not-array", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ email: "a@x.com" }) as unknown as ReturnType<typeof fs.readFileSync>);
+    expect(inspectAccountsFile().state).toBe("not-array");
+  });
+
+  it("空配列は empty", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue("[]" as unknown as ReturnType<typeof fs.readFileSync>);
+    expect(inspectAccountsFile().state).toBe("empty");
+  });
+});
+
+describe("resolveAccountSetup", () => {
+  it("config credentials があればそれをシードにする", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    const plan = resolveAccountSetup({ email: "admin@example.com", password: "secret" });
+    expect(plan.action).toBe("run");
+    if (plan.action !== "run") return;
+    expect(plan.seedSource).toBe("config");
+    expect(plan.seed).toEqual({ email: "admin@example.com", password: "secret" });
+    expect(plan.logs.some((l) => l.includes("config credentials: present"))).toBe(true);
+    expect(plan.logs.some((l) => l.includes("starting"))).toBe(true);
+  });
+
+  it("accounts.json があればそれをシードにする（config は任意）", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify([
+        { email: "test@example.com", password: "testpassword", role: "user" },
+        { email: "admin@example.com", password: "adminpassword", role: "admin" },
+      ]) as unknown as ReturnType<typeof fs.readFileSync>,
+    );
+    const plan = resolveAccountSetup(undefined);
+    expect(plan.action).toBe("run");
+    if (plan.action !== "run") return;
+    expect(plan.seedSource).toBe("accounts.json");
+    expect(plan.seed).toEqual({ email: "test@example.com", password: "testpassword" });
+    expect(plan.existing).toHaveLength(2);
+    expect(plan.logs.some((l) => l.includes("loaded 2 account(s)"))).toBe(true);
+    expect(plan.logs.some((l) => l.includes("seed from test-accounts/accounts.json"))).toBe(true);
+  });
+
+  it("どちらも無い場合はスキップ理由をログする", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    const plan = resolveAccountSetup(undefined);
+    expect(plan.action).toBe("skip");
+    expect(plan.logs.some((l) => l.includes("accounts.json: not found"))).toBe(true);
+    expect(plan.logs.some((l) => l.includes("config credentials: not set"))).toBe(true);
+    expect(plan.logs.some((l) => l.includes("skipped"))).toBe(true);
+  });
+
+  it("accounts.json があるのに email/password が無い場合はスキップ理由を出す", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify([{ role: "user", storageStatePath: "/x.json" }]) as unknown as ReturnType<typeof fs.readFileSync>,
+    );
+    const plan = resolveAccountSetup(undefined);
+    expect(plan.action).toBe("skip");
+    expect(plan.logs.some((l) => l.includes("skipped"))).toBe(true);
+    expect(plan.logs.some((l) => /email and password/.test(l) || /empty/.test(l))).toBe(true);
+  });
+
+  it("壊れた accounts.json は読んだこととスキップ理由を出す", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue("not json" as unknown as ReturnType<typeof fs.readFileSync>);
+    const plan = resolveAccountSetup(undefined);
+    expect(plan.action).toBe("skip");
+    expect(plan.logs.some((l) => l.includes("could not parse"))).toBe(true);
+    expect(plan.logs.some((l) => l.includes("skipped"))).toBe(true);
+  });
+
+  it("config credentials が accounts.json より優先される", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify([{ email: "file@example.com", password: "filepw", role: "user" }]) as unknown as ReturnType<typeof fs.readFileSync>,
+    );
+    const plan = resolveAccountSetup({ email: "config@example.com", password: "configpw" });
+    expect(plan.action).toBe("run");
+    if (plan.action !== "run") return;
+    expect(plan.seedSource).toBe("config");
+    expect(plan.seed.email).toBe("config@example.com");
+    expect(plan.existing[0].email).toBe("file@example.com");
   });
 });
 
@@ -117,7 +225,7 @@ describe("runAccountManager", () => {
     expect(createMessageWithRetry).not.toHaveBeenCalled();
   });
 
-  it("ログイン成功後 done が即座に呼ばれた場合は空配列を返す（ロールが見つからないケース）", async () => {
+  it("ログイン成功後 done が即座に呼ばれた場合はシードアカウントのセッションを返す", async () => {
     const emailLocator = makeFakeLocator({ isVisible: vi.fn().mockResolvedValue(true) });
     const passLocator = makeFakeLocator({ isVisible: vi.fn().mockResolvedValue(true) });
     const submitLocator = makeFakeLocator({ isVisible: vi.fn().mockResolvedValue(true) });
@@ -132,7 +240,9 @@ describe("runAccountManager", () => {
     vi.mocked(createMessageWithRetry).mockResolvedValueOnce(toolUseResponse("done", {}) as never);
 
     const result = await runAccountManager("https://example.com", credentials, makeSpec(), context, {} as LLMClient, "m", "run_1");
-    expect(result).toEqual([]);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ email: "seed@example.com", role: "user" });
+    expect(result[0].storageStatePath).not.toBe("");
     expect(createMessageWithRetry).toHaveBeenCalledTimes(1);
   });
 
@@ -147,7 +257,8 @@ describe("runAccountManager", () => {
     vi.mocked(createMessageWithRetry).mockResolvedValueOnce(endTurn() as never);
 
     const result = await runAccountManager("https://example.com", credentials, makeSpec(), context, {} as LLMClient, "m", "run_1");
-    expect(result).toEqual([]);
+    expect(result).toHaveLength(1);
+    expect(result[0].email).toBe("seed@example.com");
   });
 
   it("save_account で保存したアカウントは done 後にログイン・storageState 保存される", async () => {
@@ -167,6 +278,7 @@ describe("runAccountManager", () => {
         return Promise.resolve(pageCallCount === 1 ? seedPage : newAccountPage);
       }),
       storageState: vi.fn().mockResolvedValue({}),
+      clearCookies: vi.fn().mockResolvedValue(undefined),
     } as unknown as BrowserContext;
 
     vi.mocked(createMessageWithRetry)
@@ -174,9 +286,10 @@ describe("runAccountManager", () => {
       .mockResolvedValueOnce(toolUseResponse("done", {}) as never);
 
     const result = await runAccountManager("https://example.com", credentials, makeSpec(), context, {} as LLMClient, "m", "run_1");
-    expect(result).toHaveLength(1);
-    expect(result[0]).toMatchObject({ email: "test-admin@example.com", role: "admin" });
-    expect(result[0].storageStatePath).not.toBe("");
+    expect(result).toHaveLength(2);
+    expect(result.map((a) => a.email)).toEqual(["seed@example.com", "test-admin@example.com"]);
+    expect(result[1]).toMatchObject({ email: "test-admin@example.com", role: "admin" });
+    expect(result[1].storageStatePath).not.toBe("");
     expect(context.storageState).toHaveBeenCalled();
     expect(fs.writeFileSync).toHaveBeenCalled();
   });
@@ -195,7 +308,8 @@ describe("runAccountManager", () => {
       .mockResolvedValueOnce(toolUseResponse("done", {}) as never);
 
     const result = await runAccountManager("https://example.com", credentials, makeSpec(), context, {} as LLMClient, "m", "run_1");
-    expect(result).toEqual([]);
+    expect(result).toHaveLength(1);
+    expect(result[0].email).toBe("seed@example.com");
   });
 
   it("post_finding で saveFinding が呼ばれる", async () => {
@@ -249,8 +363,8 @@ describe("runAccountManager", () => {
       .mockResolvedValueOnce(toolUseResponse("done", {}) as never);
 
     await runAccountManager("https://example.com", credentials, makeSpec(), context, {} as LLMClient, "m", "run_1");
-    // ログイン時の goto 以外で呼ばれていないことを確認
-    expect(vi.mocked(page.goto).mock.calls).toHaveLength(1);
+    // ログイン時 + セッション保存時の goto 以外で呼ばれていないことを確認
+    expect(vi.mocked(page.goto).mock.calls).toHaveLength(2);
   });
 
   it("click は getByRole(button) で見つかった要素をクリックする", async () => {
@@ -286,7 +400,7 @@ describe("runAccountManager", () => {
 
     await expect(
       runAccountManager("https://example.com", credentials, makeSpec(), context, {} as LLMClient, "m", "run_1")
-    ).resolves.toEqual([]);
+    ).resolves.toMatchObject([{ email: "seed@example.com" }]);
     expect(createMessageWithRetry).toHaveBeenCalledTimes(2);
   });
 
@@ -311,7 +425,7 @@ describe("runAccountManager", () => {
 
     await expect(
       runAccountManager("https://example.com", credentials, makeSpec(), context, {} as LLMClient, "m", "run_1")
-    ).resolves.toEqual([]);
+    ).resolves.toMatchObject([{ email: "seed@example.com" }]);
   });
 
   it("view_screen はスクリーンショットを撮る", async () => {
@@ -334,7 +448,7 @@ describe("runAccountManager", () => {
 
     await expect(
       runAccountManager("https://example.com", credentials, makeSpec(), context, {} as LLMClient, "m", "run_1")
-    ).resolves.toEqual([]);
+    ).resolves.toMatchObject([{ email: "seed@example.com" }]);
     expect(page.evaluate).toHaveBeenCalled();
   });
 
@@ -347,5 +461,29 @@ describe("runAccountManager", () => {
 
     await runAccountManager("https://example.com", credentials, makeSpec(), context, {} as LLMClient, "m", "run_1");
     expect(page.ariaSnapshot).toHaveBeenCalled();
+  });
+
+  it("accounts.json の既存アカウントもセッション保存する（LLM が新規作成しなくても）", async () => {
+    const page = makeLoggedInPage();
+    const context = makeFakeContext(page);
+    vi.mocked(createMessageWithRetry).mockResolvedValueOnce(toolUseResponse("done", {}) as never);
+
+    const existing: TestAccount[] = [
+      { email: "seed@example.com", password: "pw", role: "admin", storageStatePath: "" },
+      { email: "member@example.com", password: "pw2", role: "member", storageStatePath: "" },
+    ];
+    const result = await runAccountManager(
+      "https://example.com",
+      credentials,
+      makeSpec(),
+      context,
+      {} as LLMClient,
+      "m",
+      "run_1",
+      existing,
+    );
+    expect(result.map((a) => a.email)).toEqual(["seed@example.com", "member@example.com"]);
+    expect(result.every((a) => a.storageStatePath)).toBe(true);
+    expect(context.storageState).toHaveBeenCalledTimes(2);
   });
 });

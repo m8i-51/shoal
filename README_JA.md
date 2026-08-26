@@ -255,7 +255,7 @@ cp shoal.config.example.ts shoal.config.ts
 npm start
 ```
 
-`shoal.config.ts` は `target` オブジェクトをエクスポートする:
+`shoal.config.ts` は `target` オブジェクトをエクスポートする。API エクスプローラーを使う場合は `appTools` と `execute` を含める:
 
 ```typescript
 // shoal.config.ts
@@ -272,6 +272,8 @@ export const target = {
 ```
 
 あるいは、`targets/example.ts` をコピーして `targets/index.ts` に登録し、`TARGET=my-app` で起動する方法もある。
+
+`appTools` と `execute` は API エクスプローラー用であり、ログインには不要。`test-accounts/accounts.json` だけで足り、設定ファイルに `credentials` や `projectPath` だけがあってもそれらは適用される。
 
 ---
 
@@ -364,9 +366,9 @@ Detection rate: 5/7 (71%)
 
 ## アカウントマネージャー
 
-ログインが必要なアプリには、Account Manager エージェントが認証を自律的に発見・テストする。ログインページを探し、`test-accounts/`（gitignore 済み）の認証情報をテストし、セッション状態をエクスプローラーエージェントに渡すことで認証後のルートにもアクセスできる。
+ログインが必要なアプリには、Account Manager エージェントが認証情報をテストし、セッション状態をエクスプローラーエージェントに渡すことで認証後のルートにもアクセスできる。
 
-テスト用認証情報は `test-accounts/accounts.json` に記述:
+`test-accounts/accounts.json`（gitignore 済み）にテスト用認証情報を置く。このファイルだけで足りる。`shoal.config.ts` の `target.credentials` は任意:
 
 ```json
 [
@@ -374,6 +376,12 @@ Detection rate: 5/7 (71%)
   { "email": "admin@example.com", "password": "adminpassword", "role": "admin" }
 ]
 ```
+
+起動時にこのファイルを読み、Account Manager が各アカウントでログインして Playwright のセッションを保存し、ブラウザエージェントに渡す。シード用の管理者アカウントがある場合（`accounts.json` または `target.credentials`）は、ユーザー管理を探索してロールごとにテストアカウント作成も試みる。
+
+起動ログには、`accounts.json` を読んだか、設定の credentials があるか、Account Manager を動かした／スキップした理由が必ず出る。
+
+`shoal.config.ts` の `appTools` と `execute` は API エクスプローラー用であり、ログインには不要。ツール定義がなくても `credentials` や `projectPath` は適用される。
 
 ---
 
