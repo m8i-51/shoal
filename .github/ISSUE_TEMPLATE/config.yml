@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://github.com/m8i-51/shoal#readme
+    about: Setup, configuration, and usage guide.
+  - name: Security vulnerability
+    url: https://github.com/m8i-51/shoal/security/advisories/new
+    about: Report security issues privately — please do not open a public issue.
