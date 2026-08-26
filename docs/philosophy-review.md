@@ -281,8 +281,8 @@ run 単位の HTML レポート (`framework/report.ts`) に使われるだけで
 - ✅ Swarm signals の URL エリアフィルタ — `pathsShareArea` + `currentPath`
 
 **未着手 / 部分実装（優先度順）**
-1. 非 GitHub トラッカーでの rejected（wontfix）判定
-2. `shoal diff` と page-hash の連携
-3. ダッシュボードへの trace リンク・cross-run duplicate 表示
+1. ~~非 GitHub トラッカーでの rejected（wontfix）判定~~ ✅ `normalizeCloseReason()` + 各トラッカー
+2. ~~`shoal diff` と page-hash の連携~~ ✅ `expandFocusRoutesWithPageCache()`
+3. ~~ダッシュボードへの trace リンク・cross-run duplicate 表示~~ ✅ Hall UI + regression i18n
 4. shoal-bench のバリエーション拡充とモデル別スコアの README 掲示
-5. triage の「再訪・未改善」finding を既存 issue コメントへ振り分け
+5. ~~triage の「再訪・未改善」finding を既存 issue コメントへ振り分け~~ ✅ `triage-rereport.ts`

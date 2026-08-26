@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-import { inferRoutesFromFiles, resolvePrNumber, formatDiffSummary, postPrComment } from "../experience-diff";
+import { inferRoutesFromFiles, resolvePrNumber, formatDiffSummary, postPrComment, expandFocusRoutesWithPageCache } from "../experience-diff";
 import type { Finding } from "../types";
 
 describe("inferRoutesFromFiles", () => {
@@ -41,6 +41,17 @@ describe("inferRoutesFromFiles", () => {
       "pages/checkout.tsx",
       "src/pages/checkout.tsx",
     ])).toEqual(["/checkout"]);
+  });
+});
+
+describe("expandFocusRoutesWithPageCache", () => {
+  it("page-cache 上の関連パスを git 推定ルートにマージする", () => {
+    expect(expandFocusRoutesWithPageCache(["/checkout"], ["/checkout/confirm", "/settings"]))
+      .toEqual(["/checkout", "/checkout/confirm"]);
+  });
+
+  it("git ルートが空ならそのまま返す", () => {
+    expect(expandFocusRoutesWithPageCache([], ["/checkout"])).toEqual([]);
   });
 });
 

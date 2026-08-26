@@ -25,6 +25,10 @@ export function updatePageHashes(host: string, updates: Record<string, string>):
   fs.writeFileSync(cacheFilePath(host), JSON.stringify(merged, null, 2), "utf-8");
 }
 
+export function listCachedPaths(host: string): string[] {
+  return Object.keys(loadPageHashes(host)).sort();
+}
+
 export function hashContent(content: string): string {
   return crypto.createHash("sha256").update(content).digest("hex").slice(0, 16);
 }

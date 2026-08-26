@@ -6,7 +6,9 @@
     "title": "実行一覧",
     "startRun": "実行を開始",
     "noRuns": "実行履歴がありません",
-    "noRunsHint": "実行を開始して AI エージェントにアプリを探索させましょう。"
+    "noRunsHint": "実行を開始して AI エージェントにアプリを探索させましょう。",
+    "regressionFailed": "⚠ {{count}} 件リグレッション",
+    "regressionPassed": "✓ {{count}} 件は修正維持"
   },
   "table": {
     "status": "ステータス",
@@ -91,7 +93,14 @@
     "importedBadge": "+{{count}} 件インポート済み",
     "noFindings": "まだ findings がありません。実行を開始して問題を発見しましょう。",
     "noResults": "検索結果がありません。",
-    "navLink": "Hall"
+    "navLink": "Hall",
+    "totalCount": "{{count}} 件の findings",
+    "duplicatesTitle": "run 横断の重複",
+    "duplicatesSubtitle": "複数 run で報告された類似 finding",
+    "duplicatesEmpty": "run 横断の重複は検出されませんでした。",
+    "duplicatesRuns": "{{count}} run",
+    "traceReplay": "trace を再生",
+    "traceCommand": "npx playwright show-trace {{path}}"
   },
   "goals": {
     "title": "App Goals",

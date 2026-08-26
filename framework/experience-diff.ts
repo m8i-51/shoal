@@ -1,5 +1,6 @@
 import type { Finding } from "./types";
 import type { ExperienceScore } from "./experience-score";
+import { pathsShareArea } from "./findings";
 
 /**
  * PR Experience Diff — 変更されたコードに対応する画面へ小さい群れを集中投下し、
@@ -53,6 +54,18 @@ export function inferRoutesFromFiles(changedFiles: string[]): string[] {
   }
 
   return [...routes].sort();
+}
+
+/** git 推定ルートと page-hash キャッシュ上の関連パスをマージする */
+export function expandFocusRoutesWithPageCache(routes: string[], cachedPaths: string[]): string[] {
+  if (routes.length === 0) return routes;
+  const merged = new Set(routes);
+  for (const route of routes) {
+    for (const cached of cachedPaths) {
+      if (pathsShareArea(route, cached)) merged.add(cached);
+    }
+  }
+  return [...merged].sort();
 }
 
 // ================================================================

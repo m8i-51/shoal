@@ -20,7 +20,8 @@ import { execSync, spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
-import { inferRoutesFromFiles, formatDiffSummary, resolvePrNumber, postPrComment } from "./framework/experience-diff";
+import { inferRoutesFromFiles, formatDiffSummary, resolvePrNumber, postPrComment, expandFocusRoutesWithPageCache } from "./framework/experience-diff";
+import { listCachedPaths } from "./framework/page-cache";
 import { computeExperienceScore } from "./framework/experience-score";
 import { isFinding, type Finding } from "./framework/types";
 
@@ -86,9 +87,22 @@ async function main() {
   const changedFiles = getChangedFiles(baseRef);
   console.log(`[diff] ${changedFiles.length} file(s) changed vs ${baseRef}`);
 
-  const focusRoutes = inferRoutesFromFiles(changedFiles);
+  const fileRoutes = inferRoutesFromFiles(changedFiles);
+  let focusRoutes = fileRoutes;
+  const baseUrl = process.env.BASE_URL ?? process.env.PREVIEW_URL ?? "http://localhost:3000";
+  try {
+    const cachedPaths = listCachedPaths(new URL(baseUrl).host);
+    const expanded = expandFocusRoutesWithPageCache(fileRoutes, cachedPaths);
+    if (expanded.length > fileRoutes.length) {
+      console.log(`[diff] page-cache expanded routes: ${expanded.join(", ")}`);
+    }
+    focusRoutes = expanded;
+  } catch {
+    focusRoutes = fileRoutes;
+  }
+
   if (focusRoutes.length > 0) {
-    console.log(`[diff] inferred routes: ${focusRoutes.join(", ")}`);
+    console.log(`[diff] focus routes: ${focusRoutes.join(", ")}`);
   } else {
     console.log("[diff] no route mapping inferred — agents will explore freely");
   }

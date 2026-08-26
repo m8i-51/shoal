@@ -6,7 +6,9 @@
     "title": "Run History",
     "startRun": "Start Run",
     "noRuns": "No runs yet",
-    "noRunsHint": "Start a run to explore your app with AI agents."
+    "noRunsHint": "Start a run to explore your app with AI agents.",
+    "regressionFailed": "⚠ {{count}} regressed",
+    "regressionPassed": "✓ {{count}} still fixed"
   },
   "table": {
     "status": "Status",
@@ -91,7 +93,14 @@
     "importedBadge": "+{{count}} imported",
     "noFindings": "No findings yet. Start a run to discover issues.",
     "noResults": "No results matching your search.",
-    "navLink": "Hall"
+    "navLink": "Hall",
+    "totalCount": "{{count}} findings",
+    "duplicatesTitle": "Cross-run duplicates",
+    "duplicatesSubtitle": "Similar findings reported in multiple runs",
+    "duplicatesEmpty": "No cross-run duplicates detected.",
+    "duplicatesRuns": "{{count}} runs",
+    "traceReplay": "Replay trace",
+    "traceCommand": "npx playwright show-trace {{path}}"
   },
   "goals": {
     "title": "App Goals",

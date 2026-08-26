@@ -154,7 +154,9 @@ function RunRow({ run, onView }: { run: RunSummary; onView: () => void }) {
         )}
         {run.regressionChecked > 0 && (
           <span style={{ display: "block", fontSize: "0.7rem", marginTop: "0.25rem", color: run.regressionFailed > 0 ? "#ef4444" : "#22c55e" }}>
-            {run.regressionFailed > 0 ? `⚠ ${run.regressionFailed} regressed` : `✓ ${run.regressionChecked} still fixed`}
+            {run.regressionFailed > 0
+              ? t("dashboard.regressionFailed", { count: run.regressionFailed })
+              : t("dashboard.regressionPassed", { count: run.regressionChecked })}
           </span>
         )}
       </td>

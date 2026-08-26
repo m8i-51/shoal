@@ -11,7 +11,10 @@ interface HallFinding {
   agentName: string;
   role: string;
   timestamp: string;
+  tracePath?: string;
 }
+
+type DuplicateCluster = HallFinding[];
 
 interface ExportBundle {
   version: string;
@@ -34,6 +37,7 @@ export function Hall() {
   const navigate = useNavigate();
 
   const [findings, setFindings] = useState<HallFinding[]>([]);
+  const [duplicates, setDuplicates] = useState<DuplicateCluster[]>([]);
   const [imported, setImported] = useState<HallFinding[]>([]);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<CategoryFilter>("all");
@@ -45,6 +49,10 @@ export function Hall() {
     fetch("/api/findings")
       .then((r) => (r.ok ? r.json() : []))
       .then(setFindings)
+      .catch(() => {});
+    fetch("/api/findings/cross-run-duplicates")
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setDuplicates)
       .catch(() => {});
   }, []);
 
@@ -110,7 +118,7 @@ export function Hall() {
           <span style={styles.subtitle}>{t("hall.subtitle")}</span>
         </div>
         <div style={styles.headerActions}>
-          <span style={styles.totalCount}>{allFindings.length} findings</span>
+          <span style={styles.totalCount}>{t("hall.totalCount", { count: allFindings.length })}</span>
           <button
             onClick={handleExport}
             style={styles.exportBtn}
@@ -167,10 +175,15 @@ export function Hall() {
         {importError && <span style={styles.importError}>{t("hall.importError")}</span>}
         {imported.length > 0 && (
           <span style={styles.importedBadge}>
-            +{imported.length} imported
+            {t("hall.importedBadge", { count: imported.length })}
           </span>
         )}
       </div>
+
+      <DuplicatesPanel
+        clusters={duplicates}
+        onRunClick={(runId) => navigate(`/runs/${runId}`)}
+      />
 
       {/* Findings リスト */}
       <div style={styles.list}>
@@ -192,6 +205,66 @@ export function Hall() {
   );
 }
 
+function DuplicatesPanel({
+  clusters,
+  onRunClick,
+}: {
+  clusters: DuplicateCluster[];
+  onRunClick: (runId: string) => void;
+}) {
+  const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(clusters.length > 0);
+
+  if (clusters.length === 0) {
+    return (
+      <div style={styles.duplicatesBar}>
+        <span style={styles.duplicatesHint}>{t("hall.duplicatesEmpty")}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div style={styles.duplicatesBar}>
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        style={styles.duplicatesToggle}
+      >
+        <span style={styles.duplicatesTitle}>{t("hall.duplicatesTitle")}</span>
+        <span style={styles.duplicatesSubtitle}>{t("hall.duplicatesSubtitle")}</span>
+        <span style={styles.expandHint}>{expanded ? "▲" : "▼"}</span>
+      </button>
+      {expanded && (
+        <div style={styles.duplicatesList}>
+          {clusters.map((cluster) => {
+            const runIds = Array.from(new Set(cluster.map((f) => f.runId)));
+            return (
+              <div key={`${cluster[0]?.id}:${cluster[0]?.runId}`} style={styles.duplicateCard}>
+                <div style={styles.duplicateHeader}>
+                  <span style={styles.duplicateCount}>{t("hall.duplicatesRuns", { count: runIds.length })}</span>
+                  <div style={styles.duplicateRuns}>
+                    {runIds.map((runId) => (
+                      <button
+                        key={runId}
+                        type="button"
+                        onClick={() => onRunClick(runId)}
+                        style={styles.runLink}
+                      >
+                        {runId}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <p style={styles.duplicateTitle}>{cluster[0]?.title}</p>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function FindingCard({
   finding,
   onRunClick,
@@ -199,6 +272,7 @@ function FindingCard({
   finding: HallFinding;
   onRunClick?: () => void;
 }) {
+  const { t } = useTranslation();
   const color = CAT_COLOR[finding.category] ?? "#6b7280";
   const date = new Date(finding.timestamp).toLocaleDateString("ja-JP");
   const [expanded, setExpanded] = useState(false);
@@ -227,6 +301,14 @@ function FindingCard({
       <p style={styles.cardBody}>{expanded ? finding.body : bodyPreview}</p>
       {finding.body.length > 160 && (
         <span style={styles.expandHint}>{expanded ? "▲" : "▼"}</span>
+      )}
+      {finding.tracePath && (
+        <div style={styles.traceBox} onClick={(e) => e.stopPropagation()}>
+          <span style={styles.traceLabel}>{t("hall.traceReplay")}</span>
+          <code style={styles.traceCmd}>
+            {t("hall.traceCommand", { path: finding.tracePath })}
+          </code>
+        </div>
       )}
     </div>
   );
@@ -457,5 +539,94 @@ const styles = {
     display: "block",
     textAlign: "right" as const,
     marginTop: "0.25rem",
+  },
+  duplicatesBar: {
+    padding: "0.75rem 2rem",
+    background: "#fff",
+    borderBottom: "1px solid #e2e8f0",
+  },
+  duplicatesToggle: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem",
+    width: "100%",
+    background: "transparent",
+    border: "none",
+    padding: 0,
+    cursor: "pointer",
+    textAlign: "left" as const,
+  },
+  duplicatesTitle: {
+    fontSize: "0.85rem",
+    fontWeight: 700,
+    color: "#1e293b",
+  },
+  duplicatesSubtitle: {
+    fontSize: "0.75rem",
+    color: "#94a3b8",
+    flex: 1,
+  },
+  duplicatesHint: {
+    fontSize: "0.75rem",
+    color: "#94a3b8",
+  },
+  duplicatesList: {
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: "0.5rem",
+    marginTop: "0.75rem",
+  },
+  duplicateCard: {
+    border: "1px solid #fde68a",
+    background: "#fffbeb",
+    borderRadius: "8px",
+    padding: "0.75rem 1rem",
+  },
+  duplicateHeader: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem",
+    marginBottom: "0.35rem",
+    flexWrap: "wrap" as const,
+  },
+  duplicateCount: {
+    fontSize: "0.65rem",
+    fontWeight: 700,
+    color: "#b45309",
+    background: "#fef3c7",
+    borderRadius: "9999px",
+    padding: "2px 8px",
+  },
+  duplicateRuns: {
+    display: "flex",
+    gap: "0.35rem",
+    flexWrap: "wrap" as const,
+  },
+  duplicateTitle: {
+    fontSize: "0.8rem",
+    color: "#78350f",
+    margin: 0,
+    lineHeight: 1.5,
+  },
+  traceBox: {
+    marginTop: "0.6rem",
+    padding: "0.5rem 0.65rem",
+    background: "#f8fafc",
+    borderRadius: "6px",
+    border: "1px solid #e2e8f0",
+  },
+  traceLabel: {
+    display: "block",
+    fontSize: "0.65rem",
+    fontWeight: 700,
+    color: "#64748b",
+    marginBottom: "0.25rem",
+  },
+  traceCmd: {
+    display: "block",
+    fontSize: "0.7rem",
+    color: "#334155",
+    wordBreak: "break-all" as const,
+    fontFamily: "monospace",
   },
 } as const;

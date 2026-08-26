@@ -6,6 +6,7 @@ import type { Finding } from "./types";
 import { createMessageWithRetry } from "./agent-loop";
 import type { IssueTracker } from "./trackers/index";
 import { recordIssueLink } from "./adoption";
+import { commentReturningUserReReports } from "./triage-rereport";
 
 const TRIAGE_TOOLS: Anthropic.Tool[] = [
   {
@@ -68,11 +69,32 @@ export async function runTriageAgent(
   console.log(`\n[triage] starting (findings: ${findings.length})`);
 
   const openIssues = await tracker.fetchOpenIssues();
-  const pendingIds = new Set(findings.map((f) => f.id));
+  const { results: reReports, remaining: triageFindings } = await commentReturningUserReReports(
+    findings,
+    openIssues,
+    tracker,
+  );
+  for (const report of reReports) {
+    if (report.commented) {
+      console.log(`  [triage] re-report comment on #${report.issueNumber}: ${report.issueTitle}`);
+    }
+  }
+
+  if (triageFindings.length === 0) {
+    console.log("[triage] all findings handled via re-report comments");
+    return {
+      issued: [],
+      skipped: reReports.filter((r) => r.commented).map((r) => r.findingId),
+      unprocessed: [],
+      issuesCreated: 0,
+    };
+  }
+
+  const pendingIds = new Set(triageFindings.map((f) => f.id));
   const issuedIds: string[] = [];
-  const skippedIds: string[] = [];
+  const skippedIds: string[] = reReports.filter((r) => r.commented).map((r) => r.findingId);
   let issuesCreated = 0;
-  let skipped = 0;
+  let skipped = skippedIds.length;
 
   const openIssueList = openIssues.length > 0
     ? `\n\n[Existing open issues (for deduplication)]\n${openIssues.map((i) => `- ${i.number}: ${i.title}`).join("\n")}`
@@ -86,7 +108,8 @@ Organize feedback collected by multiple agents and post it as issue tickets.
 2. Merge similar/duplicate feedback into a single issue
 3. Skip feedback that duplicates an existing open issue using skip_finding
 4. Post the rest with create_issue (no duplicates, only valuable findings)
-5. Finish after processing all items${openIssueList}
+5. Returning-user re-reports that mention an issue is still broken may already have been posted as comments on matching open issues — focus on new findings
+6. Finish after processing all items${openIssueList}
 
 [Category Guide]
 - bug: incorrect or broken behavior
@@ -105,7 +128,7 @@ Organize feedback collected by multiple agents and post it as issue tickets.
 - If a finding cannot be linked to any feedback, use skip_finding instead of create_issue`;
 
   const messages: Anthropic.MessageParam[] = [
-    { role: "user", content: "Triage the feedback and create GitHub Issues." },
+    { role: "user", content: `Triage the feedback and create issue tickets via ${tracker.name}.` },
   ];
 
   let iterations = 0;
@@ -132,7 +155,7 @@ Organize feedback collected by multiple agents and post it as issue tickets.
       let result: unknown;
 
       if (toolUse.name === "get_all_findings") {
-        result = findings.map((f) => ({
+        result = triageFindings.map((f) => ({
           id: f.id,
           agentName: f.agentName,
           role: f.role,
@@ -142,7 +165,7 @@ Organize feedback collected by multiple agents and post it as issue tickets.
           timestamp: f.timestamp,
           pending: pendingIds.has(f.id),
         }));
-        console.log(`  [triage] fetched findings (${findings.length})`);
+        console.log(`  [triage] fetched findings (${triageFindings.length})`);
 
       } else if (toolUse.name === "create_issue") {
         const { title, body, category, merged_finding_ids } = toolUse.input as {
@@ -162,7 +185,7 @@ Organize feedback collected by multiple agents and post it as issue tickets.
           toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: JSON.stringify(result) });
           continue;
         }
-        const mergedFindings = findings.filter((f) => mergedIds.includes(f.id));
+        const mergedFindings = triageFindings.filter((f) => mergedIds.includes(f.id));
         const mergedAgents = mergedFindings.map((f) => `${f.agentName} (${f.role})`);
         const screenshots = mergedFindings
           .filter((f) => f.screenshotPath)

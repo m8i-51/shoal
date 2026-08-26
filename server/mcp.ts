@@ -173,7 +173,9 @@ export async function handleVerifyFix(
 // ================================================================
 
 export function buildMcpServer(): McpServer {
-  const server = new McpServer({ name: "shoal", version: "0.1.0" });
+  const pkgPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "../package.json");
+  const pkgVersion = (JSON.parse(fs.readFileSync(pkgPath, "utf-8")) as { version: string }).version;
+  const server = new McpServer({ name: "shoal", version: pkgVersion });
 
   const asText = (data: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] });
   const asError = (e: unknown) => ({ content: [{ type: "text" as const, text: `error: ${e instanceof Error ? e.message : String(e)}` }], isError: true });
