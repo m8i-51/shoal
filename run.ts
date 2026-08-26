@@ -44,8 +44,8 @@ import { designScenarios, findMultiActorScenario, soloScenarios, type Scenario, 
 import { runTriageAgent } from "./framework/triage";
 import { generateReport } from "./framework/report";
 import type { AgentLog, Finding, RegressionCheck } from "./framework/types";
-import { loadTarget } from "./targets";
-import { runAccountManager, loadTestAccounts, type TestAccount } from "./framework/account-manager";
+import { loadTarget, applyLoadedTarget } from "./targets";
+import { runAccountManager, resolveAccountSetup, type TestAccount } from "./framework/account-manager";
 import { estimateCost, formatCostUSD } from "./framework/cost";
 
 const BASE_URL = process.env.BASE_URL ?? "http://localhost:3000";
@@ -61,12 +61,11 @@ for (const name of ["shoal.config.ts", "shoal.config.js", "shoal.config.mjs"]) {
   if (fs.existsSync(cfgPath)) {
     try {
       const mod = await import(cfgPath);
-      const t = mod.target ?? mod.default?.target;
-      if (t?.appTools && typeof t?.execute === "function") {
-        targetConfig = t;
-        console.log(`[config] loaded: ${name}`);
-      } else {
-        console.warn(`[config] ${name} found but does not export a valid target`);
+      const applied = applyLoadedTarget(targetConfig, mod, name);
+      targetConfig = applied.config;
+      for (const message of applied.messages) {
+        if (message.level === "warn") console.warn(message.text);
+        else console.log(message.text);
       }
     } catch (e) {
       console.warn(`[config] failed to load ${name}:`, e);
@@ -1346,23 +1345,38 @@ async function main() {
     // 4. open issues
     const openIssues = await trackers.fetchOpenIssues();
 
-    // 4.5. Account Manager（credentials が設定されている場合のみ）
-    // シナリオ設計より先に実行し、利用可能な role をマルチアクターシナリオ生成に渡す
+    // 4.5. Account Manager
+    // シナリオ設計より先に実行し、利用可能な role をマルチアクターシナリオ生成に渡す。
+    // シードは shoal.config の credentials、なければ test-accounts/accounts.json。
     let testAccounts: TestAccount[] = [];
-    if (targetConfig.credentials) {
-      const accountContext = await browser.newContext({ viewport: { width: 1024, height: 640 } });
-      try {
-        testAccounts = await runAccountManager(
-          BASE_URL,
-          targetConfig.credentials,
-          productSpec,
-          accountContext,
-          client,
-          defaultModel,
-          runLog.runId,
-        );
-      } finally {
-        await accountContext.close();
+    const accountPlan = resolveAccountSetup(targetConfig.credentials);
+    for (const line of accountPlan.logs) console.log(line);
+    switch (accountPlan.action) {
+      case "run": {
+        const accountContext = await browser.newContext({ viewport: { width: 1024, height: 640 } });
+        try {
+          testAccounts = await runAccountManager(
+            BASE_URL,
+            accountPlan.seed,
+            productSpec,
+            accountContext,
+            client,
+            defaultModel,
+            runLog.runId,
+            accountPlan.existing,
+          );
+        } finally {
+          await accountContext.close();
+        }
+        break;
+      }
+      case "skip": {
+        testAccounts = accountPlan.existing.filter((a) => a.storageStatePath);
+        break;
+      }
+      default: {
+        const _exhaustive: never = accountPlan;
+        throw new Error(`unhandled account setup action: ${String(_exhaustive)}`);
       }
     }
 

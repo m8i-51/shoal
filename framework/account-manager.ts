@@ -24,21 +24,175 @@ export interface TestAccount {
   storageStatePath: string;
 }
 
+export const ACCOUNTS_RELATIVE_PATH = "test-accounts/accounts.json";
+
 const ACCOUNTS_DIR = path.join(process.cwd(), "test-accounts");
 const ACCOUNTS_PATH = path.join(ACCOUNTS_DIR, "accounts.json");
 
-export function loadTestAccounts(): TestAccount[] {
-  try {
-    if (fs.existsSync(ACCOUNTS_PATH)) {
-      return JSON.parse(fs.readFileSync(ACCOUNTS_PATH, "utf-8")) as TestAccount[];
+export type AccountsFileInspection = {
+  path: string;
+  accounts: TestAccount[];
+  usableCount: number;
+} & (
+  | { state: "missing" }
+  | { state: "invalid-json"; detail: string }
+  | { state: "not-array" }
+  | { state: "empty" }
+  | { state: "loaded" }
+);
+
+export type AccountSetupPlan =
+  | {
+      action: "run";
+      seed: Credentials;
+      seedSource: "config" | "accounts.json";
+      existing: TestAccount[];
+      logs: string[];
     }
-  } catch { /* ignore */ }
-  return [];
+  | {
+      action: "skip";
+      existing: TestAccount[];
+      logs: string[];
+    };
+
+function hasUsableCredentials(account: { email?: string; password?: string }): boolean {
+  return typeof account.email === "string" && account.email.trim() !== ""
+    && typeof account.password === "string" && account.password !== "";
+}
+
+function normalizeAccount(raw: unknown): TestAccount | null {
+  if (!raw || typeof raw !== "object") return null;
+  const rec = raw as Record<string, unknown>;
+  if (typeof rec.email !== "string") return null;
+  if (typeof rec.password !== "string") return null;
+  const role = typeof rec.role === "string" && rec.role.trim() !== "" ? rec.role : "user";
+  const storageStatePath = typeof rec.storageStatePath === "string" ? rec.storageStatePath : "";
+  return { email: rec.email, password: rec.password, role, storageStatePath };
+}
+
+export function inspectAccountsFile(): AccountsFileInspection {
+  const base = { path: ACCOUNTS_PATH, accounts: [] as TestAccount[], usableCount: 0 };
+  if (!fs.existsSync(ACCOUNTS_PATH)) {
+    return { ...base, state: "missing" };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(ACCOUNTS_PATH, "utf-8"));
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    return { ...base, state: "invalid-json", detail };
+  }
+
+  if (!Array.isArray(parsed)) {
+    return { ...base, state: "not-array" };
+  }
+
+  const accounts = parsed.map(normalizeAccount).filter((a): a is TestAccount => a !== null);
+  const usableCount = accounts.filter(hasUsableCredentials).length;
+  if (parsed.length === 0 || accounts.length === 0) {
+    return { ...base, state: "empty" };
+  }
+  return { path: ACCOUNTS_PATH, accounts, usableCount, state: "loaded" };
+}
+
+export function loadTestAccounts(): TestAccount[] {
+  return inspectAccountsFile().accounts;
+}
+
+function describeAccountsFile(file: AccountsFileInspection): string {
+  const label = ACCOUNTS_RELATIVE_PATH;
+  switch (file.state) {
+    case "missing":
+      return `[account-manager] ${label}: not found`;
+    case "invalid-json":
+      return `[account-manager] ${label}: found but could not parse (${file.detail})`;
+    case "not-array":
+      return `[account-manager] ${label}: found but root is not an array`;
+    case "empty":
+      return `[account-manager] ${label}: found but empty`;
+    case "loaded":
+      return `[account-manager] ${label}: loaded ${file.accounts.length} account(s) (${file.usableCount} with email+password)`;
+    default: {
+      const _exhaustive: never = file;
+      return `[account-manager] ${label}: unknown state ${String(_exhaustive)}`;
+    }
+  }
+}
+
+function skipReason(file: AccountsFileInspection): string {
+  switch (file.state) {
+    case "missing":
+      return `no ${ACCOUNTS_RELATIVE_PATH} and no target.credentials in shoal.config.ts`;
+    case "invalid-json":
+      return `${ACCOUNTS_RELATIVE_PATH} is not valid JSON and no target.credentials in shoal.config.ts`;
+    case "not-array":
+      return `${ACCOUNTS_RELATIVE_PATH} must be a JSON array and no target.credentials in shoal.config.ts`;
+    case "empty":
+      return `${ACCOUNTS_RELATIVE_PATH} is empty and no target.credentials in shoal.config.ts`;
+    case "loaded":
+      return `${ACCOUNTS_RELATIVE_PATH} has ${file.accounts.length} account(s) but none have email and password, and no target.credentials in shoal.config.ts`;
+    default: {
+      const _exhaustive: never = file;
+      return `no seed credentials (${String(_exhaustive)})`;
+    }
+  }
+}
+
+/**
+ * Decide whether Account Manager should run.
+ * Seed comes from shoal.config `target.credentials` when present, otherwise
+ * from the first usable entry in test-accounts/accounts.json.
+ */
+export function resolveAccountSetup(configCredentials?: Credentials): AccountSetupPlan {
+  const file = inspectAccountsFile();
+  const logs = [describeAccountsFile(file)];
+  const configSeed = configCredentials && hasUsableCredentials(configCredentials) ? configCredentials : undefined;
+
+  if (configSeed) {
+    logs.push(`[account-manager] config credentials: present (${configSeed.email})`);
+    logs.push(`[account-manager] starting — seed from shoal.config target.credentials (${configSeed.email})`);
+    return { action: "run", seed: configSeed, seedSource: "config", existing: file.accounts, logs };
+  }
+
+  logs.push("[account-manager] config credentials: not set");
+
+  const usable = file.accounts.filter(hasUsableCredentials);
+  if (usable.length > 0) {
+    const seed = { email: usable[0].email, password: usable[0].password };
+    logs.push(`[account-manager] starting — seed from ${ACCOUNTS_RELATIVE_PATH} (${seed.email})`);
+    return { action: "run", seed, seedSource: "accounts.json", existing: file.accounts, logs };
+  }
+
+  logs.push(`[account-manager] skipped — ${skipReason(file)}`);
+  const reusable = file.accounts.filter((a) => a.storageStatePath);
+  if (reusable.length > 0) {
+    logs.push(`[account-manager] ${reusable.length} saved session(s) in ${ACCOUNTS_RELATIVE_PATH} will still be applied`);
+  }
+  return { action: "skip", existing: file.accounts, logs };
 }
 
 function saveTestAccounts(accounts: TestAccount[]): void {
   fs.mkdirSync(ACCOUNTS_DIR, { recursive: true });
   fs.writeFileSync(ACCOUNTS_PATH, JSON.stringify(accounts, null, 2), "utf-8");
+}
+
+function collectAccountsToPersist(
+  seed: Credentials,
+  existing: TestAccount[],
+  created: Array<{ email: string; password: string; role: string }>,
+): Array<{ email: string; password: string; role: string }> {
+  const byEmail = new Map<string, { email: string; password: string; role: string }>();
+  const seedRole = existing.find((a) => a.email === seed.email)?.role || "user";
+  byEmail.set(seed.email, { email: seed.email, password: seed.password, role: seedRole });
+  for (const account of existing) {
+    if (!hasUsableCredentials(account)) continue;
+    byEmail.set(account.email, { email: account.email, password: account.password, role: account.role || "user" });
+  }
+  for (const account of created) {
+    byEmail.set(account.email, account);
+  }
+  return [...byEmail.values()];
 }
 
 // ================================================================
@@ -200,6 +354,7 @@ export async function runAccountManager(
   client: LLMClient,
   model: string,
   runId: string,
+  existingAccounts: TestAccount[] = [],
 ): Promise<TestAccount[]> {
   console.log("\n[account-manager] starting...");
 
@@ -210,9 +365,9 @@ export async function runAccountManager(
   console.log(`[account-manager] logging in as ${credentials.email}...`);
   const loggedIn = await performLogin(page, baseUrl, credentials);
   if (!loggedIn) {
-    console.warn("[account-manager] login failed — skipping account setup");
+    console.warn("[account-manager] seed login failed — skipping role discovery, still trying known accounts");
     await page.close();
-    return [];
+    return persistKnownAccounts(baseUrl, context, collectAccountsToPersist(credentials, existingAccounts, []));
   }
   console.log("[account-manager] login succeeded");
 
@@ -388,18 +543,30 @@ If user management is not accessible from this account, or the app has no role s
   }
 
   await page.close();
-  console.log(`[account-manager] found ${savedAccounts.length} account(s)`);
+  console.log(`[account-manager] found ${savedAccounts.length} newly created account(s)`);
 
-  if (savedAccounts.length === 0) return [];
+  return persistKnownAccounts(
+    baseUrl,
+    context,
+    collectAccountsToPersist(credentials, existingAccounts, savedAccounts),
+  );
+}
 
-  // 各アカウントにログインして storageState を保存
+async function persistKnownAccounts(
+  baseUrl: string,
+  context: BrowserContext,
+  accounts: Array<{ email: string; password: string; role: string }>,
+): Promise<TestAccount[]> {
   const testAccounts: TestAccount[] = [];
-  for (const account of savedAccounts) {
+  for (const account of accounts) {
     const stateDir = path.join(ACCOUNTS_DIR, "states");
     fs.mkdirSync(stateDir, { recursive: true });
     const statePath = path.join(stateDir, `${account.role.replace(/[^a-zA-Z0-9]/g, "_")}.json`);
 
-    console.log(`  [account-manager] saving session for role: ${account.role}`);
+    console.log(`  [account-manager] saving session for ${account.email} (role: ${account.role})`);
+    if (typeof context.clearCookies === "function") {
+      await context.clearCookies().catch(() => undefined);
+    }
     const loginPage = await context.newPage();
     const ok = await performLogin(loginPage, baseUrl, account);
     if (ok) {
@@ -414,6 +581,7 @@ If user management is not accessible from this account, or the app has no role s
   }
 
   saveTestAccounts(testAccounts);
-  console.log(`[account-manager] done (${testAccounts.length} account(s) ready)`);
-  return testAccounts;
+  const ready = testAccounts.filter((a) => a.storageStatePath);
+  console.log(`[account-manager] done (${ready.length}/${testAccounts.length} account(s) ready)`);
+  return ready;
 }

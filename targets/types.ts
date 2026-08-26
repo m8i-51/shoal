@@ -16,6 +16,7 @@ export interface TargetConfig {
   projectPath?: string;
   /** Optional: seed credentials for the Account Manager agent.
    *  If set, shoal will log in, discover roles, create test accounts per role,
-   *  and run all browser agents in authenticated sessions. */
+   *  and run all browser agents in authenticated sessions.
+   *  Not required when test-accounts/accounts.json already has usable email/password entries. */
   credentials?: Credentials;
 }
