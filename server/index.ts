@@ -11,6 +11,7 @@ import { generateDiary, getDiaryPath } from "../framework/diary.js";
 import { findCrossRunDuplicates } from "../framework/cross-run-dedup.js";
 import { computeExperienceScore } from "../framework/experience-score.js";
 import { isFinding, type Finding } from "../framework/types.js";
+import { buildSafeProxyUrl } from "./proxy-url.js";
 
 function specFilePath(baseUrl: string): string {
   try {
@@ -189,22 +190,23 @@ app.get("/api/findings/export", (_req, res) => {
 app.post("/api/findings/proxy-url", async (req, res) => {
   const { url } = req.body as { url?: string };
   if (!url || typeof url !== "string") { res.status(400).json({ error: "url required" }); return; }
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-    if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("invalid protocol");
-    const h = parsed.hostname;
-    const bare = h.replace(/^\[|\]$/g, ""); // IPv6 brackets: [::1] → ::1
-    if (bare === "localhost" || bare === "127.0.0.1" || bare === "::1" || bare.startsWith("192.168.") || bare.startsWith("10.") || bare.endsWith(".local")) {
-      res.status(400).json({ error: "private urls not allowed" });
-      return;
-    }
-  } catch {
-    res.status(400).json({ error: "invalid url" });
+  const safeUrl = buildSafeProxyUrl(url);
+  // Prefix must be a string literal at this sink (allowlist reconstruction alone is not enough for CodeQL).
+  if (
+    !safeUrl
+    || (
+      !safeUrl.startsWith("https://raw.githubusercontent.com/")
+      && !safeUrl.startsWith("https://gist.githubusercontent.com/")
+    )
+  ) {
+    res.status(400).json({ error: "host not allowed" });
     return;
   }
   try {
-    const upstream = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+    const upstream = await fetch(safeUrl, {
+      signal: AbortSignal.timeout(10_000),
+      redirect: "error",
+    });
     if (!upstream.ok) { res.status(502).json({ error: "upstream error" }); return; }
     const data = await upstream.json();
     res.json(data);
