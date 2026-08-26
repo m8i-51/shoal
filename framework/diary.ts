@@ -3,19 +3,33 @@ import * as path from "path";
 import { createLLMClient } from "./llm-client.js";
 import { isFinding, type Finding } from "./types.js";
 
-function isSafeRunId(runId: string): boolean {
-  return /^run_\d+$/.test(runId);
+/**
+ * Resolve `name` under `root`, or return null if it can escape the directory.
+ * Dot-dot and separator checks must sit next to the path sink; CodeQL does not
+ * treat a `/^run_\d+$/` helper as a TaintedPath sanitizer.
+ */
+function containedPath(root: string, name: string): string | null {
+  if (name.includes("..") || name.includes("/") || name.includes("\\")) return null;
+  const resolvedRoot = path.resolve(root);
+  const resolved = path.resolve(resolvedRoot, name);
+  if (!resolved.startsWith(resolvedRoot + path.sep)) return null;
+  return resolved;
 }
 
 function loadFindings(runId: string): Finding[] {
-  if (!isSafeRunId(runId)) return [];
-  const dir = path.join(process.cwd(), "findings", runId);
-  if (!fs.existsSync(dir)) return [];
+  if (runId.includes("..") || runId.includes("/") || runId.includes("\\")) return [];
+  if (!/^run_\d+$/.test(runId)) return [];
+  const dir = containedPath(path.join(process.cwd(), "findings"), runId);
+  if (!dir || !fs.existsSync(dir)) return [];
   const out: Finding[] = [];
   for (const file of fs.readdirSync(dir)) {
+    if (file.includes("..") || file.includes("/") || file.includes("\\")) continue;
+    if (path.basename(file) !== file) continue;
     if (!file.endsWith(".json") || file === "triage_result.json") continue;
+    const fullPath = containedPath(dir, file);
+    if (!fullPath) continue;
     try {
-      const f: unknown = JSON.parse(fs.readFileSync(path.join(dir, file), "utf-8"));
+      const f: unknown = JSON.parse(fs.readFileSync(fullPath, "utf-8"));
       if (!isFinding(f)) continue;
       out.push(f);
     } catch { /* skip */ }
@@ -41,7 +55,10 @@ function extractEvents(lines: string[]): string[] {
 }
 
 export async function generateDiary(runId: string, logLines: string[]): Promise<string> {
-  if (!isSafeRunId(runId)) throw new Error("invalid run id");
+  if (runId.includes("..") || runId.includes("/") || runId.includes("\\")) {
+    throw new Error("invalid run id");
+  }
+  if (!/^run_\d+$/.test(runId)) throw new Error("invalid run id");
   const findings = loadFindings(runId);
   const events = extractEvents(logLines);
 
@@ -90,15 +107,19 @@ ${eventsText}
     .map((b) => (b as { type: "text"; text: string }).text)
     .join("");
 
-  const diaryPath = path.join(process.cwd(), "logs", `diary_${runId}.md`);
-  fs.mkdirSync(path.dirname(diaryPath), { recursive: true });
+  const logsRoot = path.resolve(process.cwd(), "logs");
+  const diaryPath = containedPath(logsRoot, `diary_${runId}.md`);
+  if (!diaryPath) throw new Error("invalid run id");
+  fs.mkdirSync(logsRoot, { recursive: true });
   fs.writeFileSync(diaryPath, text, "utf-8");
 
   return text;
 }
 
 export function getDiaryPath(runId: string): string | null {
+  if (runId.includes("..") || runId.includes("/") || runId.includes("\\")) return null;
   if (!/^run_\d+$/.test(runId)) return null;
-  const p = path.join(process.cwd(), "logs", `diary_${runId}.md`);
+  const p = containedPath(path.resolve(process.cwd(), "logs"), `diary_${runId}.md`);
+  if (!p) return null;
   return fs.existsSync(p) ? p : null;
 }
