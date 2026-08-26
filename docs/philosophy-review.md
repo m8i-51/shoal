@@ -263,9 +263,9 @@ run 単位の HTML レポート (`framework/report.ts`) に使われるだけで
 | 2 | ガードレール (案11) | ✅ 実装済み | 利用者の信頼の土台。他機能より先に欲しい安全装置 |
 | 3 | エージェント個人記憶 (案2) | ✅ 実装済み | ブラウザエージェントも `runLog.agents` に記録し memory を永続化（2026-08 修正） |
 | 4 | Playwright trace (案5) | ✅ 実装済み（エージェント単位） | finding 保存時点の区間切り出し・ダッシュボード導線は未着手 |
-| 5 | 採用率フィードバック (案3) | 🟡 部分実装 | プロンプト還元は動作。`computeWeightedSummary()` への重み混入・非 GitHub rejected 判定は未着手 |
+| 5 | 採用率フィードバック (案3) | ✅ 実装済み | `computeWeightedSummary()` に lens/category 採用率乗数を反映。非 GitHub rejected 判定は未着手 |
 | 6 | 環境ペルソナ (案4) | ✅ 実装済み | axe-core による `run_a11y_audit` 含む |
-| 7 | スティグマジー → ペアシナリオ (案6) | ✅ 実装済み（Phase A / B とも） | Phase A は URL エリアマッチなし（LLM 判断） |
+| 7 | スティグマジー → ペアシナリオ (案6) | ✅ 実装済み（Phase A / B とも） | URL プレフィックスで同エリアの signal を優先 |
 | 8 | MCP 化 (案8) → Experience Diff (案9) | ✅ 実装済み（`shoal mcp` / `shoal diff`） | ループを閉じる本丸。案1・regression 機構に依存 |
 | 9 | 時間旅行ペルソナ (案7) | ✅ 実装済み（セッション継続 + 再訪シナリオ） | 案2の記憶基盤の上に載せる |
 | 10 | shoal-bench (案10) | ✅ 実装済み（`npm run bench`） | いつでも着手可能だが、機能が揃うほど価値が上がる |
@@ -276,13 +276,13 @@ run 単位の HTML レポート (`framework/report.ts`) に使われるだけで
 - ✅ axe-core による a11y 実測監査 — ブラウザエージェントの `run_a11y_audit` ツール
 - ✅ `verify_fix(findingId)` — 単一 finding 特化の検証 run（MCP ツール）
 - ✅ ブラウザエージェントの RunLog / memory 記録 — `AgentLog.agentType: "browser"` として `runLog.agents` に統合
+- ✅ 採用率の coverage 重み付け — `lensAdoptionWeight` / `categoryAdoptionWeight`
+- ✅ safe モードのブラウザガード — DELETE ネットワークブロック + 不可逆クリック intercept
+- ✅ Swarm signals の URL エリアフィルタ — `pathsShareArea` + `currentPath`
 
 **未着手 / 部分実装（優先度順）**
-1. 採用率を `computeWeightedSummary()` または org-designer の重み計算に反映
-2. 非 GitHub トラッカーでの rejected（wontfix）判定
-3. `safe` モードのブラウザ側プログラム的ガード（削除・支払い UI の intercept）
-4. Swarm signals の URL プレフィックスフィルタ
-5. `shoal diff` と page-hash の連携
-6. ダッシュボードへの trace リンク・cross-run duplicate 表示
-7. shoal-bench のバリエーション拡充とモデル別スコアの README 掲示
-8. triage の「再訪・未改善」finding を既存 issue コメントへ振り分け
+1. 非 GitHub トラッカーでの rejected（wontfix）判定
+2. `shoal diff` と page-hash の連携
+3. ダッシュボードへの trace リンク・cross-run duplicate 表示
+4. shoal-bench のバリエーション拡充とモデル別スコアの README 掲示
+5. triage の「再訪・未改善」finding を既存 issue コメントへ振り分け
