@@ -50,10 +50,19 @@ describe("getDiaryPath", () => {
   it("パストラバーサル試みは null", () => {
     expect(getDiaryPath("../etc/passwd")).toBeNull();
     expect(getDiaryPath("run_123/../../../etc")).toBeNull();
+    expect(getDiaryPath("run_123\\..\\..\\etc")).toBeNull();
   });
 });
 
 describe("generateDiary", () => {
+  it("不正な runId は throw しファイルを書かない", async () => {
+    await expect(generateDiary("run_abc", [])).rejects.toThrow("invalid run id");
+    await expect(generateDiary("../etc/passwd", [])).rejects.toThrow("invalid run id");
+    await expect(generateDiary("run_123/../../../etc", [])).rejects.toThrow("invalid run id");
+    expect(fs.writeFileSync).not.toHaveBeenCalled();
+    expect(mockCreateMessage).not.toHaveBeenCalled();
+  });
+
   it("生成されたテキストを返す", async () => {
     const result = await generateDiary("run_123", []);
     expect(result).toBe(DIARY_TEXT);
@@ -88,6 +97,21 @@ describe("generateDiary", () => {
     await generateDiary("run_123", []);
     const [params] = mockCreateMessage.mock.calls[0];
     expect(params.messages[0].content).toContain("Login is broken");
+  });
+
+  it("readdir のパストラバーサルなファイル名は読まない", async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readdirSync).mockReturnValue(
+      ["../secret.json", "foo/../bar.json", "f1.json"] as unknown as ReturnType<typeof fs.readdirSync>,
+    );
+    const finding = { id: "f1", runId: "run_123", agentId: "a", agentName: "A", role: "r", title: "Login is broken", body: "", category: "bug", timestamp: new Date().toISOString() };
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(finding) as unknown as ReturnType<typeof fs.readFileSync>);
+
+    await generateDiary("run_123", []);
+    const readPaths = vi.mocked(fs.readFileSync).mock.calls.map((c) => String(c[0]));
+    expect(readPaths.some((p) => p.includes("f1.json"))).toBe(true);
+    expect(readPaths.every((p) => !p.includes(".."))).toBe(true);
+    expect(readPaths.every((p) => !p.includes("secret.json"))).toBe(true);
   });
 
   it("triage_result.json（timestamp を持たない集計ファイル）はプロンプトに混ぜない", async () => {
