@@ -13,7 +13,7 @@ import {
   saveSnapshotBeforeAction,
   getDiffFromSnapshot,
 } from "./observation";
-import type { ProductSpec } from "./product-discovery";
+import { resolveLoginPath, type ProductSpec } from "./product-discovery";
 import type { Credentials } from "../targets/types";
 import Anthropic from "@anthropic-ai/sdk";
 
@@ -120,6 +120,141 @@ function describeAccountsFile(file: AccountsFileInspection): string {
   }
 }
 
+export type AuthHandoff =
+  | { kind: "session"; email?: string; role?: string }
+  | { kind: "credentials"; email: string; password: string; role: string; loginPath: string }
+  | { kind: "guest" };
+
+export type BrowserAuthPlan = {
+  handoff: AuthHandoff;
+  storageStatePath?: string;
+  startPath: string;
+};
+
+/** Join base URL with a login path. `/` and empty path mean the app root. */
+export function resolveLoginUrl(baseUrl: string, loginPath?: string): string {
+  const trimmed = loginPath?.trim() ?? "";
+  if (!trimmed || trimmed === "/") return baseUrl;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  const base = baseUrl.replace(/\/$/, "");
+  const path = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+  return `${base}${path}`;
+}
+
+/**
+ * URLs to try for Account Manager login, discovered path first.
+ * BASE_URL is always last so a marketing homepage does not hide /login.
+ */
+export function loginCandidateUrls(baseUrl: string, loginPath?: string): string[] {
+  const resolved = loginPath ? resolveLoginUrl(baseUrl, loginPath) : undefined;
+  const urls: string[] = [];
+  if (resolved && resolved.replace(/\/$/, "") !== baseUrl.replace(/\/$/, "")) {
+    urls.push(resolved);
+  }
+  urls.push(baseUrl);
+  return urls;
+}
+
+function sessionPlan(account: TestAccount): BrowserAuthPlan {
+  return {
+    handoff: { kind: "session", email: account.email, role: account.role },
+    storageStatePath: account.storageStatePath,
+    startPath: "/",
+  };
+}
+
+/**
+ * Decide how a browser agent should authenticate.
+ *
+ * Session injection stays the default. When it failed but accounts.json still
+ * has email/password, hand those values over with the discovered login path
+ * instead of letting the agent invent credentials. Guest exploration is only
+ * for agents that truly have no test account — and they are told not to guess.
+ */
+export function planBrowserAuth(opts: {
+  testAccounts: TestAccount[];
+  accountRole: string;
+  loginPath?: string;
+  returningSessionPath?: string;
+  preferAccountSession: boolean;
+}): BrowserAuthPlan {
+  const sessionForRole = opts.testAccounts.find((a) => a.role === opts.accountRole && a.storageStatePath);
+  const credsForRole = opts.testAccounts.find((a) => a.role === opts.accountRole && hasUsableCredentials(a));
+  const anyCreds = opts.testAccounts.find(hasUsableCredentials);
+
+  if (opts.preferAccountSession && sessionForRole) return sessionPlan(sessionForRole);
+  if (opts.returningSessionPath) {
+    return { handoff: { kind: "session" }, storageStatePath: opts.returningSessionPath, startPath: "/" };
+  }
+  if (sessionForRole) return sessionPlan(sessionForRole);
+
+  const creds = credsForRole ?? anyCreds;
+  if (creds) {
+    const loginPath = opts.loginPath?.trim() || "/";
+    return {
+      handoff: {
+        kind: "credentials",
+        email: creds.email,
+        password: creds.password,
+        role: creds.role,
+        loginPath,
+      },
+      startPath: loginPath,
+    };
+  }
+
+  return { handoff: { kind: "guest" }, startPath: "/" };
+}
+
+export function authPrompt(handoff: AuthHandoff): string {
+  switch (handoff.kind) {
+    case "session":
+      if (!handoff.email) return "";
+      return `
+[Authentication]
+You are already logged in as ${handoff.email} (${handoff.role ?? "user"}).
+Do not log out. Do not submit a login form with different credentials.`;
+    case "credentials":
+      return `
+[Authentication]
+You are NOT logged in. Session injection failed, so you must sign in yourself.
+Use these exact test credentials — do NOT invent, guess, or try any other username or password:
+- Email / username: ${handoff.email}
+- Password: ${handoff.password}
+- Login page: ${handoff.loginPath}
+
+Navigate to that login page if you are not already there, enter these values, and continue as this user.
+If these credentials fail, record that as a finding and continue as a guest. Do not try other credentials.`;
+    case "guest":
+      return `
+[Authentication]
+You are exploring as a guest (not logged in).
+Do NOT invent, guess, or try usernames and passwords. There are no test credentials available for you.
+If you hit a login wall, explore only what is available without an account, or record the login wall as a finding and move on.`;
+    default: {
+      const _exhaustive: never = handoff;
+      return "";
+    }
+  }
+}
+
+export function describeAuthPlan(agentName: string, plan: BrowserAuthPlan): string {
+  switch (plan.handoff.kind) {
+    case "session":
+      return plan.handoff.email
+        ? `[auth] ${agentName}: session injected (${plan.handoff.email})`
+        : `[auth] ${agentName}: restored previous session`;
+    case "credentials":
+      return `[auth] ${agentName}: no session — handing off credentials for ${plan.handoff.email} at ${plan.handoff.loginPath}`;
+    case "guest":
+      return `[auth] ${agentName}: guest (do not guess credentials)`;
+    default: {
+      const _exhaustive: never = plan.handoff;
+      return `[auth] ${agentName}: unknown`;
+    }
+  }
+}
+
 function skipReason(file: AccountsFileInspection): string {
   switch (file.state) {
     case "missing":
@@ -204,60 +339,63 @@ async function takeScreenshot(page: Page, label: string): Promise<string> {
   return buffer.toString("base64");
 }
 
+async function fillLoginForm(page: Page, credentials: Credentials): Promise<boolean> {
+  const emailSelectors = [
+    'input[type="email"]',
+    'input[name="email"]',
+    'input[name="username"]',
+    'input[placeholder*="mail" i]',
+    'input[placeholder*="user" i]',
+  ];
+  let filled = false;
+  for (const sel of emailSelectors) {
+    const el = page.locator(sel).first();
+    if (await el.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await el.fill(credentials.email);
+      filled = true;
+      break;
+    }
+  }
+  if (!filled) return false;
+
+  const passEl = page.locator('input[type="password"]').first();
+  if (!await passEl.isVisible({ timeout: 2000 }).catch(() => false)) return false;
+  await passEl.fill(credentials.password);
+
+  const submitSelectors = [
+    'button[type="submit"]',
+    'input[type="submit"]',
+    'button:has-text("Login")',
+    'button:has-text("Sign in")',
+    'button:has-text("ログイン")',
+    'button:has-text("サインイン")',
+  ];
+  for (const sel of submitSelectors) {
+    const el = page.locator(sel).first();
+    if (await el.isVisible({ timeout: 1000 }).catch(() => false)) {
+      await el.click();
+      await page.waitForTimeout(2000);
+      return true;
+    }
+  }
+  return false;
+}
+
 async function performLogin(
   page: Page,
-  baseUrl: string,
+  urls: string[],
   credentials: Credentials,
 ): Promise<boolean> {
-  try {
-    await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.waitForTimeout(1000);
-
-    // email / username フィールドを探す
-    const emailSelectors = [
-      'input[type="email"]',
-      'input[name="email"]',
-      'input[name="username"]',
-      'input[placeholder*="mail" i]',
-      'input[placeholder*="user" i]',
-    ];
-    let filled = false;
-    for (const sel of emailSelectors) {
-      const el = page.locator(sel).first();
-      if (await el.isVisible({ timeout: 2000 }).catch(() => false)) {
-        await el.fill(credentials.email);
-        filled = true;
-        break;
-      }
+  for (const url of urls) {
+    try {
+      await page.goto(url, { waitUntil: "networkidle" });
+      await page.waitForTimeout(1000);
+      if (await fillLoginForm(page, credentials)) return true;
+    } catch {
+      // try the next candidate
     }
-    if (!filled) return false;
-
-    // password フィールド
-    const passEl = page.locator('input[type="password"]').first();
-    if (!await passEl.isVisible({ timeout: 2000 }).catch(() => false)) return false;
-    await passEl.fill(credentials.password);
-
-    // submit
-    const submitSelectors = [
-      'button[type="submit"]',
-      'input[type="submit"]',
-      'button:has-text("Login")',
-      'button:has-text("Sign in")',
-      'button:has-text("ログイン")',
-      'button:has-text("サインイン")',
-    ];
-    for (const sel of submitSelectors) {
-      const el = page.locator(sel).first();
-      if (await el.isVisible({ timeout: 1000 }).catch(() => false)) {
-        await el.click();
-        await page.waitForTimeout(2000);
-        return true;
-      }
-    }
-    return false;
-  } catch {
-    return false;
   }
+  return false;
 }
 
 // ================================================================
@@ -358,16 +496,22 @@ export async function runAccountManager(
 ): Promise<TestAccount[]> {
   console.log("\n[account-manager] starting...");
 
+  const loginPath = resolveLoginPath(productSpec);
+  const loginUrls = loginCandidateUrls(baseUrl, loginPath);
+  if (loginPath) {
+    console.log(`[account-manager] login URL candidates: ${loginUrls.join(" → ")}`);
+  }
+
   const page = await context.newPage();
   const observation = setupObservation(page);
 
-  // まず seed アカウントでログイン
+  // まず seed アカウントでログイン（発見済みのログイン URL を優先）
   console.log(`[account-manager] logging in as ${credentials.email}...`);
-  const loggedIn = await performLogin(page, baseUrl, credentials);
+  const loggedIn = await performLogin(page, loginUrls, credentials);
   if (!loggedIn) {
     console.warn("[account-manager] seed login failed — skipping role discovery, still trying known accounts");
     await page.close();
-    return persistKnownAccounts(baseUrl, context, collectAccountsToPersist(credentials, existingAccounts, []));
+    return persistKnownAccounts(loginUrls, context, collectAccountsToPersist(credentials, existingAccounts, []));
   }
   console.log("[account-manager] login succeeded");
 
@@ -546,14 +690,14 @@ If user management is not accessible from this account, or the app has no role s
   console.log(`[account-manager] found ${savedAccounts.length} newly created account(s)`);
 
   return persistKnownAccounts(
-    baseUrl,
+    loginUrls,
     context,
     collectAccountsToPersist(credentials, existingAccounts, savedAccounts),
   );
 }
 
 async function persistKnownAccounts(
-  baseUrl: string,
+  loginUrls: string[],
   context: BrowserContext,
   accounts: Array<{ email: string; password: string; role: string }>,
 ): Promise<TestAccount[]> {
@@ -568,12 +712,12 @@ async function persistKnownAccounts(
       await context.clearCookies().catch(() => undefined);
     }
     const loginPage = await context.newPage();
-    const ok = await performLogin(loginPage, baseUrl, account);
+    const ok = await performLogin(loginPage, loginUrls, account);
     if (ok) {
       await context.storageState({ path: statePath });
       console.log(`    saved: ${statePath}`);
     } else {
-      console.warn(`    login failed for ${account.email} — storageState not saved`);
+      console.warn(`    login failed for ${account.email} — storageState not saved; credentials kept for browser-agent handoff`);
     }
     await loginPage.close();
 
@@ -582,6 +726,12 @@ async function persistKnownAccounts(
 
   saveTestAccounts(testAccounts);
   const ready = testAccounts.filter((a) => a.storageStatePath);
-  console.log(`[account-manager] done (${ready.length}/${testAccounts.length} account(s) ready)`);
-  return ready;
+  const fallback = testAccounts.filter((a) => !a.storageStatePath && hasUsableCredentials(a));
+  console.log(`[account-manager] done (${ready.length}/${testAccounts.length} account(s) with session)`);
+  if (fallback.length > 0) {
+    console.warn(`[account-manager] ${fallback.length} account(s) have no session — browser agents will receive credentials and the login URL instead of guessing`);
+  }
+  // Keep accounts without a session so the runner can hand off credentials
+  // instead of leaving browser agents to invent logins.
+  return testAccounts;
 }

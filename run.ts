@@ -38,14 +38,14 @@ import {
   getDiffFromSnapshot,
   type ObservationState,
 } from "./framework/observation";
-import { discoverProduct, loadCachedSpec, type ProductSpec } from "./framework/product-discovery";
+import { discoverProduct, loadCachedSpec, resolveLoginPath, type ProductSpec } from "./framework/product-discovery";
 import { designOrg, UNIVERSAL_LENSES } from "./framework/org-designer";
 import { designScenarios, findMultiActorScenario, soloScenarios, type Scenario, type ScenarioActor, type ScenarioOutcome } from "./framework/scenario-designer";
 import { runTriageAgent } from "./framework/triage";
 import { generateReport } from "./framework/report";
 import type { AgentLog, Finding, RegressionCheck } from "./framework/types";
 import { loadTarget, applyLoadedTarget } from "./targets";
-import { runAccountManager, resolveAccountSetup, type TestAccount } from "./framework/account-manager";
+import { runAccountManager, resolveAccountSetup, planBrowserAuth, authPrompt, describeAuthPlan, resolveLoginUrl, type TestAccount, type BrowserAuthPlan } from "./framework/account-manager";
 import { estimateCost, formatCostUSD } from "./framework/cost";
 
 const BASE_URL = process.env.BASE_URL ?? "http://localhost:3000";
@@ -1039,6 +1039,7 @@ async function runBrowserAgent(
   productSpec: ProductSpec,
   assignment: Assignment = {},
   scenarioOutcomes: ScenarioOutcome[] = [],
+  authPlan: BrowserAuthPlan = { handoff: { kind: "guest" }, startPath: "/" },
 ): Promise<BrowserAgentLog> {
   const assignmentLabel = assignment.scenario
     ? `[scenario: ${assignment.scenario.title.slice(0, 35)}]`
@@ -1115,18 +1116,36 @@ ${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\
     ? `\n[Your Task for This Run]\nTitle: ${assignment.scenario.title}\nYou are: ${assignment.scenario.context}\nGoal: ${assignment.scenario.goal}\nConstraints: ${assignment.scenario.constraints}\n\nFocus on completing this task naturally as this user. Report any issues you encounter along the way.\nWhen done (or if you cannot complete the goal), call post_outcome with achieved=true/false and a brief reason.`
     : assignment.lens
     ? `\n[Focus Area for This Run]\n${assignment.lens}\nKeep this perspective in mind and prioritize reporting related issues.`
-    : ""}${focusPrompt()}${describeEnvironment(agent.environment)}${sessionContinuityPrompt(hasAgentSession(agent.id))}${formatAgentMemories(agent)}${guardrailPrompt(SHOAL_MODE)}`;
+    : ""}${focusPrompt()}${describeEnvironment(agent.environment)}${sessionContinuityPrompt(hasAgentSession(agent.id))}${formatAgentMemories(agent)}${guardrailPrompt(SHOAL_MODE)}${authPrompt(authPlan.handoff)}`;
 
-  await page.goto(BASE_URL, { waitUntil: "networkidle" });
+  const startUrl = resolveLoginUrl(BASE_URL, authPlan.startPath);
+  await page.goto(startUrl, { waitUntil: "networkidle" });
   await page.waitForTimeout(5000);
   const initialScreenshot = await takeScreenshot(page, "initial");
+
+  const opening = (() => {
+    switch (authPlan.handoff.kind) {
+      case "credentials":
+        return "The login page is open. Sign in with the exact credentials in [Authentication], then use the app. Do not invent other usernames or passwords.";
+      case "guest":
+        return "The app is open. Start using it. If you see a login form, do not guess usernames or passwords — explore only what is available without an account.";
+      case "session":
+        return authPlan.handoff.email
+          ? "The app is open and you are already logged in. Start using it. Do not log out or enter different credentials."
+          : "The app is open. Start using it.";
+      default: {
+        const _exhaustive: never = authPlan.handoff;
+        return `The app is open. Start using it. (${String(_exhaustive)})`;
+      }
+    }
+  })();
 
   const messages: Anthropic.MessageParam[] = [
     {
       role: "user",
       content: [
         { type: "image", source: { type: "base64", media_type: "image/png", data: initialScreenshot.base64 } },
-        { type: "text", text: "The app is open. Start using it." },
+        { type: "text", text: opening },
       ],
     },
   ];
@@ -1371,7 +1390,7 @@ async function main() {
         break;
       }
       case "skip": {
-        testAccounts = accountPlan.existing.filter((a) => a.storageStatePath);
+        testAccounts = accountPlan.existing;
         break;
       }
       default: {
@@ -1466,22 +1485,23 @@ async function main() {
         const assignment = pairAssignments.get(agent.id) ?? pickAssignment(dispatchIdx++, dispatchScenarios);
         agentAssignments.set(agent.id, assignment);
 
-        // storageState の優先順位:
-        // 1. マルチアクターの場合は actor のロールに合うテストアカウント（権限が本質なので最優先）
-        // 2. 前回の run の自分のセッション（「再訪ユーザー」）
-        // 3. エージェントのロールに合うテストアカウント
         const accountRole = assignment.actor?.role ?? agent.role;
-        const matchedAccount = testAccounts.find((a) => a.role === accountRole && a.storageStatePath);
+        const authPlan = planBrowserAuth({
+          testAccounts,
+          accountRole,
+          loginPath: resolveLoginPath(productSpec),
+          returningSessionPath: hasAgentSession(agent.id) ? agentSessionPath(agent.id) : undefined,
+          preferAccountSession: Boolean(assignment.actor),
+        });
+        console.log(describeAuthPlan(agent.name, authPlan));
         const baseOptions: Parameters<typeof browser.newContext>[0] = {
           viewport: { width: 1024, height: 640 },
         };
-        if (assignment.actor && matchedAccount?.storageStatePath) {
-          baseOptions.storageState = matchedAccount.storageStatePath;
-        } else if (hasAgentSession(agent.id)) {
-          baseOptions.storageState = agentSessionPath(agent.id);
-          console.log(`[session] ${agent.name} returns with their previous session`);
-        } else if (matchedAccount?.storageStatePath) {
-          baseOptions.storageState = matchedAccount.storageStatePath;
+        if (authPlan.storageStatePath) {
+          baseOptions.storageState = authPlan.storageStatePath;
+          if (!assignment.actor && hasAgentSession(agent.id)) {
+            console.log(`[session] ${agent.name} returns with their previous session`);
+          }
         }
         // ペルソナの環境プロファイル（デバイス・ロケール・配色）を重ねる
         const contextOptions = buildContextOptions(agent.environment, baseOptions);
@@ -1498,7 +1518,7 @@ async function main() {
         const page = await context.newPage();
         await applyNetworkThrottle(page, agent.environment?.networkThrottle);
         try {
-          return await runBrowserAgent(agent, page, productSpec, assignment, scenarioOutcomes);
+          return await runBrowserAgent(agent, page, productSpec, assignment, scenarioOutcomes, authPlan);
         } finally {
           // 次の run で「再訪ユーザー」になれるようセッションを保存（close 前に呼ぶ）
           await saveAgentSession(context, agent.id);
