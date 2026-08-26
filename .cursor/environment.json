@@ -1,0 +1,11 @@
+{
+  "name": "shoal",
+  "install": "npm ci && npx playwright install --with-deps chromium && npm run build:web",
+  "terminals": [
+    {
+      "name": "dashboard",
+      "command": "npm run serve"
+    }
+  ],
+  "ports": [4000]
+}
