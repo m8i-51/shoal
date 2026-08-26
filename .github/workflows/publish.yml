@@ -26,17 +26,7 @@ jobs:
         run: npm ci
 
       - name: Verify CLI entrypoints are packaged
-        run: |
-          files=$(npm pack --dry-run --json | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d[0].files.map(f=>f.path).join('\n'))")
-          missing=0
-          for f in run.ts diff.ts triage-only.ts server/index.ts server/mcp.ts; do
-            if ! printf '%s\n' "$files" | grep -qx "$f"; then
-              echo "::error::published package is missing CLI entrypoint: $f (add it to package.json \"files\")"
-              missing=1
-            fi
-          done
-          [ "$missing" -eq 0 ] && echo "All CLI entrypoints are present in the package."
-          exit $missing
+        run: npm pack --dry-run --json | npx tsx scripts/verify-pack-entrypoints.ts
 
       - name: Test
         run: npm test
