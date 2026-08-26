@@ -280,9 +280,8 @@ run 単位の HTML レポート (`framework/report.ts`) に使われるだけで
 - ✅ safe モードのブラウザガード — DELETE ネットワークブロック + 不可逆クリック intercept
 - ✅ Swarm signals の URL エリアフィルタ — `pathsShareArea` + `currentPath`
 
-**未着手 / 部分実装（優先度順）**
+**未着手 / 部分実装**
 
-_監査 G-1〜3 + 中優先 + philosophy-review 残項目 1〜5 は 2026-08 PR #40 で消化済み。_
+_監査 G-1〜3 + philosophy-review 残項目 1〜5 + bench 拡充は PR #40 で消化済み。_
 
-残タスク（低優先）:
-- finding 保存時点の trace 区間切り出し（エージェント単位 trace は実装済み）
+残タスク: なし（低優先の finding 単位 trace 切り出しも実装済み）

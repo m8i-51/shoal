@@ -25,6 +25,7 @@ import { buildContextOptions, sanitizeEnvironment, describeEnvironment, applyNet
 import { agentSessionPath, hasAgentSession, saveAgentSession, sessionContinuityPrompt } from "./framework/session-store";
 import { runA11yAudit, formatAuditForAgent } from "./framework/a11y-audit";
 import { loadPageHashes, updatePageHashes, hashContent } from "./framework/page-cache";
+import { saveFindingTraceChunk, traceAgentZipPath, traceFindingZipPath } from "./framework/trace-chunk";
 import { loadPersonaPack, formatPackForPrompt, type PersonaPack } from "./framework/persona-pack";
 import { buildTrackers } from "./framework/trackers/index";
 import {
@@ -118,10 +119,6 @@ function focusPrompt(): string {
 Recent code changes affect these areas — spend most of your session here:
 ${FOCUS_PATHS.map((p) => `- ${p}`).join("\n")}
 Explore these paths first and in depth. Only wander elsewhere once they are exhausted.`;
-}
-
-function traceZipPath(runId: string, agentId: string): string {
-  return path.join(process.cwd(), "logs", "traces", runId, `${agentId}.zip`);
 }
 
 // エージェントへの割り当て。actor はマルチアクターシナリオで同時に動く役割
@@ -1041,8 +1038,14 @@ async function executeBrowserTool(
         const { title, body, category } = input as { title: string; body: string; category: string };
         const safeCategory = VALID_CATEGORIES.includes(String(category)) ? String(category) : "ux";
         screenshot = await takeScreenshot(page, `feedback_${String(title).slice(0, 20)}`);
+        const findingId = `${agentId}_${Date.now()}`;
+        let findingTracePath: string | undefined;
+        if (TRACE_ENABLED) {
+          const chunkPath = await saveFindingTraceChunk(page.context(), runLog.runId, findingId);
+          findingTracePath = chunkPath ?? traceAgentZipPath(runLog.runId, agentId);
+        }
         const finding: Finding = {
-          id: `${agentId}_${Date.now()}`,
+          id: findingId,
           runId: runLog.runId,
           agentId,
           agentName: agentLog.agentName,
@@ -1052,7 +1055,7 @@ async function executeBrowserTool(
           category: safeCategory,
           timestamp: new Date().toISOString(),
           screenshotPath: screenshot.filePath,
-          ...(TRACE_ENABLED ? { tracePath: traceZipPath(runLog.runId, agentId) } : {}),
+          ...(findingTracePath ? { tracePath: findingTracePath } : {}),
         };
         saveFinding(finding);
         agentLog.feedbacksSaved.push({ title: String(title), category: safeCategory, findingId: finding.id });
@@ -1577,7 +1580,7 @@ async function main() {
           // 次の run で「再訪ユーザー」になれるようセッションを保存（close 前に呼ぶ）
           await saveAgentSession(context, agent.id);
           if (TRACE_ENABLED) {
-            const tracePath = traceZipPath(runLog.runId, agent.id);
+            const tracePath = traceAgentZipPath(runLog.runId, agent.id);
             try {
               fs.mkdirSync(path.dirname(tracePath), { recursive: true });
               await context.tracing.stop({ path: tracePath });
