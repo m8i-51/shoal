@@ -71,11 +71,11 @@ npm install -g @m8i-51/shoal
 npx playwright install chromium
 ```
 
-テストしたいプロジェクトのディレクトリに移動して実行:
+テストしたいプロジェクトの、shoal 設定を置くディレクトリに移動して実行:
 
 ```bash
-cd your-project
-shoal init     # 利用可能なオプションをすべて含む .env を生成
+cd your-project          # サブディレクトリでも可 — [設定の場所](#設定の場所) を参照
+shoal init               # 利用可能なオプションをすべて含む .env を生成
 ```
 
 `.env` を開いて最低限これを設定:
@@ -85,13 +85,15 @@ ANTHROPIC_API_KEY=sk-ant-...
 BASE_URL=http://localhost:3000   # 対象アプリの URL
 ```
 
-実行:
+**同じディレクトリから**実行:
 
 ```bash
 shoal serve    # Web ダッシュボードを http://localhost:4000 で起動
 shoal          # またはターミナルから直接実行
 shoal config   # 既存の .env を対話形式で更新（トラッカー設定など）
 ```
+
+起動時に、どの `.env` を読んだか（または読めなかったか）がログに出ます。`0 variables injected` と出たら、`.env` のあるディレクトリにいません。
 
 **リポジトリをクローンして開発する場合:**
 
@@ -151,6 +153,46 @@ shoal は run のたびに学習する。
 
 ---
 
+## 設定の場所
+
+shoal は `.env`・`test-accounts/`・`shoal.config.ts` の読み込みと `logs/`・`findings/` の書き込みを、**カレントディレクトリ**（`cd` した場所）基準で行います。グローバルインストール先や、モノレポのルートを自動では探しません。
+
+起動時のログ:
+
+```
+[env] working directory: /path/you/ran/from
+[env] loaded /path/you/ran/from/.env (12 variables)
+```
+
+`.env` が無い場合:
+
+```
+[env] no .env found at /path/you/ran/from/.env (0 variables injected)
+```
+
+注入件数が 0 だと、想定していないデフォルトプロバイダ（Anthropic）に落ち、認証情報なしで失敗します。ログもカレントディレクトリ側に出るので、サブディレクトリの設定を見ていないことに気づきにくいです。
+
+**サブディレクトリに設定だけ置く**（モノレポでよくある運用）:
+
+```bash
+mkdir -p apps/shoal
+cd apps/shoal
+shoal init                 # apps/shoal/.env を生成
+# test-accounts/accounts.json もここに置く
+shoal serve                # ダッシュボード。logs / findings も apps/shoal/ に出る
+```
+
+リポジトリルートから起動する場合はパスを指定します:
+
+```bash
+shoal serve --dir apps/shoal
+shoal --dir apps/shoal
+# .env だけ別パスで読み、ログはカレントディレクトリに残す:
+shoal serve --env-file apps/shoal/.env
+```
+
+`--dir` は `test-accounts/`・`logs/`・`findings/`・`shoal.config.ts` の解決先も切り替えます。環境変数は `SHOAL_DIR` / `SHOAL_ENV_FILE` です。
+
 ## 設定
 
 | 変数 | デフォルト | 説明 |
@@ -186,6 +228,8 @@ shoal は run のたびに学習する。
 ¹ Notion のデータベースには `Name`（title）、`Labels`（multi_select）、`Status`（select）プロパティが必要。
 
 複数のトラッカーを同時に有効化でき、すべてのトラッカーに並列で起票される。`ISSUE_TRACKERS` が未設定でも `GITHUB_TOKEN` と `GITHUB_REPO` があれば GitHub が自動で有効になる（後方互換）。
+
+Backlog の課題タイプ ID / 優先度 ID はプロジェクトごとに違います。起票時にプロジェクトの課題タイプと優先度の一覧を取得し、指摘カテゴリ（`bug` / `ux` / `feature-request` / `goal-gap`）を名前（バグ・要望・タスク、高・中・低など）で対応付けます。名前で判断できないときだけモデルに選ばせます。選んだタイプと優先度はログに出ます（`[backlog] selected issueType "バグ" (id=…) for category=bug`）。
 
 ---
 
@@ -340,7 +384,7 @@ Detection rate: 5/7 (71%)
 | プロバイダ | 変数 |
 |---|---|
 | Anthropic（デフォルト） | `ANTHROPIC_API_KEY` |
-| Amazon Bedrock | `LLM_PROVIDER=bedrock`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` |
+| Amazon Bedrock | `LLM_PROVIDER=bedrock`, `AWS_REGION`（キーは省略可。デフォルトの認証チェーンを使用） |
 | OpenAI | `LLM_PROVIDER=openai`, `LLM_API_KEY`, `LLM_MODEL` |
 | OpenRouter | `LLM_PROVIDER=openrouter`, `LLM_API_KEY`, `LLM_MODEL` |
 | Groq | `LLM_PROVIDER=groq`, `LLM_API_KEY`, `LLM_MODEL` |
@@ -349,9 +393,25 @@ Detection rate: 5/7 (71%)
 | Ollama | `LLM_BASE_URL=http://localhost:11434/v1`, `LLM_MODEL` |
 | LM Studio | `LLM_BASE_URL=http://localhost:1234/v1`, `LLM_MODEL` |
 
-Bedrock を使う場合は `LLM_MODEL` に Bedrock のモデル ID（例: `anthropic.claude-3-5-sonnet-20241022-v2:0`）を設定する。クロスリージョン推論プロファイル（例: `us.anthropic.claude-3-5-sonnet-20241022-v2:0`）にも対応している。
+### Amazon Bedrock
 
-詳細は `.env.example` を参照。
+`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` は **未設定のまま**にすると、デフォルトの AWS 認証チェーン（`~/.aws/credentials`、名前付きプロファイル、SSO キャッシュ、インスタンスロール）が使われます。マシンのデフォルトプロファイルに長期キーがある場合、短命な `aws sso login` は拒否されることが多いです。そのときは新しいログインを無理に使わず、既存キー（または専用プロファイル）を使ってください。
+
+`.env` に空の `AWS_ACCESS_KEY_ID=` / `AWS_SECRET_ACCESS_KEY=` を書かないでください。空文字が入ると認証チェーンが壊れます。shoal は起動時に空の AWS キーを無視し、警告を出します。
+
+`LLM_MODEL` には基盤モデル ID か推論プロファイル ID を指定します。作業リージョンでは、リージョン内呼び出しや地域限定プロファイルに未対応の世代があります。データ所在を国内に閉じたい場合は、その地域プロファイルが存在する世代を選んで組み合わせてください:
+
+| スコープ | `LLM_MODEL` の例 | 典型的な `AWS_REGION` |
+|---|---|---|
+| 基盤モデル（オンデマンド、リージョンが提供している場合） | `anthropic.claude-3-5-haiku-20241022-v1:0` | モデルがあるリージョン |
+| US クロスリージョン | `us.anthropic.claude-sonnet-4-5-20250929-v1:0` | `us-east-1` |
+| EU クロスリージョン | `eu.anthropic.claude-sonnet-4-5-20250929-v1:0` | `eu-central-1` |
+| APAC クロスリージョン | `apac.anthropic.claude-sonnet-4-5-20250929-v1:0` | `ap-northeast-1` |
+| 日本（東京 + 大阪のみ） | `jp.anthropic.claude-sonnet-4-5-20250929-v1:0` | `ap-northeast-1` |
+| 日本 | `jp.anthropic.claude-haiku-4-5-20251001-v1:0` | `ap-northeast-1` |
+| 日本 | `jp.anthropic.claude-sonnet-4-6` | `ap-northeast-1` |
+
+アカウントで使えるプロファイルは `aws bedrock list-inference-profiles` で確認できます。コピー用の例は `.env.example` にあります。
 
 ---
 

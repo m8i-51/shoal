@@ -10,8 +10,8 @@
  *   npm run bench            # ANTHROPIC_API_KEY（等）が必要
  *   BENCH_PORT=4319 npm run bench
  */
-import { config as loadEnv } from "dotenv";
-loadEnv({ override: true });
+import { loadShoalEnv } from "../framework/load-env";
+loadShoalEnv({ quiet: process.env.NODE_ENV === "test" });
 import { spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";

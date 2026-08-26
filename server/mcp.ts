@@ -20,6 +20,11 @@ import { spawnRun, activeSessions } from "./runner.js";
 import { listRuns } from "./runs.js";
 import { computeExperienceScore } from "../framework/experience-score.js";
 import { isFinding, type Finding } from "../framework/types.js";
+import { loadShoalEnv } from "../framework/load-env.js";
+
+if (process.env.NODE_ENV !== "test") {
+  loadShoalEnv({ logger: (m) => console.error(m) });
+}
 
 // ================================================================
 // Handlers — MCP 配線から分離した単体テスト可能な関数群

@@ -14,8 +14,8 @@
  *   SHOAL_PR_NUMBER   コメント先 PR 番号（GitHub Actions では GITHUB_REF から自動解決）
  *   GITHUB_TOKEN / GITHUB_REPO が揃っていれば PR コメント、なければ logs/ に markdown を保存
  */
-import { config as loadEnv } from "dotenv";
-loadEnv({ override: true });
+import { loadShoalEnv } from "./framework/load-env";
+loadShoalEnv({ quiet: process.env.NODE_ENV === "test" });
 import { execSync, spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";

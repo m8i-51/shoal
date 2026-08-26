@@ -6,8 +6,8 @@
  *   ANTHROPIC_API_KEY=xxx GITHUB_TOKEN=xxx GITHUB_REPO=owner/repo npx tsx run.ts
  */
 
-import { config as loadEnv } from "dotenv";
-loadEnv({ override: true }); // .env を常に優先（継承した環境変数を上書き）
+import { loadShoalEnv } from "./framework/load-env";
+loadShoalEnv({ quiet: process.env.NODE_ENV === "test" });
 import Anthropic from "@anthropic-ai/sdk";
 import { chromium, type Page } from "playwright";
 import * as fs from "fs";

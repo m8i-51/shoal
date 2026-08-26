@@ -13,14 +13,41 @@
  */
 import { spawn, spawnSync } from "child_process";
 import { fileURLToPath } from "url";
-import { dirname, join } from "path";
+import { dirname, join, resolve } from "path";
 import { existsSync } from "fs";
+import { parseShoalArgs, printHelp } from "./cli-args.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const packageRoot = join(__dirname, "..");
+
+const parsed = parseShoalArgs(process.argv);
+process.argv = [process.argv[0], process.argv[1], ...parsed.rest];
+
+const dir = parsed.dir ?? process.env.SHOAL_DIR;
+const envFile = parsed.envFile ?? process.env.SHOAL_ENV_FILE;
+const originalCwd = process.cwd();
+
+if (dir) {
+  const absDir = resolve(originalCwd, dir);
+  if (!existsSync(absDir)) {
+    console.error(`[shoal] --dir not found: ${absDir}`);
+    process.exit(1);
+  }
+  process.chdir(absDir);
+}
+
+if (envFile) {
+  process.env.SHOAL_ENV_FILE = resolve(originalCwd, envFile);
+}
+
 const subcommand = process.argv[2];
 
 async function main() {
+  if (subcommand === "--help" || subcommand === "-h" || subcommand === "help") {
+    printHelp();
+    process.exit(0);
+  }
+
   // init — 対話形式で .env をカレントディレクトリに生成する
   if (subcommand === "init") {
     const { runInit } = await import("./init.js");
