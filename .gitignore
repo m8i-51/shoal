@@ -8,6 +8,7 @@ agents.json
 product-specs/
 coverage/
 .claude/
+.cursor/
 shoal.config.ts
 test-accounts/
 cache/
