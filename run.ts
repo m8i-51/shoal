@@ -178,7 +178,7 @@ const POST_FEEDBACK_TOOL: Tool = {
 
 const REPORT_REGRESSION_TOOL: Tool = {
   name: "report_regression",
-  description: "Report a regression when a previously fixed bug has reappeared as a GitHub Issue. / 修正済みバグの再発をGitHub Issueとして報告する",
+  description: "Report a regression when a previously fixed bug has reappeared as an issue ticket. / 修正済みバグの再発を issue チケットとして報告する",
   input_schema: {
     type: "object",
     properties: {
@@ -500,7 +500,7 @@ const PERSONA_DESIGNER_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: "get_open_issues",
-    description: "Get the titles and labels of currently open GitHub Issues (known problems). Use this to understand what is already known and recruit agents who are likely to explore DIFFERENT areas. / 現在オープンなGitHub Issueのタイトルとラベルを取得する。既知の問題を把握し、未探索領域を掘れるペルソナを採用するために使う",
+    description: "Get the titles and labels of currently open issue tickets (known problems). Use this to understand what is already known and recruit agents who are likely to explore DIFFERENT areas. / 現在オープンな issue チケットのタイトルとラベルを取得する。既知の問題を把握し、未探索領域を掘れるペルソナを採用するために使う",
     input_schema: { type: "object", properties: {}, required: [] },
   },
   {
@@ -832,7 +832,7 @@ const BROWSER_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: "post_feedback",
-    description: "Record an issue or improvement as feedback. Becomes a GitHub Issue after triage. / 問題・改善点をフィードバックとして記録する",
+    description: "Record an issue or improvement as feedback. Becomes an issue ticket after triage. / 問題・改善点をフィードバックとして記録する（triage 後に issue チケット化される）",
     input_schema: {
       type: "object",
       properties: {
