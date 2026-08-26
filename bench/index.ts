@@ -1,14 +1,13 @@
 /**
  * shoal-bench — shoal の検出力ベンチマーク。
  *
- * バグを仕込んだサンプルアプリ（bench/app.ts）を起動し、その上で通常の run を
- * 実行して、findings を正解ラベル（bench/labels.json）と突合した検出率を出す。
- * プロンプト・モデル・探索ロジックを変更したとき、検出力が落ちていないかを
- * 確かめる回帰テストとして使う。
+ * バグを仕込んだサンプルアプリ（bench/app.ts, bench/forms-app.ts）を起動し、
+ * 通常の run を実行して findings を正解ラベルと突合した検出率を出す。
  *
  * Usage:
- *   npm run bench            # ANTHROPIC_API_KEY（等）が必要
- *   BENCH_PORT=4319 npm run bench
+ *   npm run bench                         # store variant (default)
+ *   BENCH_VARIANT=forms npm run bench     # forms variant
+ *   BENCH_RECORD=1 npm run bench          # append score to bench/scores.json
  */
 import { loadShoalEnv } from "../framework/load-env";
 loadShoalEnv({ quiet: process.env.NODE_ENV === "test" });
@@ -16,8 +15,8 @@ import { spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
-import { createBenchApp } from "./app";
-import { loadLabels, loadRunFindings, scoreFindings, formatBenchResult } from "./score";
+import { loadLabels, loadRunFindings, scoreFindings, formatBenchResult, recordBenchScore } from "./score";
+import { labelsPathForVariant, resolveBenchVariant } from "./variants";
 
 const benchDir = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.join(benchDir, "..");
@@ -35,9 +34,8 @@ function runShoal(runId: string, baseUrl: string): Promise<number> {
         BASE_URL: baseUrl,
         MAX_EXPLORERS: "0",
         MAX_BROWSERS: process.env.MAX_BROWSERS ?? "3",
-        REFRESH_SPEC: "1", // ベンチアプリは毎回まっさらな理解から始める
-        SHOAL_TRACE: process.env.SHOAL_TRACE ?? "0", // ベンチでは trace を省いて高速化
-        // ベンチ結果を汚さないよう issue tracker は無効化
+        REFRESH_SPEC: "1",
+        SHOAL_TRACE: process.env.SHOAL_TRACE ?? "0",
         ISSUE_TRACKERS: "",
         GITHUB_TOKEN: "",
         GITHUB_REPO: "",
@@ -48,11 +46,12 @@ function runShoal(runId: string, baseUrl: string): Promise<number> {
 }
 
 async function main() {
-  const port = parseInt(process.env.BENCH_PORT ?? "4319", 10);
-  const app = createBenchApp();
+  const variant = resolveBenchVariant();
+  const port = parseInt(process.env.BENCH_PORT ?? String(variant.defaultPort), 10);
+  const app = variant.createApp();
   const server = app.listen(port);
   const baseUrl = `http://localhost:${port}`;
-  console.log(`[bench] sample app → ${baseUrl}`);
+  console.log(`[bench] ${variant.id} app → ${baseUrl}`);
 
   const runId = `run_${Date.now()}`;
   try {
@@ -61,19 +60,31 @@ async function main() {
     server.close();
   }
 
-  const labels = loadLabels();
+  const labels = loadLabels(labelsPathForVariant(variant));
   const findings = loadRunFindings(runId);
   const result = scoreFindings(findings, labels);
 
-  console.log(`\n${formatBenchResult(result)}\n`);
+  console.log(`\n${formatBenchResult(result, variant.id)}\n`);
 
   const outDir = path.join(process.cwd(), "logs");
   fs.mkdirSync(outDir, { recursive: true });
-  const outPath = path.join(outDir, `bench_${runId}.json`);
-  fs.writeFileSync(outPath, JSON.stringify({ runId, ...result }, null, 2), "utf-8");
+  const outPath = path.join(outDir, `bench_${variant.id}_${runId}.json`);
+  fs.writeFileSync(outPath, JSON.stringify({ runId, variant: variant.id, ...result }, null, 2), "utf-8");
   console.log(`[bench] result saved: ${outPath}`);
 
-  // SHOAL_BENCH_MIN（0-100）を下回ったら非ゼロ終了 — CI の回帰ゲートに使える
+  if (process.env.BENCH_RECORD === "1") {
+    const model = process.env.ANTHROPIC_MODEL ?? process.env.OPENAI_MODEL ?? process.env.SHOAL_MODEL ?? "unknown";
+    recordBenchScore({
+      variant: variant.id,
+      model,
+      detectionRate: Math.round(result.detectionRate * 100),
+      totalFindings: result.totalFindings,
+      runDate: new Date().toISOString().slice(0, 10),
+      config: `MAX_BROWSERS=${process.env.MAX_BROWSERS ?? "3"}`,
+    });
+    console.log("[bench] score appended to bench/scores.json");
+  }
+
   const min = parseInt(process.env.SHOAL_BENCH_MIN ?? "", 10);
   if (Number.isFinite(min) && result.detectionRate * 100 < min) {
     console.error(`[bench] detection rate ${Math.round(result.detectionRate * 100)}% is below SHOAL_BENCH_MIN=${min}`);

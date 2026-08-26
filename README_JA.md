@@ -344,11 +344,20 @@ workflow は毎週月曜 09:00 UTC に自動実行され、Actions タブから�
 
 ## shoal-bench
 
-群れは実際どれくらい問題を検出できるのか？ `bench/` には**7 つのバグを仕込んだ**小さなストアアプリが同梱されている — 認証なしの管理画面、数量を無視するカート合計、サイレント保存失敗、alt 欠落、読めない低コントラストボタン、確認なし削除、リンク切れ — それぞれ `bench/labels.json` の正解ラベルに対応する。
+群れは実際どれくらい問題を検出できるのか？ `bench/` には**2 種類のサンプルアプリ**と正解ラベルが同梱されている:
+
+| バリアント | アプリ | 仕込みバグ数 | ラベル |
+|---|---|---:|---|
+| `store`（デフォルト） | カート / 管理 / ナビ付きストア | 7 | `bench/labels.json` |
+| `forms` | サポート問い合わせフォーム | 3 | `bench/labels-forms.json` |
+
+各ラベルには `lens` / `path` / `category` メタデータがあり、領域別の採点ができる。
 
 ```bash
-npm run bench                       # ベンチアプリに群れを放って検出率を採点
-SHOAL_BENCH_MIN=60 npm run bench    # 検出率 60% 未満で非ゼロ終了（CI の回帰ゲート）
+npm run bench                         # store バリアント
+npm run bench:forms                   # forms バリアント
+SHOAL_BENCH_MIN=60 npm run bench      # 検出率 60% 未満で非ゼロ終了（CI の回帰ゲート）
+BENCH_RECORD=1 npm run bench          # モデル別スコアを bench/scores.json に追記
 ```
 
 スコアラーが findings をラベルと突合し、検出レポートを出力する:
@@ -357,8 +366,16 @@ SHOAL_BENCH_MIN=60 npm run bench    # 検出率 60% 未満で非ゼロ終了（C
 Detection rate: 5/7 (71%)
   ✓ cart-total-wrong
       └ "Cart total doesn't match item quantities"
-  ✗ low-contrast — The Buy button text is nearly the same color as its background
+  ✗ low-contrast (accessibility @ /) — The Buy button text is nearly the same color as its background
 ```
+
+### 公開済み検出スコア
+
+`BENCH_RECORD=1` で記録したスコア（`bench/scores.json`）:
+
+| バリアント | モデル | 検出率 | Findings | 日付 | 設定 |
+|---|---|---:|---:|---|---|
+| store | claude-sonnet-4-20250514 | 71% | 11 | 2026-08-15 | MAX_BROWSERS=3, default prompts |
 
 プロンプト・モデル・探索ロジックを変更したときの回帰テストとして使える。仕込みバグは直さないこと（アプリのテストスイートがバグの存在を固定している）。
 

@@ -262,13 +262,13 @@ run 単位の HTML レポート (`framework/report.ts`) に使われるだけで
 | 1 | Experience Score (案1) | ✅ 実装済み | 既存データの集計のみ。ダッシュボードの価値が一段上がる |
 | 2 | ガードレール (案11) | ✅ 実装済み | 利用者の信頼の土台。他機能より先に欲しい安全装置 |
 | 3 | エージェント個人記憶 (案2) | ✅ 実装済み | ブラウザエージェントも `runLog.agents` に記録し memory を永続化（2026-08 修正） |
-| 4 | Playwright trace (案5) | ✅ 実装済み（エージェント単位） | finding 保存時点の区間切り出し・ダッシュボード導線は未着手 |
-| 5 | 採用率フィードバック (案3) | ✅ 実装済み | `computeWeightedSummary()` に lens/category 採用率乗数を反映。非 GitHub rejected 判定は未着手 |
+| 4 | Playwright trace (案5) | ✅ 実装済み | Hall UI に trace 再生コマンド表示 |
+| 5 | 採用率フィードバック (案3) | ✅ 実装済み | 非 GitHub rejected 判定 + coverage 重み付け |
 | 6 | 環境ペルソナ (案4) | ✅ 実装済み | axe-core による `run_a11y_audit` 含む |
 | 7 | スティグマジー → ペアシナリオ (案6) | ✅ 実装済み（Phase A / B とも） | URL プレフィックスで同エリアの signal を優先 |
 | 8 | MCP 化 (案8) → Experience Diff (案9) | ✅ 実装済み（`shoal mcp` / `shoal diff`） | ループを閉じる本丸。案1・regression 機構に依存 |
 | 9 | 時間旅行ペルソナ (案7) | ✅ 実装済み（セッション継続 + 再訪シナリオ） | 案2の記憶基盤の上に載せる |
-| 10 | shoal-bench (案10) | ✅ 実装済み（`npm run bench`） | いつでも着手可能だが、機能が揃うほど価値が上がる |
+| 10 | shoal-bench (案10) | ✅ 実装済み | store + forms バリアント、`BENCH_RECORD` スコア記録、README 掲示 |
 
 ロードマップの骨格は実装済み。発展候補と既知ギャップ:
 
@@ -281,8 +281,8 @@ run 単位の HTML レポート (`framework/report.ts`) に使われるだけで
 - ✅ Swarm signals の URL エリアフィルタ — `pathsShareArea` + `currentPath`
 
 **未着手 / 部分実装（優先度順）**
-1. ~~非 GitHub トラッカーでの rejected（wontfix）判定~~ ✅ `normalizeCloseReason()` + 各トラッカー
-2. ~~`shoal diff` と page-hash の連携~~ ✅ `expandFocusRoutesWithPageCache()`
-3. ~~ダッシュボードへの trace リンク・cross-run duplicate 表示~~ ✅ Hall UI + regression i18n
-4. shoal-bench のバリエーション拡充とモデル別スコアの README 掲示
-5. ~~triage の「再訪・未改善」finding を既存 issue コメントへ振り分け~~ ✅ `triage-rereport.ts`
+
+_監査 G-1〜3 + 中優先 + philosophy-review 残項目 1〜5 は 2026-08 PR #40 で消化済み。_
+
+残タスク（低優先）:
+- finding 保存時点の trace 区間切り出し（エージェント単位 trace は実装済み）

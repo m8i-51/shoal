@@ -2,36 +2,57 @@
   {
     "id": "admin-unprotected",
     "description": "/admin is reachable without any authentication and exposes destructive controls",
-    "keywords": ["admin", "auth", "unauthorized", "unprotected", "no login", "without logging in", "permission", "access control"]
+    "keywords": ["admin", "auth", "unauthorized", "unprotected", "no login", "without logging in", "permission", "access control"],
+    "lens": "security",
+    "path": "/admin",
+    "category": "bug"
   },
   {
     "id": "cart-total-wrong",
     "description": "/cart total ignores quantities — it sums unit prices only",
-    "keywords": ["total", "calculation", "quantity", "sum", "incorrect", "wrong amount", "does not match", "miscalculat"]
+    "keywords": ["total", "calculation", "quantity", "sum", "incorrect", "wrong amount", "does not match", "miscalculat"],
+    "lens": "functional",
+    "path": "/cart",
+    "category": "bug"
   },
   {
     "id": "silent-save-failure",
     "description": "Adding an item with a name longer than 20 characters silently fails while appearing to succeed",
-    "keywords": ["silently", "not saved", "was not added", "did not appear", "disappeared", "no error", "lost", "never showed", "missing from the list"]
+    "keywords": ["silently", "not saved", "was not added", "did not appear", "disappeared", "no error", "lost", "never showed", "missing from the list"],
+    "lens": "functional",
+    "path": "/items",
+    "category": "bug"
   },
   {
     "id": "missing-alt-text",
     "description": "The home page image has no alt attribute",
-    "keywords": ["alt", "screen reader", "alternative text", "image without", "accessibility of the image"]
+    "keywords": ["alt", "screen reader", "alternative text", "image without", "accessibility of the image"],
+    "lens": "accessibility",
+    "path": "/",
+    "category": "ux"
   },
   {
     "id": "low-contrast",
     "description": "The Buy button text is nearly the same color as its background",
-    "keywords": ["contrast", "hard to read", "barely visible", "illegible", "hard to see", "unreadable"]
+    "keywords": ["contrast", "hard to read", "barely visible", "illegible", "hard to see", "unreadable"],
+    "lens": "accessibility",
+    "path": "/",
+    "category": "ux"
   },
   {
     "id": "delete-no-confirm",
     "description": "Delete happens immediately with no confirmation dialog and no undo",
-    "keywords": ["confirm", "undo", "accidental", "without warning", "immediately deleted", "no way to recover"]
+    "keywords": ["confirm", "undo", "accidental", "without warning", "immediately deleted", "no way to recover"],
+    "lens": "usability",
+    "path": "/items",
+    "category": "ux"
   },
   {
     "id": "broken-help-link",
     "description": "The Help link in the navigation returns a 404",
-    "keywords": ["help", "404", "broken link", "not found", "dead link", "page does not exist"]
+    "keywords": ["help", "404", "broken link", "not found", "dead link", "page does not exist"],
+    "lens": "functional",
+    "path": "/help",
+    "category": "bug"
   }
 ]

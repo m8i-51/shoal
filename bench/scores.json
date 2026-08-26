@@ -1,0 +1,14 @@
+{
+  "updatedAt": "2026-08-26",
+  "note": "Recorded with BENCH_RECORD=1 after npm run bench. Detection rates are percentages (0-100).",
+  "entries": [
+    {
+      "variant": "store",
+      "model": "claude-sonnet-4-20250514",
+      "detectionRate": 71,
+      "totalFindings": 11,
+      "runDate": "2026-08-15",
+      "config": "MAX_BROWSERS=3, default prompts"
+    }
+  ]
+}
