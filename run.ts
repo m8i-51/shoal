@@ -20,7 +20,7 @@ import { loadAgents, addAgent, retireAgent, recordAgentMemories, formatAgentMemo
 import { updateCoverage, computeWeightedSummary, getLastRunPaths, getFindingHotspots } from "./framework/coverage";
 import { computeExperienceScore, formatExperienceLine } from "./framework/experience-score";
 import { updateAdoption } from "./framework/adoption";
-import { getShoalMode, filterAppTools, applyBrowserGuardrails, guardrailPrompt } from "./framework/guardrails";
+import { getShoalMode, filterAppTools, applyBrowserGuardrails, guardrailPrompt, guardSafeBrowserClick } from "./framework/guardrails";
 import { buildContextOptions, sanitizeEnvironment, describeEnvironment, applyNetworkThrottle, SUGGESTED_DEVICES, type EnvironmentProfile } from "./framework/environment";
 import { agentSessionPath, hasAgentSession, saveAgentSession, sessionContinuityPrompt } from "./framework/session-store";
 import { runA11yAudit, formatAuditForAgent } from "./framework/a11y-audit";
@@ -248,10 +248,11 @@ function makeExecutor(agentLog: AgentLog, scenarioOutcomes: ScenarioOutcome[], s
     try {
       switch (toolName) {
         case "check_swarm_signals": {
-          const signals = getSwarmSignals(agentLog.agentId);
+          const currentPath = agentLog.visitedPaths.at(-1);
+          const signals = getSwarmSignals(agentLog.agentId, 8, currentPath);
           result = signals.length > 0
-            ? { signals, hint: "If any of these relate to your persona or area, try to reproduce them from your own perspective." }
-            : { signals: [], hint: "No reports from other agents yet — keep exploring." };
+            ? { signals, currentPath: currentPath ?? null, hint: "These reports are from your current area when possible — try to reproduce them from your own perspective." }
+            : { signals: [], currentPath: currentPath ?? null, hint: "No reports from other agents in your area yet — keep exploring." };
           break;
         }
         case "post_outcome": {
@@ -906,6 +907,13 @@ async function executeBrowserTool(
       }
       case "click": {
         const { description } = input as { description: string };
+        const guard = await guardSafeBrowserClick(page, description, SHOAL_MODE);
+        if (!guard.allowed) {
+          console.log(`  [guardrails] blocked click: ${description}`);
+          screenshot = await takeScreenshot(page, `blocked_click_${description.slice(0, 20)}`);
+          resultText = guard.message;
+          break;
+        }
         await saveSnapshotBeforeAction(page, observation);
         const escapedDesc = description.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         const buttonLocator = page.getByRole("button", { name: new RegExp(escapedDesc, "i") });
@@ -1019,10 +1027,14 @@ async function executeBrowserTool(
         break;
       }
       case "check_swarm_signals": {
-        const signals = getSwarmSignals(agentId);
+        let currentPath = agentLog.visitedPaths.at(-1) ?? "/";
+        try {
+          currentPath = new URL(page.url()).pathname || currentPath;
+        } catch { /* keep last visited path */ }
+        const signals = getSwarmSignals(agentId, 8, currentPath);
         resultText = signals.length > 0
-          ? JSON.stringify({ signals, hint: "If any of these relate to your persona or the area you are in, try to reproduce them from your own perspective." })
-          : "(no reports from other agents yet — keep exploring)";
+          ? JSON.stringify({ signals, currentPath, hint: "These reports are from your current area when possible — try to reproduce them from your own perspective." })
+          : `(no reports from other agents in ${currentPath} yet — keep exploring)`;
         break;
       }
       case "post_feedback": {
