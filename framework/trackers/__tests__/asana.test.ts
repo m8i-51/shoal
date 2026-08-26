@@ -93,7 +93,7 @@ describe("AsanaTracker", () => {
         json: async () => ({ data: [{ gid: "task2", name: "Fixed bug", notes: "details" }] }),
       } as Response);
       const result = await makeTracker().fetchClosedIssues();
-      expect(result).toEqual([{ number: "task2", title: "Fixed bug", body: "details", labels: [] }]);
+      expect(result).toEqual([{ number: "task2", title: "Fixed bug", body: "details", labels: [], stateReason: null }]);
     });
 
     it("notes が無い場合は空文字にフォールバックする", async () => {

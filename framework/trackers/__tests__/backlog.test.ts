@@ -189,7 +189,14 @@ describe("BacklogTracker", () => {
         json: async () => [{ issueKey: "PROJ-2", summary: "Fixed bug", description: "details" }],
       } as Response);
       const result = await makeTracker().fetchClosedIssues();
-      expect(result).toEqual([{ number: "PROJ-2", title: "Fixed bug", body: "details", labels: [] }]);
+      expect(result).toEqual([{
+        number: "PROJ-2",
+        title: "Fixed bug",
+        body: "details",
+        labels: [],
+        url: "https://myspace.backlog.com/view/PROJ-2",
+        stateReason: null,
+      }]);
     });
 
     it("description が無い場合は空文字にフォールバックする", async () => {

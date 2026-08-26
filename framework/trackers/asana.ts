@@ -1,4 +1,5 @@
 import type { IssueTracker, OpenIssue, ClosedIssue } from "./types";
+import { normalizeCloseReason } from "./close-reason";
 
 export class AsanaTracker implements IssueTracker {
   readonly name = "asana";
@@ -73,16 +74,17 @@ export class AsanaTracker implements IssueTracker {
 
   async fetchClosedIssues(): Promise<ClosedIssue[]> {
     const res = await fetch(
-      `https://app.asana.com/api/1.0/tasks?project=${this.projectId}&completed=true&opt_fields=gid,name,notes&limit=20`,
+      `https://app.asana.com/api/1.0/tasks?project=${this.projectId}&completed=true&opt_fields=gid,name,notes,tags.name&limit=20`,
       { headers: this.headers }
     );
     if (!res.ok) return [];
-    const data = await res.json() as { data?: { gid: string; name: string; notes: string }[] };
+    const data = await res.json() as { data?: { gid: string; name: string; notes: string; tags?: { name: string }[] }[] };
     return (data.data ?? []).map((t) => ({
       number: t.gid,
       title: t.name,
       body: t.notes ?? "",
-      labels: [],
+      labels: t.tags?.map((tag) => tag.name) ?? [],
+      stateReason: normalizeCloseReason({ labels: t.tags?.map((tag) => tag.name) }),
     }));
   }
 }

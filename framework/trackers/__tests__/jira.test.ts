@@ -94,6 +94,46 @@ describe("JiraTracker", () => {
       vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({}) } as Response);
       expect(await makeTracker().fetchClosedIssues()).toEqual([]);
     });
+
+    it("Won't Fix resolution は stateReason not_planned", async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          issues: [{
+            key: "PROJ-9",
+            fields: {
+              summary: "Bug",
+              labels: [],
+              description: "",
+              resolution: { name: "Won't Fix" },
+              status: { name: "Closed" },
+            },
+          }],
+        }),
+      } as Response);
+      const result = await makeTracker().fetchClosedIssues();
+      expect(result[0].stateReason).toBe("not_planned");
+    });
+
+    it("Done resolution は stateReason completed", async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          issues: [{
+            key: "PROJ-10",
+            fields: {
+              summary: "Bug",
+              labels: [],
+              description: "",
+              resolution: { name: "Done" },
+              status: { name: "Closed" },
+            },
+          }],
+        }),
+      } as Response);
+      const result = await makeTracker().fetchClosedIssues();
+      expect(result[0].stateReason).toBe("completed");
+    });
   });
 
   describe("commentOnIssue", () => {

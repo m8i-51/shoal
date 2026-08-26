@@ -97,7 +97,7 @@ describe("NotionTracker", () => {
         }),
       } as Response);
       const result = await makeTracker().fetchClosedIssues();
-      expect(result).toEqual([{ number: "p3", title: "Fixed bug", labels: [], body: "" }]);
+      expect(result).toEqual([{ number: "p3", title: "Fixed bug", labels: [], body: "", stateReason: "completed" }]);
       const [, opts] = vi.mocked(fetch).mock.calls[0];
       expect(JSON.parse((opts as RequestInit).body as string).filter.select.equals).toBe("Closed");
     });
