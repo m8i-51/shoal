@@ -115,7 +115,7 @@ export function generateReport(
       ? `<span class="badge" style="background:#8b5cf6">scenario</span>&nbsp;${esc(assignment.scenario.title)}`
       : assignment?.lens
       ? `<span class="badge" style="background:#0ea5e9">lens</span>&nbsp;${esc(assignment.lens.split(":")[0].trim())}`
-      : `<span class="badge" style="background:#9ca3af">${a.agentType === "regression" ? "regression" : "—"}</span>`;
+      : `<span class="badge" style="background:#9ca3af">${esc(a.agentType)}</span>`;
     const statusColor = a.status === "completed" ? "#22c55e" : "#ef4444";
     return `<tr>
   <td>${esc(a.agentName)}</td>

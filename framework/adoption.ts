@@ -123,6 +123,31 @@ function formatLine(name: string, count: AdoptionCount): string {
   return `${name}: ${count.adopted} adopted / ${count.rejected} rejected (${rate}%)`;
 }
 
+/** 0–1 の採用率。データが無ければ null */
+export function adoptionRate(count: AdoptionCount | undefined): number | null {
+  if (!count) return null;
+  const total = count.adopted + count.rejected;
+  if (total === 0) return null;
+  return count.adopted / total;
+}
+
+/**
+ * coverage 重み付け用の乗数。
+ * 0% 採用 → 0.75、50% → 1.0、100% → 1.25（完全には消さない）
+ */
+export function adoptionWeight(rate: number | null): number {
+  if (rate === null) return 1;
+  return 0.75 + rate * 0.5;
+}
+
+export function lensAdoptionWeight(lens: string, stats: AdoptionStats = loadAdoptionStats()): number {
+  return adoptionWeight(adoptionRate(stats.byLens[lens]));
+}
+
+export function categoryAdoptionWeight(category: string, stats: AdoptionStats = loadAdoptionStats()): number {
+  return adoptionWeight(adoptionRate(stats.byCategory[category]));
+}
+
 export function formatAdoptionSummary(stats: AdoptionStats = loadAdoptionStats()): string {
   const lensEntries = Object.entries(stats.byLens);
   const categoryEntries = Object.entries(stats.byCategory);

@@ -261,16 +261,27 @@ run 単位の HTML レポート (`framework/report.ts`) に使われるだけで
 |---|---|---|---|
 | 1 | Experience Score (案1) | ✅ 実装済み | 既存データの集計のみ。ダッシュボードの価値が一段上がる |
 | 2 | ガードレール (案11) | ✅ 実装済み | 利用者の信頼の土台。他機能より先に欲しい安全装置 |
-| 3 | エージェント個人記憶 (案2) | ✅ 実装済み | 小さい実装で思想的リターンが最大。案7の土台にもなる |
-| 4 | Playwright trace (案5) | ✅ 実装済み | 独立して出せる。finding の説得力が即座に上がる |
-| 5 | 採用率フィードバック (案3) | ✅ 実装済み | 案1の集計基盤を再利用。自然選択ループが閉じる |
-| 6 | 環境ペルソナ (案4) | ✅ 実装済み（axe-core による a11y 実証は未着手） | context 生成の変更が中心。a11y 実証は段階投入 |
-| 7 | スティグマジー → ペアシナリオ (案6) | ✅ 実装済み（Phase A / B とも） | Phase A は小さく、B は大きい。分けて出す |
+| 3 | エージェント個人記憶 (案2) | ✅ 実装済み | ブラウザエージェントも `runLog.agents` に記録し memory を永続化（2026-08 修正） |
+| 4 | Playwright trace (案5) | ✅ 実装済み | Hall UI に trace 再生コマンド表示 |
+| 5 | 採用率フィードバック (案3) | ✅ 実装済み | 非 GitHub rejected 判定 + coverage 重み付け |
+| 6 | 環境ペルソナ (案4) | ✅ 実装済み | axe-core による `run_a11y_audit` 含む |
+| 7 | スティグマジー → ペアシナリオ (案6) | ✅ 実装済み（Phase A / B とも） | URL プレフィックスで同エリアの signal を優先 |
 | 8 | MCP 化 (案8) → Experience Diff (案9) | ✅ 実装済み（`shoal mcp` / `shoal diff`） | ループを閉じる本丸。案1・regression 機構に依存 |
 | 9 | 時間旅行ペルソナ (案7) | ✅ 実装済み（セッション継続 + 再訪シナリオ） | 案2の記憶基盤の上に載せる |
-| 10 | shoal-bench (案10) | ✅ 実装済み（`npm run bench`） | いつでも着手可能だが、機能が揃うほど価値が上がる |
+| 10 | shoal-bench (案10) | ✅ 実装済み | store + forms バリアント、`BENCH_RECORD` スコア記録、README 掲示 |
 
-ロードマップの全項目が実装済み。発展候補も以下の通り消化:
+ロードマップの骨格は実装済み。発展候補と既知ギャップ:
+
+**消化済み**
 - ✅ axe-core による a11y 実測監査 — ブラウザエージェントの `run_a11y_audit` ツール
 - ✅ `verify_fix(findingId)` — 単一 finding 特化の検証 run（MCP ツール）
-- 未着手: shoal-bench のバグバリエーション拡充とモデル別スコアの README 掲示
+- ✅ ブラウザエージェントの RunLog / memory 記録 — `AgentLog.agentType: "browser"` として `runLog.agents` に統合
+- ✅ 採用率の coverage 重み付け — `lensAdoptionWeight` / `categoryAdoptionWeight`
+- ✅ safe モードのブラウザガード — DELETE ネットワークブロック + 不可逆クリック intercept
+- ✅ Swarm signals の URL エリアフィルタ — `pathsShareArea` + `currentPath`
+
+**未着手 / 部分実装**
+
+_監査 G-1〜3 + philosophy-review 残項目 1〜5 + bench 拡充は PR #40 で消化済み。_
+
+残タスク: なし（低優先の finding 単位 trace 切り出しも実装済み）

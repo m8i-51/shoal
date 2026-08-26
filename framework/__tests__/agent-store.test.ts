@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("fs");
 
 import * as fs from "fs";
-import { loadAgents, addAgent, retireAgent, recordAgentMemories, formatAgentMemories, type Agent, type AgentMemory } from "../agent-store";
+import { loadAgents, addAgent, retireAgent, recordAgentMemories, formatAgentMemories, buildMemoryInputs, type Agent, type AgentMemory } from "../agent-store";
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
   return {
@@ -94,6 +94,37 @@ describe("retireAgent", () => {
     const result = retireAgent("agent_nonexistent");
     expect(result).toBe(false);
     expect(fs.writeFileSync).not.toHaveBeenCalled();
+  });
+});
+
+describe("buildMemoryInputs", () => {
+  it("scenario outcome と finding を agentId ごとに集約する", () => {
+    const inputs = buildMemoryInputs(
+      ["agent_browser", "agent_api"],
+      [
+        { agentId: "agent_browser", scenarioTitle: "Checkout", achieved: false, reason: "Button stuck" },
+        { agentId: "agent_api", scenarioTitle: "List items", achieved: true, reason: "Done" },
+      ],
+      [
+        { agentId: "agent_browser", category: "bug", title: "Checkout broken" },
+      ],
+    );
+    expect(inputs.get("agent_browser")).toEqual({
+      frustrations: [
+        'Could not complete "Checkout" — Button stuck',
+        'Reported [bug] "Checkout broken"',
+      ],
+      achievements: [],
+    });
+    expect(inputs.get("agent_api")).toEqual({
+      frustrations: [],
+      achievements: ['Completed "List items"'],
+    });
+  });
+
+  it("体験がない agent も空の entry を返す", () => {
+    const inputs = buildMemoryInputs(["agent_idle"], [], []);
+    expect(inputs.get("agent_idle")).toEqual({ frustrations: [], achievements: [] });
   });
 });
 

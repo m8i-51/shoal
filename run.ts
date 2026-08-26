@@ -16,15 +16,16 @@ import { createLLMClient } from "./framework/llm-client";
 import type { Tool } from "./framework/llm-client";
 import { createMessageWithRetry, runAgentLoop, sleep, rateLimitRetries } from "./framework/agent-loop";
 import { collectedFindings, initRunLog, saveRunLog, saveFinding, getSwarmSignals, runLog } from "./framework/findings";
-import { loadAgents, addAgent, retireAgent, recordAgentMemories, formatAgentMemories, type Agent, type MemoryInput } from "./framework/agent-store";
+import { loadAgents, addAgent, retireAgent, recordAgentMemories, formatAgentMemories, buildMemoryInputs, type Agent } from "./framework/agent-store";
 import { updateCoverage, computeWeightedSummary, getLastRunPaths, getFindingHotspots } from "./framework/coverage";
 import { computeExperienceScore, formatExperienceLine } from "./framework/experience-score";
 import { updateAdoption } from "./framework/adoption";
-import { getShoalMode, filterAppTools, applyBrowserGuardrails, guardrailPrompt } from "./framework/guardrails";
+import { getShoalMode, filterAppTools, applyBrowserGuardrails, guardrailPrompt, guardSafeBrowserClick } from "./framework/guardrails";
 import { buildContextOptions, sanitizeEnvironment, describeEnvironment, applyNetworkThrottle, SUGGESTED_DEVICES, type EnvironmentProfile } from "./framework/environment";
 import { agentSessionPath, hasAgentSession, saveAgentSession, sessionContinuityPrompt } from "./framework/session-store";
 import { runA11yAudit, formatAuditForAgent } from "./framework/a11y-audit";
 import { loadPageHashes, updatePageHashes, hashContent } from "./framework/page-cache";
+import { saveFindingTraceChunk, traceAgentZipPath, traceFindingZipPath } from "./framework/trace-chunk";
 import { loadPersonaPack, formatPackForPrompt, type PersonaPack } from "./framework/persona-pack";
 import { buildTrackers } from "./framework/trackers/index";
 import {
@@ -120,10 +121,6 @@ ${FOCUS_PATHS.map((p) => `- ${p}`).join("\n")}
 Explore these paths first and in depth. Only wander elsewhere once they are exhausted.`;
 }
 
-function traceZipPath(runId: string, agentId: string): string {
-  return path.join(process.cwd(), "logs", "traces", runId, `${agentId}.zip`);
-}
-
 // エージェントへの割り当て。actor はマルチアクターシナリオで同時に動く役割
 type Assignment = {
   scenario?: Scenario;
@@ -181,7 +178,7 @@ const POST_FEEDBACK_TOOL: Tool = {
 
 const REPORT_REGRESSION_TOOL: Tool = {
   name: "report_regression",
-  description: "Report a regression when a previously fixed bug has reappeared as a GitHub Issue. / 修正済みバグの再発をGitHub Issueとして報告する",
+  description: "Report a regression when a previously fixed bug has reappeared as an issue ticket. / 修正済みバグの再発を issue チケットとして報告する",
   input_schema: {
     type: "object",
     properties: {
@@ -248,10 +245,11 @@ function makeExecutor(agentLog: AgentLog, scenarioOutcomes: ScenarioOutcome[], s
     try {
       switch (toolName) {
         case "check_swarm_signals": {
-          const signals = getSwarmSignals(agentLog.agentId);
+          const currentPath = agentLog.visitedPaths.at(-1);
+          const signals = getSwarmSignals(agentLog.agentId, 8, currentPath);
           result = signals.length > 0
-            ? { signals, hint: "If any of these relate to your persona or area, try to reproduce them from your own perspective." }
-            : { signals: [], hint: "No reports from other agents yet — keep exploring." };
+            ? { signals, currentPath: currentPath ?? null, hint: "These reports are from your current area when possible — try to reproduce them from your own perspective." }
+            : { signals: [], currentPath: currentPath ?? null, hint: "No reports from other agents in your area yet — keep exploring." };
           break;
         }
         case "post_outcome": {
@@ -502,7 +500,7 @@ const PERSONA_DESIGNER_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: "get_open_issues",
-    description: "Get the titles and labels of currently open GitHub Issues (known problems). Use this to understand what is already known and recruit agents who are likely to explore DIFFERENT areas. / 現在オープンなGitHub Issueのタイトルとラベルを取得する。既知の問題を把握し、未探索領域を掘れるペルソナを採用するために使う",
+    description: "Get the titles and labels of currently open issue tickets (known problems). Use this to understand what is already known and recruit agents who are likely to explore DIFFERENT areas. / 現在オープンな issue チケットのタイトルとラベルを取得する。既知の問題を把握し、未探索領域を掘れるペルソナを採用するために使う",
     input_schema: { type: "object", properties: {}, required: [] },
   },
   {
@@ -709,6 +707,47 @@ interface BrowserAgentLog {
   error: string | null;
 }
 
+function browserLogToAgentLog(agent: Agent, log: BrowserAgentLog): AgentLog {
+  return {
+    agentType: "browser",
+    agentId: agent.id,
+    agentName: log.agentName,
+    role: agent.role,
+    startedAt: log.startedAt,
+    completedAt: log.completedAt,
+    status: log.status,
+    iterations: log.iterations,
+    actions: log.actions.map((a) => ({
+      timestamp: a.timestamp,
+      tool: a.tool,
+      input: a.input,
+      result: null,
+      durationMs: a.durationMs,
+    })),
+    visitedPaths: log.visitedPaths,
+    issuesPosted: log.feedbacksSaved.map((f) => ({
+      title: f.title,
+      category: f.category,
+      url: null,
+    })),
+    regressionChecks: [],
+    error: log.error,
+  };
+}
+
+function applyAgentSummary(agentLog: AgentLog): void {
+  runLog.summary.totalActions += agentLog.actions.length;
+  if (agentLog.status === "completed") runLog.summary.completed++;
+  else if (agentLog.status === "error") runLog.summary.errors++;
+  if (agentLog.status === "iteration_limit") runLog.summary.iterationLimitReached++;
+}
+
+function recordBrowserAgentRun(agent: Agent, browserLog: BrowserAgentLog): void {
+  const agentLog = browserLogToAgentLog(agent, browserLog);
+  runLog.agents.push(agentLog);
+  applyAgentSummary(agentLog);
+}
+
 const TOOLS_THAT_SEND_SCREENSHOT = new Set(["navigate", "post_feedback", "view_screen"]);
 
 const BROWSER_TOOLS: Anthropic.Tool[] = [
@@ -793,7 +832,7 @@ const BROWSER_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: "post_feedback",
-    description: "Record an issue or improvement as feedback. Becomes a GitHub Issue after triage. / 問題・改善点をフィードバックとして記録する",
+    description: "Record an issue or improvement as feedback. Becomes an issue ticket after triage. / 問題・改善点をフィードバックとして記録する（triage 後に issue チケット化される）",
     input_schema: {
       type: "object",
       properties: {
@@ -865,6 +904,13 @@ async function executeBrowserTool(
       }
       case "click": {
         const { description } = input as { description: string };
+        const guard = await guardSafeBrowserClick(page, description, SHOAL_MODE);
+        if (!guard.allowed) {
+          console.log(`  [guardrails] blocked click: ${description}`);
+          screenshot = await takeScreenshot(page, `blocked_click_${description.slice(0, 20)}`);
+          resultText = guard.message;
+          break;
+        }
         await saveSnapshotBeforeAction(page, observation);
         const escapedDesc = description.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         const buttonLocator = page.getByRole("button", { name: new RegExp(escapedDesc, "i") });
@@ -978,18 +1024,28 @@ async function executeBrowserTool(
         break;
       }
       case "check_swarm_signals": {
-        const signals = getSwarmSignals(agentId);
+        let currentPath = agentLog.visitedPaths.at(-1) ?? "/";
+        try {
+          currentPath = new URL(page.url()).pathname || currentPath;
+        } catch { /* keep last visited path */ }
+        const signals = getSwarmSignals(agentId, 8, currentPath);
         resultText = signals.length > 0
-          ? JSON.stringify({ signals, hint: "If any of these relate to your persona or the area you are in, try to reproduce them from your own perspective." })
-          : "(no reports from other agents yet — keep exploring)";
+          ? JSON.stringify({ signals, currentPath, hint: "These reports are from your current area when possible — try to reproduce them from your own perspective." })
+          : `(no reports from other agents in ${currentPath} yet — keep exploring)`;
         break;
       }
       case "post_feedback": {
         const { title, body, category } = input as { title: string; body: string; category: string };
         const safeCategory = VALID_CATEGORIES.includes(String(category)) ? String(category) : "ux";
         screenshot = await takeScreenshot(page, `feedback_${String(title).slice(0, 20)}`);
+        const findingId = `${agentId}_${Date.now()}`;
+        let findingTracePath: string | undefined;
+        if (TRACE_ENABLED) {
+          const chunkPath = await saveFindingTraceChunk(page.context(), runLog.runId, findingId);
+          findingTracePath = chunkPath ?? traceAgentZipPath(runLog.runId, agentId);
+        }
         const finding: Finding = {
-          id: `${agentId}_${Date.now()}`,
+          id: findingId,
           runId: runLog.runId,
           agentId,
           agentName: agentLog.agentName,
@@ -999,7 +1055,7 @@ async function executeBrowserTool(
           category: safeCategory,
           timestamp: new Date().toISOString(),
           screenshotPath: screenshot.filePath,
-          ...(TRACE_ENABLED ? { tracePath: traceZipPath(runLog.runId, agentId) } : {}),
+          ...(findingTracePath ? { tracePath: findingTracePath } : {}),
         };
         saveFinding(finding);
         agentLog.feedbacksSaved.push({ title: String(title), category: safeCategory, findingId: finding.id });
@@ -1283,7 +1339,8 @@ async function runVerifyMode(
   await applyBrowserGuardrails(context, SHOAL_MODE);
   const page = await context.newPage();
   try {
-    await runBrowserAgent(verifier, page, productSpec, { scenario }, scenarioOutcomes);
+    const browserLog = await runBrowserAgent(verifier, page, productSpec, { scenario }, scenarioOutcomes);
+    recordBrowserAgentRun(verifier, browserLog);
   } finally {
     await context.close();
   }
@@ -1420,7 +1477,7 @@ async function main() {
       process.exit(1);
     }
 
-    // 6.5. エージェント数が確定したので totalAgents を更新
+    // 6.5. roster サイズを記録（実際に走った agent 数は run 終了時に runLog.agents.length で確定）
     runLog.summary.totalAgents = allAgents.length;
 
     // 7. API agents (exploration + regression)
@@ -1523,7 +1580,7 @@ async function main() {
           // 次の run で「再訪ユーザー」になれるようセッションを保存（close 前に呼ぶ）
           await saveAgentSession(context, agent.id);
           if (TRACE_ENABLED) {
-            const tracePath = traceZipPath(runLog.runId, agent.id);
+            const tracePath = traceAgentZipPath(runLog.runId, agent.id);
             try {
               fs.mkdirSync(path.dirname(tracePath), { recursive: true });
               await context.tracing.stop({ path: tracePath });
@@ -1536,6 +1593,10 @@ async function main() {
       })
     );
     const allVisitedPaths = browserLogs.flatMap((log) => log.visitedPaths);
+    for (let i = 0; i < browserAgents.length; i++) {
+      recordBrowserAgentRun(browserAgents[i], browserLogs[i]);
+    }
+    runLog.summary.totalAgents = runLog.agents.length;
 
     // 9. triage (API + browser findings)
     await sleep(2000);
@@ -1549,20 +1610,11 @@ async function main() {
     }
 
     // 10. record each agent's personal memory (frustrations / achievements)
-    const memoryInputs = new Map<string, MemoryInput>();
-    for (const log of runLog.agents) {
-      const input: MemoryInput = { frustrations: [], achievements: [] };
-      for (const o of scenarioOutcomes) {
-        if (o.agentId !== log.agentId) continue;
-        if (o.achieved) input.achievements.push(`Completed "${o.scenarioTitle}"`);
-        else input.frustrations.push(`Could not complete "${o.scenarioTitle}" — ${o.reason}`);
-      }
-      for (const f of collectedFindings) {
-        if (f.agentId !== log.agentId) continue;
-        input.frustrations.push(`Reported [${f.category}] "${f.title}"`);
-      }
-      memoryInputs.set(log.agentId, input);
-    }
+    const memoryInputs = buildMemoryInputs(
+      runLog.agents.map((log) => log.agentId),
+      scenarioOutcomes,
+      collectedFindings,
+    );
     recordAgentMemories(runLog.runId, memoryInputs);
 
     // 11. update coverage (report が最新スコアを含められるよう先に更新する)

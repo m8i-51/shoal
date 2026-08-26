@@ -1,0 +1,26 @@
+[
+  {
+    "id": "empty-email-accepted",
+    "description": "The contact form accepts tickets with an empty email despite the required attribute",
+    "keywords": ["empty email", "blank email", "required", "validation", "no email", "accepted without", "missing email"],
+    "lens": "functional",
+    "path": "/contact",
+    "category": "bug"
+  },
+  {
+    "id": "error-page-leak",
+    "description": "The status page exposes internal error details and stack traces",
+    "keywords": ["stack trace", "internal error", "database_connection", "leak", "exposes", "sensitive", "debug"],
+    "lens": "security",
+    "path": "/status",
+    "category": "bug"
+  },
+  {
+    "id": "missing-form-labels",
+    "description": "Contact form inputs rely on placeholders only and have no associated labels",
+    "keywords": ["label", "placeholder only", "screen reader", "form label", "accessibility", "unlabeled", "no label"],
+    "lens": "accessibility",
+    "path": "/contact",
+    "category": "ux"
+  }
+]

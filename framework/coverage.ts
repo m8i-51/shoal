@@ -2,6 +2,8 @@ import * as fs from "fs";
 import * as path from "path";
 import { isFinding, type Finding } from "./types";
 import type { Scenario, ScenarioOutcome } from "./scenario-designer";
+import { extractFindingPath } from "./findings";
+import { formatAdoptionSummary, lensAdoptionWeight, categoryAdoptionWeight, loadAdoptionStats } from "./adoption";
 
 export interface OutcomeRecord {
   scenarioTitle: string;
@@ -152,6 +154,7 @@ export function computeWeightedSummary(): WeightedSummary {
     }
   }
 
+  const adoptionStats = loadAdoptionStats();
   const byCategory: Record<string, number> = {};
   const byLens: Record<string, number> = {};
   const byScenario: Record<string, number> = {};
@@ -162,12 +165,12 @@ export function computeWeightedSummary(): WeightedSummary {
     const decay = Math.pow(0.5, age / halfLifeMs);
 
     for (const [cat, count] of Object.entries(entry.byCategory)) {
-      byCategory[cat] = (byCategory[cat] ?? 0) + count * decay;
+      byCategory[cat] = (byCategory[cat] ?? 0) + count * decay * categoryAdoptionWeight(cat, adoptionStats);
     }
     for (const [lens, count] of Object.entries(entry.byLens)) {
       // 繰り返し呼ばれるほど「必要」とみなしてボーナスを加算
       const bonus = 1 + Math.pow((lensRepeat[lens] ?? 1) - 1, REPETITION_EXPONENT) * REPETITION_BONUS;
-      byLens[lens] = (byLens[lens] ?? 0) + count * decay * bonus;
+      byLens[lens] = (byLens[lens] ?? 0) + count * decay * bonus * lensAdoptionWeight(lens, adoptionStats);
     }
     for (const [title, count] of Object.entries(entry.byScenario ?? {})) {
       const bonus = 1 + Math.pow((scenarioRepeat[title] ?? 1) - 1, REPETITION_EXPONENT) * REPETITION_BONUS;
@@ -207,9 +210,12 @@ export function computeWeightedSummary(): WeightedSummary {
     .sort((a, b) => b[1] - a[1])
     .map(([t, n]) => `"${t}" (×${n})`);
 
+  const adoptionLine = formatAdoptionSummary(adoptionStats);
+
   const formatted = [
     `Coverage summary (half-life: ${HALF_LIFE_DAYS} days, repetition window: ${REPETITION_WINDOW_DAYS} days, ${coverage.entries.length} run(s) tracked):`,
     `Total weighted findings: ${totalWeighted}`,
+    adoptionLine || null,
     `By lens: ${sortedLens.map(([l, c]) => `${l} (${c})`).join(" > ") || "(none)"}`,
     scenarioLine,
     `By category: ${sortedCategory.map(([c, n]) => `${c} (${n})`).join(" > ") || "(none)"}`,
@@ -237,14 +243,6 @@ export interface FindingHotspot {
   categories: Record<string, number>;
 }
 
-function extractPath(finding: Finding): string {
-  const text = `${finding.title} ${finding.body}`;
-  const m = text.match(/(\/[a-zA-Z0-9_][a-zA-Z0-9_/-]*)/);
-  if (!m) return "/";
-  const segments = m[1].split("/").filter(Boolean);
-  return segments.length > 0 ? `/${segments[0]}` : "/";
-}
-
 export function getFindingHotspots(topN = 12): FindingHotspot[] {
   const base = path.join(process.cwd(), "findings");
   if (!fs.existsSync(base)) return [];
@@ -260,7 +258,7 @@ export function getFindingHotspots(topN = 12): FindingHotspot[] {
         try {
           const f: unknown = JSON.parse(fs.readFileSync(path.join(dir, file), "utf-8"));
           if (!isFinding(f)) continue;
-          const p = extractPath(f);
+          const p = extractFindingPath(f);
           const entry = counts.get(p) ?? { total: 0, categories: {} };
           entry.total++;
           entry.categories[f.category] = (entry.categories[f.category] ?? 0) + 1;

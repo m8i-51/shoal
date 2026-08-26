@@ -27,9 +27,18 @@ function makeEntry(overrides: Partial<RunCoverage> = {}): RunCoverage {
   };
 }
 
-function setupMockCoverage(coverage: Coverage) {
-  vi.mocked(fs.existsSync).mockReturnValue(true);
-  vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(coverage) as unknown as ReturnType<typeof fs.readFileSync>);
+function setupMockCoverage(coverage: Coverage, adoption?: { byLens: Record<string, { adopted: number; rejected: number }>; byCategory: Record<string, { adopted: number; rejected: number }> }) {
+  vi.mocked(fs.existsSync).mockImplementation((p: unknown) => {
+    const s = String(p);
+    return s.endsWith("coverage.json") || s.endsWith("adoption.json");
+  });
+  vi.mocked(fs.readFileSync).mockImplementation((p: unknown) => {
+    const s = String(p);
+    if (s.endsWith("adoption.json")) {
+      return JSON.stringify(adoption ?? { byLens: {}, byCategory: {} }) as ReturnType<typeof fs.readFileSync>;
+    }
+    return JSON.stringify(coverage) as ReturnType<typeof fs.readFileSync>;
+  });
 }
 
 describe("loadCoverage", () => {
@@ -142,6 +151,31 @@ describe("computeWeightedSummary", () => {
     const result = computeWeightedSummary();
     expect(result.formatted).toContain("Security");
     expect(result.formatted.toLowerCase()).toContain("underrepresented");
+  });
+
+  it("採用率の高い lens ほど重み付けが大きくなる", () => {
+    setupMockCoverage(
+      {
+        entries: [
+          makeEntry({
+            timestamp: new Date().toISOString(),
+            findingsCount: 2,
+            byLens: { Security: 1, Accessibility: 1 },
+          }),
+        ],
+      },
+      {
+        byLens: {
+          Security: { adopted: 4, rejected: 0 },
+          Accessibility: { adopted: 0, rejected: 4 },
+        },
+        byCategory: {},
+      },
+    );
+
+    const result = computeWeightedSummary();
+    expect(result.byLens.Security).toBeGreaterThan(result.byLens.Accessibility);
+    expect(result.formatted).toContain("Finding adoption");
   });
 
   it("全レンズが均等な場合は underrepresented なしのメッセージを出す", () => {

@@ -1,4 +1,5 @@
 import type { IssueTracker, OpenIssue, ClosedIssue } from "./types";
+import { normalizeCloseReason } from "./close-reason";
 import {
   categoryFromLabels,
   pickCatalogItem,
@@ -168,9 +169,25 @@ export class BacklogTracker implements IssueTracker {
       keyword: "feedback-agent",
     }));
     if (!res.ok) return [];
-    const data = await res.json() as { issueKey: string; summary: string; description: string }[];
+    const data = await res.json() as {
+      issueKey: string;
+      summary: string;
+      description: string;
+      resolution?: { name?: string } | null;
+      status?: { name?: string };
+    }[];
     return Array.isArray(data)
-      ? data.map((i) => ({ number: i.issueKey, title: i.summary, body: i.description ?? "", labels: [] }))
+      ? data.map((i) => ({
+          number: i.issueKey,
+          title: i.summary,
+          body: i.description ?? "",
+          labels: [],
+          url: `${this.baseUrl}/view/${i.issueKey}`,
+          stateReason: normalizeCloseReason({
+            resolutionName: i.resolution?.name ?? null,
+            statusName: i.status?.name,
+          }),
+        }))
       : [];
   }
 }

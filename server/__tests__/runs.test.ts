@@ -73,6 +73,25 @@ describe("listRuns", () => {
     expect(listRuns()).toEqual([]);
   });
 
+  it("browser エージェントを含む run の agentCount を正しく返す", () => {
+    const log = mockRunLog({
+      runId: "run_browser",
+      summary: { ...mockRunLog().summary, totalAgents: 3 },
+      agents: [
+        { agentType: "explorer", agentId: "a1", agentName: "A", role: "r", startedAt: "", completedAt: null, status: "completed", iterations: 1, actions: [], visitedPaths: [], issuesPosted: [], regressionChecks: [], error: null },
+        { agentType: "browser", agentId: "a2", agentName: "B", role: "r", startedAt: "", completedAt: null, status: "completed", iterations: 1, actions: [], visitedPaths: [], issuesPosted: [], regressionChecks: [], error: null },
+        { agentType: "browser", agentId: "a3", agentName: "C", role: "r", startedAt: "", completedAt: null, status: "completed", iterations: 1, actions: [], visitedPaths: [], issuesPosted: [], regressionChecks: [], error: null },
+      ],
+    });
+    vi.mocked(fs.existsSync).mockImplementation((p: unknown) => String(p).endsWith("logs"));
+    vi.mocked(fs.readdirSync).mockReturnValue(["2026-01-01T00-00-00_run_browser.json"] as unknown as ReturnType<typeof fs.readdirSync>);
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(log) as unknown as ReturnType<typeof fs.readFileSync>);
+
+    const result = listRuns();
+    expect(result[0].agentCount).toBe(3);
+    expect(result[0].completedAgents).toBe(3);
+  });
+
   it("通常の run ログを完了状態のサマリーに変換する", () => {
     const log = mockRunLog({
       runId: "run_done",

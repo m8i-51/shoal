@@ -1,4 +1,5 @@
 import type { IssueTracker, OpenIssue, ClosedIssue } from "./types";
+import { normalizeCloseReason } from "./close-reason";
 
 export class NotionTracker implements IssueTracker {
   readonly name = "notion";
@@ -67,15 +68,35 @@ export class NotionTracker implements IssueTracker {
   }
 
   async fetchOpenIssues(): Promise<OpenIssue[]> {
-    return this._queryPages("Open");
+    const pages = await this._queryPages("Open");
+    return pages.map(({ number, title, labels }) => ({ number, title, labels }));
   }
 
   async fetchClosedIssues(): Promise<ClosedIssue[]> {
     const pages = await this._queryPages("Closed");
-    return pages.map((p) => ({ ...p, body: "" }));
+    const rejectedPages = await this._queryPages("Won't fix");
+    const notPlannedPages = await this._queryPages("Not planned");
+    const all = [...pages, ...rejectedPages, ...notPlannedPages];
+    const seen = new Set<string>();
+    return all.filter((p) => {
+      if (seen.has(String(p.number))) return false;
+      seen.add(String(p.number));
+      return true;
+    }).map((p) => ({
+      number: p.number,
+      title: p.title,
+      body: "",
+      labels: p.labels,
+      stateReason: p.stateReason,
+    }));
   }
 
-  private async _queryPages(status: string): Promise<{ number: string; title: string; labels: string[] }[]> {
+  private async _queryPages(status: string): Promise<{
+    number: string;
+    title: string;
+    labels: string[];
+    stateReason: string | null;
+  }[]> {
     const res = await fetch(`https://api.notion.com/v1/databases/${this.databaseId}/query`, {
       method: "POST",
       headers: this.headers,
@@ -98,6 +119,7 @@ export class NotionTracker implements IssueTracker {
       number: p.id,
       title: p.properties.Name?.title[0]?.plain_text ?? "(no title)",
       labels: p.properties.Labels?.multi_select.map((l) => l.name) ?? [],
+      stateReason: normalizeCloseReason({ statusName: status, labels: p.properties.Labels?.multi_select.map((l) => l.name) }),
     }));
   }
 }

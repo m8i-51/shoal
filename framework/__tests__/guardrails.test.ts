@@ -7,8 +7,11 @@ import {
   applyBrowserGuardrails,
   filterAppTools,
   guardrailPrompt,
+  isDestructiveBrowserAction,
+  guardSafeBrowserClick,
   type AppTool,
 } from "../guardrails";
+import type { Page } from "playwright";
 
 describe("getShoalMode", () => {
   it("デフォルトは safe", () => {
@@ -39,7 +42,13 @@ describe("shouldBlockRequest", () => {
     expect(shouldBlockRequest("HEAD", "read-only")).toBe(false);
   });
 
-  it("safe / full ではブロックしない", () => {
+  it("safe では DELETE のみブロックする", () => {
+    expect(shouldBlockRequest("DELETE", "safe")).toBe(true);
+    expect(shouldBlockRequest("POST", "safe")).toBe(false);
+    expect(shouldBlockRequest("PATCH", "safe")).toBe(false);
+  });
+
+  it("safe / full では POST/PUT/PATCH は通す", () => {
     expect(shouldBlockRequest("POST", "safe")).toBe(false);
     expect(shouldBlockRequest("DELETE", "full")).toBe(false);
   });
@@ -67,9 +76,18 @@ describe("applyBrowserGuardrails", () => {
     return { route, abort, continue: cont };
   }
 
-  it("safe / full では route を登録しない", async () => {
-    const { context } = makeContext();
+  it("safe でも DELETE を abort する", async () => {
+    const { context, getHandler } = makeContext();
     await applyBrowserGuardrails(context, "safe");
+    expect(vi.mocked(context.route)).toHaveBeenCalledTimes(1);
+
+    const del = makeRoute("DELETE");
+    await getHandler()(del.route);
+    expect(del.abort).toHaveBeenCalledWith("accessdenied");
+  });
+
+  it("full では route を登録しない", async () => {
+    const { context } = makeContext();
     await applyBrowserGuardrails(context, "full");
     expect(vi.mocked(context.route)).not.toHaveBeenCalled();
   });
@@ -118,6 +136,46 @@ describe("guardrailPrompt", () => {
   it("read-only / safe は指示を返し、full は空文字を返す", () => {
     expect(guardrailPrompt("read-only")).toContain("READ-ONLY");
     expect(guardrailPrompt("safe")).toContain("SAFE");
+    expect(guardrailPrompt("safe")).toContain("blocked programmatically");
     expect(guardrailPrompt("full")).toBe("");
+  });
+});
+
+describe("isDestructiveBrowserAction", () => {
+  it("削除・支払い・送信系の文言を検出する", () => {
+    expect(isDestructiveBrowserAction("Delete account")).toBe(true);
+    expect(isDestructiveBrowserAction("Pay now")).toBe(true);
+    expect(isDestructiveBrowserAction("Send invitation")).toBe(true);
+    expect(isDestructiveBrowserAction("Save changes")).toBe(false);
+  });
+});
+
+describe("guardSafeBrowserClick", () => {
+  function makePage(buttonText: string): Page {
+    const button = {
+      count: vi.fn(async () => 1),
+      innerText: vi.fn(async () => buttonText),
+      getAttribute: vi.fn(async () => null),
+    };
+    return {
+      getByRole: vi.fn(() => ({ first: () => button })),
+      getByText: vi.fn(() => ({ first: () => button })),
+    } as unknown as Page;
+  }
+
+  it("full モードでは常に許可する", async () => {
+    const result = await guardSafeBrowserClick(makePage("Delete"), "Delete item", "full");
+    expect(result.allowed).toBe(true);
+  });
+
+  it("safe モードで destructive なクリックをブロックする", async () => {
+    const result = await guardSafeBrowserClick(makePage("Delete permanently"), "Delete item", "safe");
+    expect(result.allowed).toBe(false);
+    expect(result.message).toContain("Blocked click");
+  });
+
+  it("safe モードでも無害なクリックは許可する", async () => {
+    const result = await guardSafeBrowserClick(makePage("Continue"), "Continue", "safe");
+    expect(result.allowed).toBe(true);
   });
 });

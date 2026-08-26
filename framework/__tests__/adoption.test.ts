@@ -8,7 +8,7 @@ vi.mock("path", async (importOriginal) => {
   return { ...actual, join: (...args: string[]) => args.join("/") };
 });
 
-import { recordIssueLink, updateAdoption, formatAdoptionSummary, loadIssueLinks, type IssueLink } from "../adoption";
+import { recordIssueLink, updateAdoption, formatAdoptionSummary, loadIssueLinks, adoptionWeight, lensAdoptionWeight, type IssueLink } from "../adoption";
 import type { ClosedIssue } from "../trackers/index";
 
 function makeLink(overrides: Partial<IssueLink> = {}): IssueLink {
@@ -134,6 +134,23 @@ describe("updateAdoption", () => {
     const summary = updateAdoption([makeClosed()]);
     expect(summary).toContain("Finding adoption");
     expect(summary).toContain("Security: 1 adopted / 0 rejected (100%)");
+  });
+});
+
+describe("adoptionWeight", () => {
+  it("データが無いときは 1.0", () => {
+    expect(adoptionWeight(null)).toBe(1);
+  });
+
+  it("0% 採用 → 0.75、100% 採用 → 1.25", () => {
+    expect(adoptionWeight(0)).toBe(0.75);
+    expect(adoptionWeight(1)).toBe(1.25);
+    expect(adoptionWeight(0.5)).toBe(1);
+  });
+
+  it("lensAdoptionWeight は stats から採用率を反映する", () => {
+    expect(lensAdoptionWeight("Security", { byLens: { Security: { adopted: 2, rejected: 0 } }, byCategory: {} })).toBe(1.25);
+    expect(lensAdoptionWeight("UX", { byLens: { UX: { adopted: 0, rejected: 4 } }, byCategory: {} })).toBe(0.75);
   });
 });
 

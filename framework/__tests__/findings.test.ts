@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("fs");
 
 import * as fs from "fs";
-import { saveFinding, initRunLog, saveRunLog, getSwarmSignals, collectedFindings } from "../findings";
+import { saveFinding, initRunLog, saveRunLog, getSwarmSignals, collectedFindings, extractFindingPath, pathsShareArea } from "../findings";
 import type { Finding } from "../types";
 
 function makeFinding(overrides: Partial<Finding> = {}): Finding {
@@ -84,6 +84,38 @@ describe("getSwarmSignals", () => {
     expect(signals).toHaveLength(3);
     expect(signals[0].title).toBe("Finding 7"); // 直近3件（7,8,9）
     expect(signals[0].excerpt.length).toBeLessThanOrEqual(201); // 200 + "…"
+  });
+
+  it("currentPath を渡すと同エリアの finding だけを返す", () => {
+    saveFinding(makeFinding({ id: "s1", agentId: "a2", title: "Checkout bug", body: "On /checkout the button fails" }));
+    saveFinding(makeFinding({ id: "s2", agentId: "a2", title: "Admin bug", body: "On /admin/users page broken" }));
+    const signals = getSwarmSignals("a1", 8, "/checkout/review");
+    expect(signals).toHaveLength(1);
+    expect(signals[0].title).toBe("Checkout bug");
+    expect(signals[0].path).toBe("/checkout");
+  });
+
+  it("同エリアに finding が無いときは全体からフォールバックする", () => {
+    saveFinding(makeFinding({ id: "s1", agentId: "a2", title: "Admin bug", body: "On /admin page broken" }));
+    const signals = getSwarmSignals("a1", 8, "/checkout");
+    expect(signals).toHaveLength(1);
+    expect(signals[0].title).toBe("Admin bug");
+  });
+});
+
+describe("extractFindingPath", () => {
+  it("本文中の最初のパスから先頭セグメントを取る", () => {
+    expect(extractFindingPath({ title: "Bug", body: "Visited /checkout/review and failed" })).toBe("/checkout");
+    expect(extractFindingPath({ title: "Bug", body: "No path here" })).toBe("/");
+  });
+});
+
+describe("pathsShareArea", () => {
+  it("同じルートセグメントまたは prefix を共有する", () => {
+    expect(pathsShareArea("/checkout/review", "/checkout")).toBe(true);
+    expect(pathsShareArea("/checkout", "/checkout/review")).toBe(true);
+    expect(pathsShareArea("/checkout", "/admin")).toBe(false);
+    expect(pathsShareArea("/", "/checkout")).toBe(true);
   });
 });
 

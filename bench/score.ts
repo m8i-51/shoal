@@ -14,6 +14,24 @@ export interface BenchLabel {
   id: string;
   description: string;
   keywords: string[];
+  lens?: string;
+  path?: string;
+  category?: string;
+}
+
+export interface BenchScoreEntry {
+  variant: string;
+  model: string;
+  detectionRate: number;
+  totalFindings: number;
+  runDate: string;
+  config?: string;
+}
+
+export interface PublishedBenchScores {
+  updatedAt: string;
+  note?: string;
+  entries: BenchScoreEntry[];
 }
 
 export interface DetectedLabel {
@@ -76,9 +94,9 @@ export function scoreFindings(findings: Finding[], labels: BenchLabel[]): BenchR
   };
 }
 
-export function formatBenchResult(result: BenchResult): string {
+export function formatBenchResult(result: BenchResult, variantId = "store"): string {
   const lines = [
-    "shoal-bench result",
+    `shoal-bench result (${variantId})`,
     "==================",
     `Detection rate: ${result.detected.length}/${result.detected.length + result.missed.length} (${Math.round(result.detectionRate * 100)}%)`,
     `Findings: ${result.totalFindings} total, ${result.unmatchedFindings} not matching any seeded bug`,
@@ -89,7 +107,48 @@ export function formatBenchResult(result: BenchResult): string {
     for (const title of d.matchedBy.slice(0, 2)) lines.push(`      └ "${title}"`);
   }
   for (const m of result.missed) {
-    lines.push(`  ✗ ${m.id} — ${m.description}`);
+    const meta = [m.lens, m.path].filter(Boolean).join(" @ ");
+    lines.push(`  ✗ ${m.id}${meta ? ` (${meta})` : ""} — ${m.description}`);
+  }
+  return lines.join("\n");
+}
+
+export function loadPublishedScores(scoresPath = path.join(benchDir, "scores.json")): PublishedBenchScores {
+  if (!fs.existsSync(scoresPath)) {
+    return { updatedAt: "", entries: [] };
+  }
+  return JSON.parse(fs.readFileSync(scoresPath, "utf-8")) as PublishedBenchScores;
+}
+
+export function recordBenchScore(
+  entry: BenchScoreEntry,
+  scoresPath = path.join(benchDir, "scores.json"),
+): PublishedBenchScores {
+  const published = loadPublishedScores(scoresPath);
+  const withoutDuplicate = published.entries.filter(
+    (e) => !(e.variant === entry.variant && e.model === entry.model && e.runDate === entry.runDate),
+  );
+  const next: PublishedBenchScores = {
+    updatedAt: new Date().toISOString().slice(0, 10),
+    note: published.note,
+    entries: [entry, ...withoutDuplicate],
+  };
+  fs.writeFileSync(scoresPath, JSON.stringify(next, null, 2) + "\n", "utf-8");
+  return next;
+}
+
+export function formatPublishedScoresMarkdown(scores: PublishedBenchScores): string {
+  if (scores.entries.length === 0) {
+    return "_No published scores yet. Run `BENCH_RECORD=1 npm run bench` to append results to `bench/scores.json`._";
+  }
+  const lines = [
+    "| Variant | Model | Detection | Findings | Date | Config |",
+    "|---|---|---:|---:|---|---|",
+  ];
+  for (const entry of scores.entries) {
+    lines.push(
+      `| ${entry.variant} | ${entry.model} | ${entry.detectionRate}% | ${entry.totalFindings} | ${entry.runDate} | ${entry.config ?? "—"} |`,
+    );
   }
   return lines.join("\n");
 }

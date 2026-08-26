@@ -1,4 +1,5 @@
 import type { IssueTracker, OpenIssue, ClosedIssue } from "./types";
+import { normalizeCloseReason } from "./close-reason";
 
 export class JiraTracker implements IssueTracker {
   readonly name = "jira";
@@ -97,18 +98,33 @@ export class JiraTracker implements IssueTracker {
       `project = ${this.projectKey} AND statusCategory = Done AND labels = "feedback-agent" ORDER BY updated DESC`
     );
     const res = await fetch(
-      `${this.baseUrl}/rest/api/3/search?jql=${jql}&maxResults=20&fields=summary,labels,description`,
+      `${this.baseUrl}/rest/api/3/search?jql=${jql}&maxResults=20&fields=summary,labels,description,resolution,status`,
       { headers: this.headers }
     );
     if (!res.ok) return [];
     const data = await res.json() as {
-      issues?: { key: string; fields: { summary: string; labels: string[]; description: unknown } }[];
+      issues?: {
+        key: string;
+        fields: {
+          summary: string;
+          labels: string[];
+          description: unknown;
+          resolution?: { name?: string } | null;
+          status?: { name?: string };
+        };
+      }[];
     };
     return (data.issues ?? []).map((i) => ({
       number: i.key,
       title: i.fields.summary,
       body: typeof i.fields.description === "string" ? i.fields.description : "",
       labels: i.fields.labels,
+      url: `${this.baseUrl}/browse/${i.key}`,
+      stateReason: normalizeCloseReason({
+        resolutionName: i.fields.resolution?.name ?? null,
+        statusName: i.fields.status?.name,
+        labels: i.fields.labels,
+      }),
     }));
   }
 }

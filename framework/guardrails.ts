@@ -1,4 +1,4 @@
-import type { BrowserContext } from "playwright";
+import type { BrowserContext, Page } from "playwright";
 import type { Tool } from "./llm-client";
 
 /**
@@ -10,7 +10,7 @@ import type { Tool } from "./llm-client";
  *   destructive 指定された API ツールを除外する
  * - "safe" (デフォルト): テストデータの作成・編集は許可するが、
  *   不可逆な操作（削除・支払い・実在の宛先への送信など）を
- *   プロンプトで抑止し、destructive 指定された API ツールを除外する
+ *   プロンプト + ネットワーク/クリック層で抑止し、destructive 指定された API ツールを除外する
  * - "full": 制限なし（従来の挙動）
  */
 
@@ -28,12 +28,15 @@ export function getShoalMode(env: NodeJS.ProcessEnv = process.env): ShoalMode {
 const MUTATION_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 export function shouldBlockRequest(method: string, mode: ShoalMode): boolean {
-  return mode === "read-only" && MUTATION_METHODS.has(method.toUpperCase());
+  const upper = method.toUpperCase();
+  if (mode === "read-only") return MUTATION_METHODS.has(upper);
+  if (mode === "safe") return upper === "DELETE";
+  return false;
 }
 
-/** read-only モードのとき、ブラウザコンテキストの mutation リクエストをブロックする */
+/** read-only / safe モードのとき、ブラウザコンテキストの危険リクエストをブロックする */
 export async function applyBrowserGuardrails(context: BrowserContext, mode: ShoalMode): Promise<void> {
-  if (mode !== "read-only") return;
+  if (mode === "full") return;
   await context.route("**/*", (route) => {
     const method = route.request().method();
     if (shouldBlockRequest(method, mode)) {
@@ -42,6 +45,76 @@ export async function applyBrowserGuardrails(context: BrowserContext, mode: Shoa
     }
     return route.continue();
   });
+}
+
+const DESTRUCTIVE_CLICK_PATTERNS = [
+  /\bdelete\b/i,
+  /\bremove\b/i,
+  /\bpay\s*now\b/i,
+  /\bconfirm\s+(payment|purchase|order)\b/i,
+  /\bcomplete\s+(payment|purchase|order)\b/i,
+  /\bplace\s+order\b/i,
+  /\bsend\s+(invitation|invite|email|message)\b/i,
+  /\bcancel\s+subscription\b/i,
+  /\brevoke\b/i,
+  /\bpermanently\b/i,
+  /\btransfer\s+funds\b/i,
+];
+
+export function isDestructiveBrowserAction(text: string): boolean {
+  const normalized = text.trim();
+  if (!normalized) return false;
+  return DESTRUCTIVE_CLICK_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+async function resolveClickTargetText(page: Page, description: string): Promise<string> {
+  const escapedDesc = description.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const locators = [
+    page.getByRole("button", { name: new RegExp(escapedDesc, "i") }),
+    page.getByRole("link", { name: new RegExp(escapedDesc, "i") }),
+    page.getByText(description, { exact: false }),
+  ];
+  for (const loc of locators) {
+    try {
+      const target = loc.first();
+      if (!(await target.count())) continue;
+      const parts = [
+        await target.innerText({ timeout: 500 }).catch(() => ""),
+        await target.getAttribute("aria-label").catch(() => ""),
+        await target.getAttribute("title").catch(() => ""),
+      ].filter(Boolean);
+      if (parts.length > 0) return parts.join(" ");
+    } catch { /* try next */ }
+  }
+  return "";
+}
+
+export interface SafeClickGuardResult {
+  allowed: boolean;
+  message: string;
+}
+
+/** safe モードで不可逆なクリックをブロックする */
+export async function guardSafeBrowserClick(
+  page: Page,
+  description: string,
+  mode: ShoalMode,
+): Promise<SafeClickGuardResult> {
+  if (mode !== "safe") return { allowed: true, message: "" };
+
+  const targetText = await resolveClickTargetText(page, description);
+  const combined = [description, targetText].filter(Boolean).join(" ");
+  if (!isDestructiveBrowserAction(combined)) {
+    return { allowed: true, message: "" };
+  }
+
+  return {
+    allowed: false,
+    message:
+      `[Safety Mode: SAFE] Blocked click on "${description}" — this looks like an irreversible action ` +
+      `(delete / pay / send). Observe the UI up to this point, record your findings with post_feedback, ` +
+      `and move on without completing the action.`,
+  };
 }
 
 /** ターゲット設定の appTools に付けられる destructive フラグ付きツール */
@@ -80,7 +153,8 @@ Creating and editing obvious test data is fine, but avoid irreversible or outwar
 - sending emails / messages / invitations that could reach real people
 - changing account credentials or permissions
 When a flow leads to such an action, stop right before the final confirmation,
-record what you observed up to that point, and move on.`;
+record what you observed up to that point, and move on.
+Irreversible clicks and DELETE requests are blocked programmatically in this mode.`;
     case "full":
       return "";
   }

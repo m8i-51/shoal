@@ -58,6 +58,22 @@ describe("runTriageAgent", () => {
     expect(createMessageWithRetry).not.toHaveBeenCalled();
   });
 
+  it("再訪 re-report は既存 open issue へコメントし LLM triage から除外する", async () => {
+    const tracker = makeTracker({
+      fetchOpenIssues: vi.fn().mockResolvedValue([{ number: 9, title: "Checkout still broken", labels: [] }]),
+      commentOnIssue: vi.fn().mockResolvedValue(true),
+    });
+    const finding = makeFinding({
+      id: "f1",
+      title: "Checkout still broken",
+      body: "Still broken since last visit.",
+    });
+    const result = await runTriageAgent([finding], {} as LLMClient, "m", tracker);
+    expect(tracker.commentOnIssue).toHaveBeenCalledWith(9, expect.stringContaining("Returning-user re-report"));
+    expect(result.skipped).toEqual(["f1"]);
+    expect(createMessageWithRetry).not.toHaveBeenCalled();
+  });
+
   it("tool_use が無い応答（end_turn）でループを終了する", async () => {
     vi.mocked(createMessageWithRetry).mockResolvedValue(endTurn() as never);
     const result = await runTriageAgent([makeFinding()], {} as LLMClient, "m", makeTracker());

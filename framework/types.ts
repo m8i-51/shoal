@@ -23,7 +23,7 @@ export interface Finding {
   category: string;
   timestamp: string;
   screenshotPath?: string;
-  /** Playwright trace zip (per agent session) — replay with `npx playwright show-trace <path>` */
+  /** Playwright trace zip — per-finding chunk when saved, else agent session fallback */
   tracePath?: string;
 }
 
@@ -47,7 +47,7 @@ export interface RegressionCheck {
 }
 
 export interface AgentLog {
-  agentType: "explorer" | "regression";
+  agentType: "explorer" | "regression" | "browser";
   agentId: string;
   agentName: string;
   role: string;

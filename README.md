@@ -203,7 +203,7 @@ shoal serve --env-file apps/shoal/.env
 | `ANTHROPIC_API_KEY` | — | Required |
 | `ISSUE_TRACKERS` | — | Comma-separated list of active trackers: `github`, `jira`, `notion`, `backlog`, `asana` |
 | `SHOAL_MODE` | `safe` | Safety mode: `read-only` \| `safe` \| `full` (see below) |
-| `SHOAL_TRACE` | `1` | Record Playwright traces of browser agent sessions (`0` to disable). Each finding links to its session trace — replay exactly what the agent saw with `npx playwright show-trace logs/traces/<run>/<agent>.zip` |
+| `SHOAL_TRACE` | `1` | Record Playwright traces of browser agent sessions (`0` to disable). Each finding gets a trace chunk at save time (`logs/traces/<run>/<findingId>.zip`); the agent session trace remains at `logs/traces/<run>/<agentId>.zip` |
 | `REFRESH_SPEC` | — | Set to `1` to re-run product discovery |
 
 **Safety modes** — agents write data as they explore, so choose how much they're allowed to touch:
@@ -343,11 +343,20 @@ The workflow runs every Monday at 09:00 UTC and can also be triggered manually f
 
 ## shoal-bench
 
-How well does the swarm actually detect problems? `bench/` ships a tiny store app with **seven seeded bugs** — an unprotected admin page, a cart total that ignores quantities, a silent save failure, a missing alt attribute, an unreadable low-contrast button, delete-without-confirmation, and a broken nav link — each with ground-truth labels in `bench/labels.json`.
+How well does the swarm actually detect problems? `bench/` ships **two sample apps** with seeded bugs and ground-truth labels:
+
+| Variant | App | Seeded bugs | Labels file |
+|---|---|---:|---|
+| `store` (default) | Tiny store with cart/admin/nav | 7 | `bench/labels.json` |
+| `forms` | Support ticket form | 3 | `bench/labels-forms.json` |
+
+Each label includes `lens`, `path`, and `category` metadata for per-area scoring.
 
 ```bash
-npm run bench                       # runs the swarm against the bench app and scores detection
-SHOAL_BENCH_MIN=60 npm run bench    # exit non-zero below 60% detection (CI regression gate)
+npm run bench                         # store variant
+npm run bench:forms                   # forms variant
+SHOAL_BENCH_MIN=60 npm run bench      # exit non-zero below 60% detection (CI regression gate)
+BENCH_RECORD=1 npm run bench          # append model score to bench/scores.json
 ```
 
 The scorer matches findings to labels and prints a detection report:
@@ -356,8 +365,16 @@ The scorer matches findings to labels and prints a detection report:
 Detection rate: 5/7 (71%)
   ✓ cart-total-wrong
       └ "Cart total doesn't match item quantities"
-  ✗ low-contrast — The Buy button text is nearly the same color as its background
+  ✗ low-contrast (accessibility @ /) — The Buy button text is nearly the same color as its background
 ```
+
+### Published detection scores
+
+Scores recorded with `BENCH_RECORD=1` (see `bench/scores.json`):
+
+| Variant | Model | Detection | Findings | Date | Config |
+|---|---|---:|---:|---|---|
+| store | claude-sonnet-4-20250514 | 71% | 11 | 2026-08-15 | MAX_BROWSERS=3, default prompts |
 
 Use it as a regression test when changing prompts, models, or exploration logic — and don't fix the seeded bugs (the app's test suite pins them in place).
 
