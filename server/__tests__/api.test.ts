@@ -337,15 +337,26 @@ describe("POST /api/findings/proxy-url", () => {
     expect(res.status).toBe(400);
   });
 
-  it("正常な外部 URL → upstream レスポンスを返す", async () => {
+  it("許可ホスト以外の公開 URL → 400", async () => {
+    const res = await request(app).post("/api/findings/proxy-url").send({ url: "https://example.com/data.json" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("host not allowed");
+  });
+
+  it("正常な GitHub raw URL → upstream レスポンスを返す", async () => {
     const bundle = { version: "1", source: "shoal", findings: [] };
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+    const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => bundle,
-    }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
     const res = await request(app).post("/api/findings/proxy-url").send({ url: "https://raw.githubusercontent.com/example/data.json" });
     expect(res.status).toBe(200);
     expect(res.body.version).toBe("1");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://raw.githubusercontent.com/example/data.json",
+      expect.objectContaining({ redirect: "error" }),
+    );
     vi.unstubAllGlobals();
   });
 
@@ -354,14 +365,14 @@ describe("POST /api/findings/proxy-url", () => {
       ok: false,
       status: 503,
     }));
-    const res = await request(app).post("/api/findings/proxy-url").send({ url: "https://example.com/data.json" });
+    const res = await request(app).post("/api/findings/proxy-url").send({ url: "https://raw.githubusercontent.com/example/data.json" });
     expect(res.status).toBe(502);
     vi.unstubAllGlobals();
   });
 
   it("fetch 例外（タイムアウト等）→ 502", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("AbortError")));
-    const res = await request(app).post("/api/findings/proxy-url").send({ url: "https://example.com/data.json" });
+    const res = await request(app).post("/api/findings/proxy-url").send({ url: "https://raw.githubusercontent.com/example/data.json" });
     expect(res.status).toBe(502);
     vi.unstubAllGlobals();
   });

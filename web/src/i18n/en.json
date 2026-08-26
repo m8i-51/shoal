@@ -86,7 +86,7 @@
     "filterAll": "All",
     "import": "Load",
     "importing": "Loading…",
-    "importPlaceholder": "Paste URL to a community findings JSON…",
+    "importPlaceholder": "Paste a GitHub raw or gist URL to a findings JSON…",
     "importError": "Failed to load. Check the URL.",
     "importedBadge": "+{{count}} imported",
     "noFindings": "No findings yet. Start a run to discover issues.",

@@ -117,7 +117,7 @@ Opens at `http://localhost:4000`. From there you can:
 - **Watch agents swim live** — the Swarm tab shows an animated real-time view of agents as they explore. When a finding is discovered, the agent's chip flashes with the finding title.
 - **Review past runs** — findings by category, agent count, duration, and estimated cost
 - **Generate an Agent Diary** — after a run completes, one LLM call turns the raw log into a story-style narrative of the exploration, readable by anyone on the team
-- **Hall of Issues** — browse all findings across every run with full-text search and category filter. Export as JSON to share, or paste a community findings URL to import findings from other projects.
+- **Hall of Issues** — browse all findings across every run with full-text search and category filter. Export as JSON to share, or paste a GitHub raw/gist URL to import findings from other projects.
 - **Edit app goals** — guide the goal-gap detector by defining what the app should achieve
 - **Schedule a weekly run** — pick a day and time directly in the dashboard for automatic recurring runs (the `shoal serve` process must stay running; for a serverless alternative see [Scheduled runs](#scheduled-runs) below)
 

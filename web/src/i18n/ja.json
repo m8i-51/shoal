@@ -86,7 +86,7 @@
     "filterAll": "すべて",
     "import": "読み込む",
     "importing": "読み込み中…",
-    "importPlaceholder": "コミュニティ findings JSON の URL を貼り付け…",
+    "importPlaceholder": "GitHub raw / gist の findings JSON URL を貼り付け…",
     "importError": "読み込みに失敗しました。URL を確認してください。",
     "importedBadge": "+{{count}} 件インポート済み",
     "noFindings": "まだ findings がありません。実行を開始して問題を発見しましょう。",
