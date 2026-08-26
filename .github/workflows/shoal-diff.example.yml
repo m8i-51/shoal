@@ -20,6 +20,10 @@ on:
 
 jobs:
   shoal-diff:
+    # Only runs once PREVIEW_URL is configured as a repository variable.
+    # This keeps the file inert in the upstream shoal repo (where it isn't set)
+    # and self-activating in your repo as soon as you add the variable.
+    if: ${{ vars.PREVIEW_URL != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
