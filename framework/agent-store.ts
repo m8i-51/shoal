@@ -35,13 +35,23 @@ function saveAgents(agents: Agent[]): void {
   fs.writeFileSync(STORE_PATH, JSON.stringify(agents, null, 2), "utf-8");
 }
 
+function requireNonEmptyString(value: unknown, field: string): string {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error(`${field} is required and must be a non-empty string`);
+  }
+  return value.trim();
+}
+
 export function addAgent(input: { name: string; role: string; persona: string; environment?: EnvironmentProfile }): Agent {
+  const name = requireNonEmptyString(input.name, "name");
+  const role = requireNonEmptyString(input.role, "role");
+  const persona = requireNonEmptyString(input.persona, "persona");
   const agents = loadAgents();
   const agent: Agent = {
     id: `agent_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-    name: input.name,
-    role: input.role,
-    persona: input.persona,
+    name,
+    role,
+    persona,
     createdAt: new Date().toISOString(),
     ...(input.environment ? { environment: input.environment } : {}),
   };

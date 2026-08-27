@@ -72,6 +72,14 @@ describe("addAgent", () => {
     const b = addAgent({ name: "B", role: "r", persona: "p" });
     expect(a.id).not.toBe(b.id);
   });
+
+  it("name / role / persona が欠落または空白だけの場合は保存せず throw する", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    expect(() => addAgent({ name: "", role: "r", persona: "p" })).toThrow(/name/i);
+    expect(() => addAgent({ name: "A", role: "  ", persona: "p" })).toThrow(/role/i);
+    expect(() => addAgent({ name: "A", role: "r", persona: undefined as unknown as string })).toThrow(/persona/i);
+    expect(fs.writeFileSync).not.toHaveBeenCalled();
+  });
 });
 
 describe("retireAgent", () => {

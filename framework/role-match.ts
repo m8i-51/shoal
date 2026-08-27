@@ -2,11 +2,12 @@
  * ペルソナ role とテストアカウント / シナリオ actor の role を突き合わせる。
  */
 
-export function normalizeRole(role: string): string {
+export function normalizeRole(role: string | null | undefined): string {
+  if (role == null) return "";
   return role.trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
 }
 
-export function roleAffinity(a: string, b: string): number {
+export function roleAffinity(a: string | null | undefined, b: string | null | undefined): number {
   const na = normalizeRole(a);
   const nb = normalizeRole(b);
   if (!na || !nb) return 0;
@@ -32,7 +33,11 @@ export function roleAffinity(a: string, b: string): number {
   return 0;
 }
 
-export function findBestByRole<T extends { role: string }>(items: T[], role: string): T | undefined {
+export function findBestByRole<T extends { role?: string | null }>(
+  items: T[],
+  role: string | null | undefined,
+): T | undefined {
+  if (!normalizeRole(role)) return undefined;
   let best: T | undefined;
   let bestScore = 0;
   for (const item of items) {

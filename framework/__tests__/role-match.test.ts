@@ -7,6 +7,13 @@ describe("normalizeRole", () => {
     expect(normalizeRole("math_instructor")).toBe("math instructor");
     expect(normalizeRole("Learner-guest")).toBe("learner guest");
   });
+
+  it("undefined / null / 空文字は空文字に正規化する（TypeError にしない）", () => {
+    expect(normalizeRole(undefined)).toBe("");
+    expect(normalizeRole(null)).toBe("");
+    expect(normalizeRole("")).toBe("");
+    expect(normalizeRole("   ")).toBe("");
+  });
 });
 
 describe("roleAffinity", () => {
@@ -35,6 +42,12 @@ describe("roleAffinity", () => {
     expect(roleAffinity("explorer", "member")).toBe(0);
     expect(roleAffinity("", "admin")).toBe(0);
   });
+
+  it("片側が undefined / null でも 0 を返し落ちない", () => {
+    expect(roleAffinity(undefined as unknown as string, "admin")).toBe(0);
+    expect(roleAffinity("admin", undefined as unknown as string)).toBe(0);
+    expect(roleAffinity(null as unknown as string, null as unknown as string)).toBe(0);
+  });
 });
 
 describe("findBestByRole", () => {
@@ -48,5 +61,14 @@ describe("findBestByRole", () => {
 
   it("一致が無ければ undefined", () => {
     expect(findBestByRole([{ role: "member", id: "1" }], "explorer")).toBeUndefined();
+  });
+
+  it("roster に空 role の壊れた項目があっても突き合わせを継続する", () => {
+    const items = [
+      { role: undefined as unknown as string, id: "broken" },
+      { role: "admin", id: "ok" },
+    ];
+    expect(findBestByRole(items, "admin")?.id).toBe("ok");
+    expect(findBestByRole(items, undefined as unknown as string)).toBeUndefined();
   });
 });

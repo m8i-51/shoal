@@ -662,10 +662,26 @@ ${pathCoverageStep}
           result = agents.map((a) => ({ id: a.id, name: a.name, role: a.role, createdAt: a.createdAt }));
           console.log(`  [persona-designer] current agents: ${agents.length}`);
         } else if (toolUse.name === "add_agent") {
-          const { name, role, persona, environment } = toolUse.input as { name: string; role: string; persona: string; environment?: EnvironmentProfile };
-          const cleanEnv = sanitizeEnvironment(environment);
-          result = addAgent({ name, role, persona, environment: cleanEnv });
-          console.log(`  [persona-designer] created: ${name} (${role})${cleanEnv ? ` [env: ${Object.entries(cleanEnv).map(([k, v]) => `${k}=${v}`).join(", ")}]` : ""}`);
+          const { name, role, persona, environment } = toolUse.input as {
+            name?: string;
+            role?: string;
+            persona?: string;
+            environment?: EnvironmentProfile;
+          };
+          try {
+            const cleanEnv = sanitizeEnvironment(environment);
+            result = addAgent({
+              name: name ?? "",
+              role: role ?? "",
+              persona: persona ?? "",
+              environment: cleanEnv,
+            });
+            console.log(`  [persona-designer] created: ${result.name} (${result.role})${cleanEnv ? ` [env: ${Object.entries(cleanEnv).map(([k, v]) => `${k}=${v}`).join(", ")}]` : ""}`);
+          } catch (e) {
+            const message = e instanceof Error ? e.message : String(e);
+            result = { error: message };
+            console.log(`  [persona-designer] add_agent rejected: ${message}`);
+          }
         } else if (toolUse.name === "retire_agent") {
           const { agentId, reason } = toolUse.input as { agentId: string; reason: string };
           result = { success: retireAgent(agentId) };
