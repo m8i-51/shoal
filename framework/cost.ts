@@ -28,7 +28,7 @@ const OPENAI_PRICING: Record<string, { input: number; output: number }> = {
 };
 
 // Local / subscription providers — cost tracking not applicable
-const FREE_PROVIDERS = new Set(["ollama", "lm-studio", "codex", "local"]);
+const FREE_PROVIDERS = new Set(["ollama", "lm-studio", "codex", "claude-cli", "local"]);
 
 let openrouterCache: Map<string, { input: number; output: number }> | null = null;
 let openrouterCachedAt = 0;

@@ -52,6 +52,21 @@ describe("createLLMClient", () => {
     expect(result.defaultModel).toBe("gpt-5.1-codex-mini");
   });
 
+  it('LLM_PROVIDER=claude-cli の場合は provider:"claude-cli"、デフォルトモデルは claude-sonnet-4-6', () => {
+    process.env.LLM_PROVIDER = "claude-cli";
+    const result = createLLMClient();
+    expect(result.provider).toBe("claude-cli");
+    expect(result.defaultModel).toBe("claude-sonnet-4-6");
+  });
+
+  it("claude-cli の createMessage は明確なエラーを投げる", async () => {
+    process.env.LLM_PROVIDER = "claude-cli";
+    const { client } = createLLMClient();
+    await expect(client.createMessage({
+      model: "m", max_tokens: 1, system: "s", tools: [], messages: [],
+    })).rejects.toThrow(/runToolSession/);
+  });
+
   it.each([
     ["ollama", "http://localhost:11434/v1", "llama3.2"],
     ["groq", "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile"],
