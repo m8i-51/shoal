@@ -41,13 +41,14 @@ import {
 } from "./framework/observation";
 import { discoverProduct, loadCachedSpec, resolveLoginPath, type ProductSpec } from "./framework/product-discovery";
 import { designOrg, UNIVERSAL_LENSES } from "./framework/org-designer";
-import { designScenarios, findMultiActorScenario, soloScenarios, type Scenario, type ScenarioActor, type ScenarioOutcome } from "./framework/scenario-designer";
+import { designScenarios, findMultiActorScenario, soloScenarios, pairAgentsToActors, pickBrowserAgents, type Scenario, type ScenarioActor, type ScenarioOutcome } from "./framework/scenario-designer";
 import { runTriageAgent } from "./framework/triage";
 import { generateReport } from "./framework/report";
 import type { AgentLog, Finding, RegressionCheck } from "./framework/types";
 import { loadTarget, applyLoadedTarget } from "./targets";
 import { runAccountManager, resolveAccountSetup, planBrowserAuth, authPrompt, describeAuthPlan, resolveLoginUrl, type TestAccount, type BrowserAuthPlan } from "./framework/account-manager";
 import { estimateCost, formatCostUSD } from "./framework/cost";
+import { clickDescribedElement } from "./framework/click-target";
 
 const BASE_URL = process.env.BASE_URL ?? "http://localhost:3000";
 const REFRESH_SPEC = process.env.REFRESH_SPEC === "1";
@@ -774,10 +775,13 @@ const BROWSER_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: "click",
-    description: "Click a button, link, or tab on screen. / 画面上の要素をクリックする",
+    description: "Click a button, link, or tab on screen. description may be the accessible name, a short phrase from it (e.g. Close), or a longer description of the control. Optionally pass ref from read_accessibility_tree (e.g. e12). / 画面上の要素をクリックする。accessible name の部分一致、またはアクセシビリティツリーの ref で対象を指定する",
     input_schema: {
       type: "object",
-      properties: { description: { type: "string" } },
+      properties: {
+        description: { type: "string", description: "Accessible name or a description of the control (partial name match is OK)" },
+        ref: { type: "string", description: "Optional accessibility-tree ref from read_accessibility_tree, e.g. e12" },
+      },
       required: ["description"],
     },
   },
@@ -817,7 +821,7 @@ const BROWSER_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: "read_accessibility_tree",
-    description: "Get the page's accessibility tree. / ページのアクセシビリティツリーを取得する",
+    description: "Get the page's accessibility tree (includes [ref=eN] ids you can pass to click). / ページのアクセシビリティツリーを取得する。要素の ref を click に渡せる",
     input_schema: { type: "object", properties: {}, required: [] },
   },
   {
@@ -903,8 +907,8 @@ async function executeBrowserTool(
         break;
       }
       case "click": {
-        const { description } = input as { description: string };
-        const guard = await guardSafeBrowserClick(page, description, SHOAL_MODE);
+        const { description, ref } = input as { description: string; ref?: string };
+        const guard = await guardSafeBrowserClick(page, description, SHOAL_MODE, ref);
         if (!guard.allowed) {
           console.log(`  [guardrails] blocked click: ${description}`);
           screenshot = await takeScreenshot(page, `blocked_click_${description.slice(0, 20)}`);
@@ -912,19 +916,7 @@ async function executeBrowserTool(
           break;
         }
         await saveSnapshotBeforeAction(page, observation);
-        const escapedDesc = description.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const buttonLocator = page.getByRole("button", { name: new RegExp(escapedDesc, "i") });
-        const linkLocator = page.getByRole("link", { name: new RegExp(escapedDesc, "i") });
-        const textLocator = page.getByText(description, { exact: false });
-        let clicked = false;
-        for (const loc of [buttonLocator, linkLocator, textLocator]) {
-          try {
-            await loc.first().click({ timeout: 5000 });
-            clicked = true;
-            break;
-          } catch { /* try next */ }
-        }
-        if (!clicked) throw new Error(`No element matching: ${description}`);
+        await clickDescribedElement(page, { description, ref });
         await page.waitForTimeout(500);
         screenshot = await takeScreenshot(page, `click_${description.slice(0, 20)}`);
         resultText = `Clicked: ${description}`;
@@ -1522,18 +1514,24 @@ async function main() {
     }
 
     // 8. browser agents
-    const browserAgents = pickAgents(allAgents, Math.min(MAX_BROWSERS, allAgents.length));
+    const multiScenario = findMultiActorScenario(scenarios);
+    const actorRoles = multiScenario?.actors?.map((a) => a.role) ?? [];
+    const browserAgents = pickBrowserAgents(allAgents, Math.min(MAX_BROWSERS, allAgents.length), actorRoles);
     console.log(`\nlaunching ${browserAgents.length} browser agents in parallel (max: ${MAX_BROWSERS})`);
     browserAgents.forEach((a) => console.log(`  - ${a.name} (${a.role})`));
 
-    // マルチアクターシナリオ: ブラウザエージェント 2 体を同一シナリオの同時アクターにする
+    // マルチアクターシナリオ: ペルソナ role と actor / テストアカウント role が合う 2 体を同時操作させる
     const pairAssignments = new Map<string, Assignment>();
-    const multiScenario = findMultiActorScenario(scenarios);
     if (multiScenario?.actors && browserAgents.length >= 2) {
-      const [actorA, actorB] = multiScenario.actors;
-      pairAssignments.set(browserAgents[0].id, { scenario: multiScenario, actor: { ...actorA, partnerRole: actorB.role } });
-      pairAssignments.set(browserAgents[1].id, { scenario: multiScenario, actor: { ...actorB, partnerRole: actorA.role } });
-      console.log(`[multi-actor] "${multiScenario.title}" — ${browserAgents[0].name} as ${actorA.role} × ${browserAgents[1].name} as ${actorB.role}`);
+      const paired = pairAgentsToActors(browserAgents, multiScenario);
+      for (const [agentId, actor] of paired) {
+        pairAssignments.set(agentId, { scenario: multiScenario, actor });
+      }
+      const pairLabel = [...paired.entries()].map(([id, actor]) => {
+        const agent = browserAgents.find((a) => a.id === id);
+        return `${agent?.name ?? id} (${agent?.role}) as ${actor.role}`;
+      }).join(" × ");
+      console.log(`[multi-actor] "${multiScenario.title}" — ${pairLabel}`);
     }
 
     await sleep(2000);
