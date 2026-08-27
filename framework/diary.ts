@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { createLLMClient } from "./llm-client.js";
+import { completeText } from "./tool-session.js";
 import { isFinding, type Finding } from "./types.js";
 
 /**
@@ -70,19 +71,17 @@ export async function generateDiary(runId: string, logLines: string[]): Promise<
     ? events.join("\n")
     : "（イベントログなし）";
 
-  const { client, defaultModel } = createLLMClient();
+  const { client, defaultModel, provider } = createLLMClient();
 
-  const msg = await client.createMessage({
+  const text = await completeText({
+    provider,
+    client,
     model: defaultModel,
-    max_tokens: 1500,
+    maxTokens: 1500,
     system: `あなたは AI エージェント群の探索を、読み手の心を動かす「探索日誌」として記録する書記役です。
 エンジニアだけでなく、プロダクトオーナーやデザイナーにも伝わる、物語体の日本語で書いてください。
 技術的なログを人間味あふれる冒険譚に変換するのがあなたの仕事です。`,
-    tools: [],
-    messages: [
-      {
-        role: "user",
-        content: `以下の探索ログをもとに、shoal エージェント群の「探索日誌」を Markdown 形式で作成してください。
+    userPrompt: `以下の探索ログをもとに、shoal エージェント群の「探索日誌」を Markdown 形式で作成してください。
 
 ## 発見された問題（${findings.length}件）
 ${findingsSummary}
@@ -98,14 +97,7 @@ ${eventsText}
 - 全体で 400〜700 字程度のコンパクトな物語にまとめる
 - 最後に「## 今回の旅のまとめ」セクションを箇条書きで追加する
 - Markdown のみで出力する（説明文は不要）`,
-      },
-    ],
   });
-
-  const text = msg.content
-    .filter((b) => b.type === "text")
-    .map((b) => (b as { type: "text"; text: string }).text)
-    .join("");
 
   const logsRoot = path.resolve(process.cwd(), "logs");
   const diaryPath = containedPath(logsRoot, `diary_${runId}.md`);

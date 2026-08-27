@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("fs");
-vi.mock("../agent-loop", () => ({ createMessageWithRetry: vi.fn() }));
+vi.mock("../llm-retry", () => ({ createMessageWithRetry: vi.fn(), sleep: vi.fn(), rateLimitRetries: 0 }));
 
 import * as fs from "fs";
-import { createMessageWithRetry } from "../agent-loop";
+import { createMessageWithRetry } from "../llm-retry";
 import { runTriageAgent } from "../triage";
 import type { Finding } from "../types";
 import type { IssueTracker } from "../trackers/index";

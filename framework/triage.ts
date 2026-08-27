@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import type { LLMClient } from "./llm-client";
 import type { Finding } from "./types";
-import { createMessageWithRetry } from "./agent-loop";
+import { runToolSession } from "./tool-session";
 import type { IssueTracker } from "./trackers/index";
 import { recordIssueLink } from "./adoption";
 import { commentReturningUserReReports } from "./triage-rereport";
@@ -127,35 +127,13 @@ Organize feedback collected by multiple agents and post it as issue tickets.
 - merged_finding_ids must contain at least one ID
 - If a finding cannot be linked to any feedback, use skip_finding instead of create_issue`;
 
-  const messages: Anthropic.MessageParam[] = [
-    { role: "user", content: `Triage the feedback and create issue tickets via ${tracker.name}.` },
-  ];
-
-  let iterations = 0;
-  while (iterations < 15) {
-    iterations++;
-
-    const response = await createMessageWithRetry(client, {
-      model,
-      max_tokens: 2048,
-      system: systemPrompt,
-      tools: TRIAGE_TOOLS,
-      messages,
-    });
-
-    messages.push({ role: "assistant", content: response.content });
-
-    const toolUses = response.content.filter(
-      (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
-    );
-    if (toolUses.length === 0 || response.stop_reason === "end_turn") break;
-
-    const toolResults: Anthropic.ToolResultBlockParam[] = [];
-    for (const toolUse of toolUses) {
-      let result: unknown;
-
-      if (toolUse.name === "get_all_findings") {
-        result = triageFindings.map((f) => ({
+  const sessionTools = TRIAGE_TOOLS.map((t) => ({
+    name: t.name,
+    description: t.description ?? t.name,
+    input_schema: t.input_schema as Record<string, unknown>,
+    execute: async (input: Record<string, unknown>): Promise<string> => {
+      if (t.name === "get_all_findings") {
+        const result = triageFindings.map((f) => ({
           id: f.id,
           agentName: f.agentName,
           role: f.role,
@@ -166,24 +144,22 @@ Organize feedback collected by multiple agents and post it as issue tickets.
           pending: pendingIds.has(f.id),
         }));
         console.log(`  [triage] fetched findings (${triageFindings.length})`);
+        return JSON.stringify(result);
+      }
 
-      } else if (toolUse.name === "create_issue") {
-        const { title, body, category, merged_finding_ids } = toolUse.input as {
+      if (t.name === "create_issue") {
+        const { title, body, category, merged_finding_ids } = input as {
           title?: string;
           body?: string;
           category?: string;
           merged_finding_ids?: string[];
         };
         if (!title || !body || !category) {
-          result = { error: "create_issue: missing required fields" };
-          toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: JSON.stringify(result) });
-          continue;
+          return JSON.stringify({ error: "create_issue: missing required fields" });
         }
         const mergedIds = merged_finding_ids ?? [];
         if (mergedIds.length === 0) {
-          result = { error: "merged_finding_ids must contain at least one ID" };
-          toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: JSON.stringify(result) });
-          continue;
+          return JSON.stringify({ error: "merged_finding_ids must contain at least one ID" });
         }
         const mergedFindings = triageFindings.filter((f) => mergedIds.includes(f.id));
         const mergedAgents = mergedFindings.map((f) => `${f.agentName} (${f.role})`);
@@ -197,54 +173,58 @@ Organize feedback collected by multiple agents and post it as issue tickets.
         const cleanTitle = title.replace(/^\[[^\]]+\]\s*/i, "");
         const url = await tracker.createIssue(`[${category}] ${cleanTitle}`, fullBody, [category, "feedback-agent"]);
         if (url === null && !tracker.isEmpty) {
-          result = { created: false, error: "tracker returned null — check logs" };
-        } else {
-          mergedIds.forEach((id) => { pendingIds.delete(id); issuedIds.push(id); });
-          issuesCreated++;
-          if (url && agentAssignments) {
-            const lenses = new Set<string>();
-            const scenarios = new Set<string>();
-            for (const f of mergedFindings) {
-              const assignment = agentAssignments.get(f.agentId);
-              if (assignment?.lens) lenses.add(assignment.lens.split(":")[0].trim());
-              if (assignment?.scenario) scenarios.add(assignment.scenario.title);
-            }
-            recordIssueLink({
-              url,
-              title: `[${category}] ${cleanTitle}`,
-              category,
-              lenses: [...lenses],
-              scenarios: [...scenarios],
-              runId: mergedFindings[0]?.runId ?? "",
-              createdAt: new Date().toISOString(),
-            });
-          }
-          result = { created: true, url, mergedCount: mergedIds.length };
-          console.log(`  [triage] issue created: "[${category}] ${cleanTitle}" (merged ${mergedIds.length})`);
+          return JSON.stringify({ created: false, error: "tracker returned null — check logs" });
         }
+        mergedIds.forEach((id) => { pendingIds.delete(id); issuedIds.push(id); });
+        issuesCreated++;
+        if (url && agentAssignments) {
+          const lenses = new Set<string>();
+          const scenarios = new Set<string>();
+          for (const f of mergedFindings) {
+            const assignment = agentAssignments.get(f.agentId);
+            if (assignment?.lens) lenses.add(assignment.lens.split(":")[0].trim());
+            if (assignment?.scenario) scenarios.add(assignment.scenario.title);
+          }
+          recordIssueLink({
+            url,
+            title: `[${category}] ${cleanTitle}`,
+            category,
+            lenses: [...lenses],
+            scenarios: [...scenarios],
+            runId: mergedFindings[0]?.runId ?? "",
+            createdAt: new Date().toISOString(),
+          });
+        }
+        console.log(`  [triage] issue created: "[${category}] ${cleanTitle}" (merged ${mergedIds.length})`);
+        return JSON.stringify({ created: true, url, mergedCount: mergedIds.length });
+      }
 
-      } else if (toolUse.name === "skip_finding") {
-        const { finding_id, reason } = toolUse.input as { finding_id?: string; reason?: string };
+      if (t.name === "skip_finding") {
+        const { finding_id, reason } = input as { finding_id?: string; reason?: string };
         if (!finding_id) {
-          result = { error: "skip_finding: missing finding_id" };
-          toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: JSON.stringify(result) });
-          continue;
+          return JSON.stringify({ error: "skip_finding: missing finding_id" });
         }
         pendingIds.delete(finding_id);
         skippedIds.push(finding_id);
         skipped++;
-        result = { skipped: true };
         console.log(`  [triage] skipped: ${finding_id} — ${reason}`);
-
-      } else {
-        result = { error: "unknown tool" };
+        return JSON.stringify({ skipped: true });
       }
 
-      toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: JSON.stringify(result) });
-    }
+      return JSON.stringify({ error: "unknown tool" });
+    },
+  }));
 
-    messages.push({ role: "user", content: toolResults });
-  }
+  await runToolSession({
+    provider: process.env.LLM_PROVIDER ?? "anthropic",
+    client,
+    model,
+    system: systemPrompt,
+    userPrompt: `Triage the feedback and create issue tickets via ${tracker.name}.`,
+    tools: sessionTools,
+    maxIterations: 15,
+    maxTokens: 2048,
+  });
 
   if (findings.length > 0) {
     const runId = findings[0].runId;

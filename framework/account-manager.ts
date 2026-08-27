@@ -2,7 +2,8 @@ import * as fs from "fs";
 import * as path from "path";
 import type { Page, BrowserContext } from "playwright";
 import type { LLMClient } from "./llm-client";
-import { createMessageWithRetry } from "./agent-loop";
+import { runToolSession } from "./tool-session";
+import type { ToolResultContent } from "./tool-types";
 import { saveFinding } from "./findings";
 import {
   setupObservation,
@@ -661,47 +662,26 @@ ${productSpec.features}
 
 If user management is not accessible from this account, or the app has no role system, just call done immediately.`;
 
-  const messages: Anthropic.MessageParam[] = [
-    {
-      role: "user",
-      content: [
-        { type: "image", source: { type: "base64", media_type: "image/png", data: initialScreenshot } },
-        { type: "text", text: "You are logged in. Start exploring user management." },
-      ],
-    },
-  ];
+  const withScreenshot = (resultText: string, screenshot: string | null): ToolResultContent =>
+    screenshot
+      ? [
+          { type: "image", source: { type: "base64", media_type: "image/png", data: screenshot } },
+          { type: "text", text: resultText },
+        ]
+      : resultText;
 
-  let iterations = 0;
-  outer: while (iterations < 12) {
-    iterations++;
-
-    const response = await createMessageWithRetry(client, {
-      model,
-      max_tokens: 1024,
-      system: systemPrompt,
-      tools: ACCOUNT_MANAGER_TOOLS,
-      messages,
-    });
-
-    messages.push({ role: "assistant", content: response.content });
-
-    const toolUses = response.content.filter(
-      (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
-    );
-    if (toolUses.length === 0 || response.stop_reason === "end_turn") break;
-
-    const toolResults: Anthropic.ToolResultBlockParam[] = [];
-
-    for (const toolUse of toolUses) {
+  const sessionTools = ACCOUNT_MANAGER_TOOLS.map((t) => ({
+    name: t.name,
+    description: t.description ?? t.name,
+    input_schema: t.input_schema as Record<string, unknown>,
+    execute: async (input: Record<string, unknown>): Promise<ToolResultContent> => {
       let resultText = "";
       let screenshot: string | null = null;
 
       try {
-        switch (toolUse.name) {
-          case "done": {
-            toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: "Done." });
-            break outer;
-          }
+        switch (t.name) {
+          case "done":
+            return "Done.";
 
           case "view_screen": {
             screenshot = await takeScreenshot(page, "view");
@@ -710,7 +690,7 @@ If user management is not accessible from this account, or the app has no role s
           }
 
           case "navigate": {
-            const { path: navPath } = toolUse.input as { path?: string };
+            const navPath = input.path as string | undefined;
             if (!navPath) { resultText = "navigate: missing path"; break; }
             await saveSnapshotBeforeAction(page, observation);
             await page.goto(`${baseUrl}${navPath}`, { waitUntil: "networkidle" });
@@ -721,7 +701,8 @@ If user management is not accessible from this account, or the app has no role s
           }
 
           case "click": {
-            const { description, ref } = toolUse.input as { description?: string; ref?: string };
+            const description = input.description as string | undefined;
+            const ref = input.ref as string | undefined;
             if (!description) { resultText = "click: missing description"; break; }
             await saveSnapshotBeforeAction(page, observation);
             await clickDescribedElement(page, { description, ref }, 4000);
@@ -732,7 +713,8 @@ If user management is not accessible from this account, or the app has no role s
           }
 
           case "fill": {
-            const { label, value } = toolUse.input as { label?: string; value?: string };
+            const label = input.label as string | undefined;
+            const value = input.value as string | undefined;
             if (!label || value === undefined) { resultText = "fill: missing label or value"; break; }
             await saveSnapshotBeforeAction(page, observation);
             const byLabel = page.getByLabel(new RegExp(label, "i"));
@@ -757,7 +739,9 @@ If user management is not accessible from this account, or the app has no role s
           }
 
           case "save_account": {
-            const { email, password, role } = toolUse.input as { email?: string; password?: string; role?: string };
+            const email = input.email as string | undefined;
+            const password = input.password as string | undefined;
+            const role = input.role as string | undefined;
             if (!email || !password || !role) { resultText = "save_account: missing required fields"; break; }
             savedAccounts.push({ email, password, role });
             console.log(`  [account-manager] saved account: ${email} (role: ${role})`);
@@ -766,7 +750,8 @@ If user management is not accessible from this account, or the app has no role s
           }
 
           case "post_finding": {
-            const { title, body } = toolUse.input as { title?: string; body?: string };
+            const title = input.title as string | undefined;
+            const body = input.body as string | undefined;
             if (!title || !body) { resultText = "post_finding: missing title or body"; break; }
             saveFinding({
               id: `acct_${Date.now()}`,
@@ -783,23 +768,32 @@ If user management is not accessible from this account, or the app has no role s
             resultText = "Finding recorded.";
             break;
           }
+
+          default:
+            resultText = `Unknown tool: ${t.name}`;
         }
       } catch (e) {
         resultText = `error: ${String(e)}`;
       }
 
-      const content: Anthropic.ToolResultBlockParam["content"] = screenshot
-        ? [
-            { type: "image", source: { type: "base64", media_type: "image/png", data: screenshot } },
-            { type: "text", text: resultText },
-          ]
-        : resultText;
+      return withScreenshot(resultText, screenshot);
+    },
+  }));
 
-      toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content });
-    }
-
-    messages.push({ role: "user", content: toolResults });
-  }
+  await runToolSession({
+    provider: process.env.LLM_PROVIDER ?? "anthropic",
+    client,
+    model,
+    system: systemPrompt,
+    userPrompt: [
+      { type: "image", source: { type: "base64", media_type: "image/png", data: initialScreenshot } },
+      { type: "text", text: "You are logged in. Start exploring user management." },
+    ],
+    tools: sessionTools,
+    maxIterations: 12,
+    maxTokens: 1024,
+    shouldStop: ({ toolUses }) => toolUses.some((tu) => tu.name === "done"),
+  });
 
   await page.close();
   console.log(`[account-manager] found ${savedAccounts.length} newly created account(s)`);

@@ -1,42 +1,10 @@
-import Anthropic from "@anthropic-ai/sdk";
-import type { LLMClient, CreateMessageParams, Tool } from "./llm-client";
+import type { LLMClient, Tool } from "./llm-client";
 import type { AgentLog } from "./types";
 import { runLog } from "./findings";
+import { runToolSession } from "./tool-session";
+import { createMessageWithRetry, sleep, rateLimitRetries } from "./llm-retry";
 
-export let rateLimitRetries = 0;
-
-export async function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-export async function createMessageWithRetry(
-  client: LLMClient,
-  params: CreateMessageParams,
-  retries = 5
-): Promise<Anthropic.Message> {
-  for (let i = 0; i < retries; i++) {
-    try {
-      const response = await client.createMessage(params);
-      if (runLog?.summary?.cost) {
-        runLog.summary.cost.inputTokens += response.usage?.input_tokens ?? 0;
-        runLog.summary.cost.outputTokens += response.usage?.output_tokens ?? 0;
-      }
-      return response;
-    } catch (e: unknown) {
-      const err = e as { status?: number; headers?: { get?: (key: string) => string | null } };
-      if (err?.status === 429 && i < retries - 1) {
-        const retryAfter = err?.headers?.get?.("retry-after");
-        const waitMs = retryAfter ? parseInt(retryAfter) * 1000 : (i + 1) * 10000;
-        console.log(`  [rate-limit] waiting ${waitMs / 1000}s (attempt ${i + 1}/${retries})`);
-        rateLimitRetries++;
-        await sleep(waitMs);
-        continue;
-      }
-      throw e;
-    }
-  }
-  throw new Error("max retries exceeded");
-}
+export { createMessageWithRetry, sleep, rateLimitRetries };
 
 export async function runAgentLoop(
   agentLog: AgentLog,
@@ -44,52 +12,37 @@ export async function runAgentLoop(
   tools: Tool[],
   client: LLMClient,
   model: string,
-  executeToolFn: (toolName: string, input: Record<string, unknown>) => Promise<string>
+  executeToolFn: (toolName: string, input: Record<string, unknown>) => Promise<string>,
+  provider = process.env.LLM_PROVIDER ?? "anthropic",
 ): Promise<void> {
-  const messages: Anthropic.MessageParam[] = [
-    { role: "user", content: "Use the app." },
-  ];
-
   try {
-    while (agentLog.iterations < 10) {
-      agentLog.iterations++;
+    const sessionTools = tools.map((t) => ({
+      name: t.name,
+      description: t.description ?? t.name,
+      input_schema: t.input_schema as Record<string, unknown>,
+      execute: async (input: Record<string, unknown>) => {
+        console.log(`  → ${t.name}(${JSON.stringify(input).slice(0, 80)})`);
+        return executeToolFn(t.name, input);
+      },
+    }));
 
-      const response = await createMessageWithRetry(client, {
-        model,
-        max_tokens: 1024,
-        system: systemPrompt,
-        tools,
-        messages,
-      });
+    const result = await runToolSession({
+      provider,
+      client,
+      model,
+      system: systemPrompt,
+      userPrompt: "Use the app.",
+      tools: sessionTools,
+      maxIterations: 10,
+      maxTokens: 1024,
+    });
 
-      const assistantContent: Anthropic.ContentBlock[] = response.content;
-      messages.push({ role: "assistant", content: assistantContent });
-
-      const toolUses = assistantContent.filter(
-        (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
-      );
-
-      if (toolUses.length === 0 || response.stop_reason === "end_turn") {
-        agentLog.status = "completed";
-        break;
-      }
-
-      if (agentLog.iterations >= 10) {
-        agentLog.status = "iteration_limit";
-        runLog.summary.iterationLimitReached++;
-      }
-
-      const toolResults: Anthropic.ToolResultBlockParam[] = [];
-      for (const toolUse of toolUses) {
-        console.log(`  → ${toolUse.name}(${JSON.stringify(toolUse.input).slice(0, 80)})`);
-        const result = await executeToolFn(
-          toolUse.name,
-          toolUse.input as Record<string, unknown>
-        );
-        toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: result });
-      }
-
-      messages.push({ role: "user", content: toolResults });
+    agentLog.iterations = result.iterations;
+    if (agentLog.iterations >= 10) {
+      agentLog.status = "iteration_limit";
+      runLog.summary.iterationLimitReached++;
+    } else {
+      agentLog.status = "completed";
     }
     runLog.summary.completed++;
   } catch (e) {

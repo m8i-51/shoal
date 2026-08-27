@@ -1,10 +1,10 @@
+import type { LLMClient } from "./llm-client";
+import { runToolSession } from "./tool-session";
+import { normalizeThresholdCandidates, type ThresholdCandidate } from "./threshold";
+import type { Page } from "playwright";
 import * as fs from "fs";
 import * as path from "path";
-import type { Page } from "playwright";
-import type { LLMClient } from "./llm-client";
-import { createMessageWithRetry } from "./agent-loop";
 import Anthropic from "@anthropic-ai/sdk";
-import { normalizeThresholdCandidates, type ThresholdCandidate } from "./threshold";
 
 export type { ThresholdCandidate } from "./threshold";
 
@@ -380,50 +380,27 @@ Guidelines for output_spec:
     ? `App URL: ${baseUrl}\n\nInvestigate what this app is.\n\n[Available Documentation]\n${docs}`
     : `App URL: ${baseUrl}\n\nInvestigate what this app is.`;
 
-  const messages: Anthropic.MessageParam[] = [
-    { role: "user", content: initialContent },
-  ];
-
   let spec: ProductSpec | null = null;
-  let iterations = 0;
   let observedFormPath: string | undefined;
   let observedLinkPath: string | undefined;
 
-  while (iterations < 8 && !spec) {
-    iterations++;
-
-    const response = await createMessageWithRetry(client, {
-      model,
-      max_tokens: 2048,
-      system: systemPrompt,
-      tools: DISCOVERY_TOOLS,
-      messages,
-    });
-
-    messages.push({ role: "assistant", content: response.content });
-
-    const toolUses = response.content.filter(
-      (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
-    );
-    if (toolUses.length === 0 || response.stop_reason === "end_turn") break;
-
-    const toolResults: Anthropic.ToolResultBlockParam[] = [];
-    for (const toolUse of toolUses) {
-      let result: string;
-
-      if (toolUse.name === "navigate_and_read") {
-        const { path } = toolUse.input as { path?: string };
-        if (!path) { result = "navigate_and_read: missing path"; toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: result }); continue; }
+  const sessionTools = DISCOVERY_TOOLS.map((t) => ({
+    name: t.name,
+    description: t.description ?? t.name,
+    input_schema: t.input_schema as Record<string, unknown>,
+    execute: async (input: Record<string, unknown>): Promise<string> => {
+      if (t.name === "navigate_and_read") {
+        const pathArg = input.path as string | undefined;
+        if (!pathArg) return "navigate_and_read: missing path";
         try {
-          await page.goto(`${baseUrl}${path}`, { waitUntil: "networkidle", timeout: 10000 });
+          await page.goto(`${baseUrl}${pathArg}`, { waitUntil: "networkidle", timeout: 10000 });
           await page.waitForTimeout(500);
           const [text, aria] = await Promise.all([
             page.evaluate(() => document.body.innerText.slice(0, 1500)),
             page.ariaSnapshot({ mode: "ai", depth: 5 }).then((s) => s.slice(0, 1500)),
           ]);
-          result = `[${path} text]\n${text}\n\n[ARIA tree]\n${aria}`;
-          console.log(`  [product-discovery] observed: ${path}`);
-          const detected = await detectLoginPath(page, path, baseUrl);
+          console.log(`  [product-discovery] observed: ${pathArg}`);
+          const detected = await detectLoginPath(page, pathArg, baseUrl);
           if (detected.formPath && !observedFormPath) {
             observedFormPath = detected.formPath;
             console.log(`  [product-discovery] login form at: ${observedFormPath}`);
@@ -432,33 +409,31 @@ Guidelines for output_spec:
             observedLinkPath = detected.linkPath;
             console.log(`  [product-discovery] login link: ${observedLinkPath}`);
           }
+          return `[${pathArg} text]\n${text}\n\n[ARIA tree]\n${aria}`;
         } catch (e) {
-          result = `fetch failed: ${String(e)}`;
+          return `fetch failed: ${String(e)}`;
         }
-
-      } else if (toolUse.name === "fetch_url") {
-        const { url } = toolUse.input as { url?: string };
-        if (!url) { result = "fetch_url: missing url"; toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: result }); continue; }
+      }
+      if (t.name === "fetch_url") {
+        const url = input.url as string | undefined;
+        if (!url) return "fetch_url: missing url";
         try {
           const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
           const text = await res.text();
-          result = text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 2000);
           console.log(`  [product-discovery] fetched: ${url}`);
+          return text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 2000);
         } catch (e) {
-          result = `fetch failed: ${String(e)}`;
+          return `fetch failed: ${String(e)}`;
         }
-
-      } else if (toolUse.name === "output_spec") {
-        const input = toolUse.input as ProductSpec;
+      }
+      if (t.name === "output_spec") {
         const fromLlm = typeof input.loginPath === "string"
-          ? normalizeLoginPath(input.loginPath, baseUrl)
+          ? normalizeLoginPath(input.loginPath as string, baseUrl)
           : undefined;
         const loginPath = observedFormPath
           ?? (fromLlm && fromLlm !== "/" ? fromLlm : undefined)
           ?? observedLinkPath;
-        const thresholdCandidates = normalizeThresholdCandidates(
-          (input as { thresholdCandidates?: unknown }).thresholdCandidates,
-        );
+        const thresholdCandidates = normalizeThresholdCandidates(input.thresholdCandidates);
         spec = {
           appName: String(input.appName),
           appDescription: String(input.appDescription),
@@ -467,23 +442,29 @@ Guidelines for output_spec:
           designContext: String(input.designContext ?? ""),
           uiFeatures: String(input.uiFeatures ?? ""),
           appGoals: Array.isArray(input.appGoals) ? input.appGoals.map(String) : [],
-          confidence: input.confidence,
+          confidence: input.confidence as ProductSpec["confidence"],
           sources: Array.isArray(input.sources) ? input.sources.map(String) : [],
           thresholdCandidates,
           ...(loginPath ? { loginPath } : {}),
         };
-        result = "product spec finalized";
         console.log(`  [product-discovery] spec confirmed (confidence: ${spec.confidence})`);
-
-      } else {
-        result = "unknown tool";
+        return "product spec finalized";
       }
+      return "unknown tool";
+    },
+  }));
 
-      toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: result });
-    }
-
-    messages.push({ role: "user", content: toolResults });
-  }
+  await runToolSession({
+    provider: process.env.LLM_PROVIDER ?? "anthropic",
+    client,
+    model,
+    system: systemPrompt,
+    userPrompt: initialContent,
+    tools: sessionTools,
+    maxIterations: 8,
+    maxTokens: 2048,
+    shouldStop: ({ toolUses }) => toolUses.some((tu) => tu.name === "output_spec"),
+  });
 
   if (!spec) {
     console.log("  [product-discovery] spec not confirmed, using fallback");

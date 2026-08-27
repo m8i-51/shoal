@@ -49,7 +49,7 @@ describe("formatCostUSD", () => {
 });
 
 describe("estimateCost — free providers", () => {
-  it.each(["ollama", "lm-studio", "codex", "local"])("%s は null を返す", async (provider) => {
+  it.each(["ollama", "lm-studio", "codex", "claude-cli", "local"])("%s は null を返す", async (provider) => {
     expect(await estimateCost("any-model", provider, 1000, 500)).toBeNull();
   });
 });
