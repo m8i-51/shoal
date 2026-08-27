@@ -80,7 +80,7 @@ function toMcpContent(result: string | Anthropic.ToolResultBlockParam["content"]
   const out: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> = [];
   for (const block of result) {
     if (!block || typeof block !== "object") continue;
-    const b = block as Record<string, unknown>;
+    const b = block as unknown as Record<string, unknown>;
     if (b.type === "text" && typeof b.text === "string") {
       out.push({ type: "text", text: b.text });
     } else if (b.type === "image") {

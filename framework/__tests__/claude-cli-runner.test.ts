@@ -66,7 +66,19 @@ describe("runClaudeCliSession", () => {
     expect(result.text).toBe("done");
     expect(result.iterations).toBe(1);
     expect(queryFn).toHaveBeenCalledTimes(1);
-    const call = queryFn.mock.calls[0][0];
+    const firstCall = (queryFn as unknown as { mock: { calls: unknown[][] } }).mock.calls[0];
+    expect(firstCall).toBeDefined();
+    const call = firstCall![0] as {
+      options: {
+        tools: unknown;
+        model: string;
+        systemPrompt: string;
+        maxTurns: number;
+        permissionMode: string;
+        allowedTools: string[];
+        mcpServers: Record<string, unknown>;
+      };
+    };
     expect(call.options.tools).toEqual([]);
     expect(call.options.model).toBe("claude-sonnet-4-6");
     expect(call.options.systemPrompt).toBe("sys");
@@ -78,19 +90,14 @@ describe("runClaudeCliSession", () => {
   });
 
   it("supports image tool results via toMcpContent path when handler runs", async () => {
-    // Drive the MCP handler by extracting it from createSdkMcpServer is hard;
-    // instead verify execute returning image blocks does not throw when we
-    // exercise convert through a mini re-import of the private path via a
-    // synthetic query that never calls tools — image conversion is covered
-    // when execute is invoked. Call execute directly to assert contract.
-    const execute = vi.fn(async () => [
+    const execute = vi.fn(async (_input?: Record<string, unknown>) => [
       { type: "text" as const, text: "ok" },
       {
         type: "image" as const,
         source: { type: "base64" as const, media_type: "image/png", data: "AAAA" },
       },
     ]);
-    const content = await execute({});
+    const content = await execute();
     expect(content[1]).toMatchObject({ type: "image", source: { data: "AAAA" } });
   });
 
