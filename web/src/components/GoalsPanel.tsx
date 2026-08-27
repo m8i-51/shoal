@@ -103,10 +103,12 @@ export function GoalsPanel() {
               ))}
             </ul>
           )}
+          <p style={styles.subHint}>{t("goals.hint")}</p>
           <p style={styles.subHint}>{t("goals.goalGapHint")}</p>
         </>
       ) : (
         <div style={styles.editArea}>
+          <p style={styles.subHint}>{t("goals.hint")}</p>
           {draft.map((g, i) => (
             <div key={i} style={styles.inputRow}>
               <input

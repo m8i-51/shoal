@@ -110,9 +110,9 @@
     "save": "Save",
     "cancel": "Cancel",
     "add": "+ Add goal",
-    "placeholder": "e.g. Users can complete onboarding without assistance",
-    "hint": "Goals inferred by product discovery. Edit to correct or add missing ones.",
-    "goalGapHint": "Agents will flag issues that prevent these goals as \"goal-gap\"."
+    "placeholder": "e.g. Users can complete the intended work without training",
+    "hint": "Write outcome success conditions only — not UI widgets (search, filters, badges belong in features). Edit UI-only drafts here in Hall.",
+    "goalGapHint": "Agents report \"goal-gap\" only when an outcome is blocked — not for missing UI controls."
   },
   "experience": {
     "title": "Experience Score",

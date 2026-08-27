@@ -259,14 +259,17 @@ const DISCOVERY_TOOLS: Anthropic.Tool[] = [
         appName: { type: "string", description: "App name" },
         appDescription: { type: "string", description: "What the app does, who it's for, and its main value (2-3 sentences)" },
         targetUsers: { type: "string", description: "Target users: roles, technical level, usage scenarios" },
-        features: { type: "string", description: "Implemented features, listed per screen as bullet points" },
+        features: {
+          type: "string",
+          description: "What the product does — capabilities and workflows, listed per screen as bullet points. Owns feature inventory (search, filters, sort, badges, forms, etc.). Do NOT put success criteria here; that belongs in appGoals.",
+        },
         designContext: {
           type: "string",
           description: "Detected UI framework, visual style, and applicable design standards. Include: (1) UI framework/library if detectable (Tailwind CSS, Material UI, Bootstrap, etc.), (2) visual style (minimalist, corporate, playful, dense, etc.), (3) design conventions relevant to this app type (e.g. enterprise UX patterns, consumer mobile conventions, dashboard best practices). Example: 'Tailwind CSS, minimalist corporate style — enterprise conventions: clear status indicators, inline validation, progressive disclosure for complex forms'",
         },
         uiFeatures: {
           type: "string",
-          description: "UI-only interactions and features that are NOT visible from API responses alone — things only discoverable by looking at the actual screen. List per screen. Examples: client-side filters, view mode toggles (card/compact), warning modals, inline validation messages, hover states, keyboard shortcuts, drag-and-drop, collapsible panels, tabs that switch without navigation, tooltips, empty-state messages, loading skeletons. Format: 'Screen: feature 1 · feature 2 · feature 3'",
+          description: "UI-only interactions and widgets that are NOT visible from API responses alone — search boxes, filters, sort controls, badges on cards, view toggles, modals, validation messages, empty states, etc. List per screen. Format: 'Screen: feature 1 · feature 2 · feature 3'. These belong here (and in features), NEVER in appGoals.",
         },
         loginPath: {
           type: "string",
@@ -275,12 +278,12 @@ const DISCOVERY_TOOLS: Anthropic.Tool[] = [
         appGoals: {
           type: "array",
           items: { type: "string" },
-          description: "3–6 concrete, measurable goals this app is designed to achieve — from the perspective of its users and the business. Each goal should be a complete sentence describing a success condition. Examples: 'New employees can submit a purchase request without any training', 'Approvers can review and act on a request within 60 seconds', 'Managers can see the status of all open requests at a glance'. Infer from the app's purpose, target users, and key workflows.",
+          description: "3–6 user/business SUCCESS CONDITIONS (outcomes), not a UI checklist. Each goal is a complete sentence about what a person can achieve — never name widgets or controls. Good: 'New employees can complete the intended purchase request without training', 'Approvers can decide on a request within a minute'. Bad (do NOT write): 'Users can search, filter, and sort requests', 'Cards show status badges', 'There is a filter dropdown'. Put search/filter/sort/badges in features or uiFeatures instead.",
         },
         confidence: {
           type: "string",
           enum: ["high", "medium", "low"],
-          description: "Inference confidence: high if README/docs obtained, low if UI observation only",
+          description: "Inference confidence: high if README/docs ground purpose and goals; medium if mixed sources; low if UI observation only (appGoals are draft for human edit in Hall)",
         },
         sources: {
           type: "array",
@@ -311,15 +314,20 @@ Steps:
 3. If a README or About page is available, fetch it with fetch_url
 4. Once you have enough information, call output_spec (finish within 6 observations)
 
+Field roles (keep these separate — do not duplicate content across them):
+- features / uiFeatures: WHAT the product has (capabilities, screens, widgets, controls)
+- appGoals: WHETHER users/business succeed (outcome success conditions only)
+
 Guidelines for output_spec:
 - appDescription: 2-3 sentences covering who uses it, why, and the main value
 - targetUsers: roles, technical level, and usage scenarios (be specific)
-- features: list per screen as "Screen name: feature 1 · feature 2 · feature 3"
+- features: list per screen as "Screen name: feature 1 · feature 2 · feature 3" (include search, filters, sort, badges here if present)
 - designContext: note the UI framework (look for class names like "tw-", "MuiButton", "btn btn-"), visual style, and what design conventions apply for this app type
-- uiFeatures: list UI-only features per screen that are invisible from API responses (filters, toggles, modals, validation messages, empty states, etc.)
+- uiFeatures: list UI-only widgets/interactions per screen (filters, sort, badges, toggles, modals, validation, empty states, etc.) — never copy these into appGoals
 - loginPath: if you saw a login / sign-in form or a link to one, record that path (e.g. /login)
-- confidence: high if README/official docs obtained, low if UI observation only
-- appGoals: 3–6 concrete goals this app is designed to achieve (user + business perspective)`;
+- confidence: high if README/official docs obtained, medium if mixed, low if UI observation only
+- appGoals: 3–6 outcome sentences from user + business perspective. Write results ("can complete X without training"), never widget names ("using search and filter"). Agents use these as goal-gap criteria, so UI checklists create false visual-regression findings.
+- When evidence is UI observation only: set confidence to low; write at most 2–3 high-level outcome drafts (no control names); treat them as Hall-editable drafts, not verified product goals`
 
   const docs = await gatherDocumentation(projectPath);
   const initialContent = docs

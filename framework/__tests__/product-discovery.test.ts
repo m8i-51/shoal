@@ -213,6 +213,30 @@ describe("discoverProduct", () => {
     expect(content).not.toContain("[Available Documentation]");
   });
 
+  it("system / output_spec は appGoals を成果条件に限定し features と役割分離する", async () => {
+    vi.mocked(createMessageWithRetry).mockResolvedValue(toolUseResponse("output_spec", makeOutputSpecInput()) as never);
+    await discoverProduct("https://example.com", makeFakePage(), {} as LLMClient, "m");
+    const [, params] = vi.mocked(createMessageWithRetry).mock.calls[0];
+    const system = params.system as string;
+    expect(system).toContain("Field roles");
+    expect(system).toContain("appGoals: WHETHER users/business succeed");
+    expect(system).toContain("never widget names");
+    expect(system).toContain("UI observation only");
+    expect(system).toContain("Hall-editable drafts");
+
+    const outputSpec = (params.tools as { name: string; input_schema: { properties: Record<string, { description?: string }> } }[])
+      .find((t) => t.name === "output_spec");
+    expect(outputSpec).toBeDefined();
+    const goalsDesc = outputSpec!.input_schema.properties.appGoals.description ?? "";
+    const featuresDesc = outputSpec!.input_schema.properties.features.description ?? "";
+    const uiDesc = outputSpec!.input_schema.properties.uiFeatures.description ?? "";
+    expect(goalsDesc).toContain("SUCCESS CONDITIONS");
+    expect(goalsDesc).toMatch(/Bad \(do NOT write\)/i);
+    expect(goalsDesc).toContain("search");
+    expect(featuresDesc).toContain("Do NOT put success criteria");
+    expect(uiDesc).toMatch(/NEVER in appGoals/i);
+  });
+
   it("spec.uiFeatures がある場合は UI_FEATURES.md も保存する", async () => {
     vi.mocked(createMessageWithRetry).mockResolvedValue(
       toolUseResponse("output_spec", makeOutputSpecInput({ uiFeatures: "drag and drop" })) as never
