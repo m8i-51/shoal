@@ -13,7 +13,7 @@ import {
   saveSnapshotBeforeAction,
   getDiffFromSnapshot,
 } from "./observation";
-import { resolveLoginPath, type ProductSpec } from "./product-discovery";
+import { resolveLoginPath, isLoginPath, type ProductSpec } from "./product-discovery";
 import type { Credentials } from "../targets/types";
 import Anthropic from "@anthropic-ai/sdk";
 
@@ -255,6 +255,47 @@ export function describeAuthPlan(agentName: string, plan: BrowserAuthPlan): stri
   }
 }
 
+function pageIdentity(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const pathname = parsed.pathname.replace(/\/+$/, "") || "/";
+    return `${parsed.origin}${pathname}`;
+  } catch {
+    return url.replace(/\/+$/, "") || "/";
+  }
+}
+
+function urlPathname(url: string): string {
+  try {
+    return new URL(url).pathname || "/";
+  } catch {
+    return "/";
+  }
+}
+
+/** True when the page looks logged in — left the login URL, or the login form is gone. */
+export function loginLooksEstablished(input: {
+  currentUrl: string;
+  submittedFromUrl: string;
+  passwordFieldVisible: boolean;
+}): boolean {
+  const samePage = pageIdentity(input.currentUrl) === pageIdentity(input.submittedFromUrl);
+  const currentIsLogin = isLoginPath(urlPathname(input.currentUrl));
+
+  if (input.passwordFieldVisible && (samePage || currentIsLogin)) return false;
+  if (!samePage && !currentIsLogin) return true;
+  return !input.passwordFieldVisible;
+}
+
+/** Playwright storageState is only useful if it actually captured cookies or localStorage. */
+export function storageStateHasSession(state: {
+  cookies?: Array<unknown>;
+  origins?: Array<{ localStorage?: Array<unknown> }>;
+}): boolean {
+  if ((state.cookies?.length ?? 0) > 0) return true;
+  return (state.origins ?? []).some((origin) => (origin.localStorage?.length ?? 0) > 0);
+}
+
 function skipReason(file: AccountsFileInspection): string {
   switch (file.state) {
     case "missing":
@@ -381,6 +422,27 @@ async function fillLoginForm(page: Page, credentials: Credentials): Promise<bool
   return false;
 }
 
+async function passwordFieldVisible(page: Page): Promise<boolean> {
+  return page.locator('input[type="password"]').first().isVisible({ timeout: 500 }).catch(() => false);
+}
+
+async function snapshotLooksLoggedIn(page: Page, submittedFromUrl: string): Promise<boolean> {
+  const currentUrl = typeof page.url === "function" ? page.url() : "";
+  return loginLooksEstablished({
+    currentUrl,
+    submittedFromUrl,
+    passwordFieldVisible: await passwordFieldVisible(page),
+  });
+}
+
+async function waitForLoginEstablished(page: Page, submittedFromUrl: string): Promise<boolean> {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    if (await snapshotLooksLoggedIn(page, submittedFromUrl)) return true;
+    await page.waitForTimeout(250);
+  }
+  return false;
+}
+
 async function performLogin(
   page: Page,
   urls: string[],
@@ -390,12 +452,55 @@ async function performLogin(
     try {
       await page.goto(url, { waitUntil: "networkidle" });
       await page.waitForTimeout(1000);
-      if (await fillLoginForm(page, credentials)) return true;
+      if (!await fillLoginForm(page, credentials)) continue;
+      if (await waitForLoginEstablished(page, url)) return true;
     } catch {
       // try the next candidate
     }
   }
   return false;
+}
+
+function sessionStatePath(role: string): string {
+  const stateDir = path.join(ACCOUNTS_DIR, "states");
+  fs.mkdirSync(stateDir, { recursive: true });
+  return path.join(stateDir, `${role.replace(/[^a-zA-Z0-9]/g, "_")}.json`);
+}
+
+async function saveContextSession(context: BrowserContext, role: string): Promise<string> {
+  const statePath = sessionStatePath(role);
+  try {
+    const state = await context.storageState({ path: statePath });
+    if (!storageStateHasSession(state)) return "";
+    return statePath;
+  } catch {
+    return "";
+  }
+}
+
+async function captureAccountSession(
+  loginUrls: string[],
+  parentContext: BrowserContext,
+  account: { email: string; password: string; role: string },
+): Promise<string> {
+  const browser = typeof parentContext.browser === "function" ? parentContext.browser() : null;
+  if (!browser || typeof browser.newContext !== "function") return "";
+
+  const isolated = await browser.newContext({ viewport: { width: 1024, height: 640 } });
+  try {
+    const page = await isolated.newPage();
+    try {
+      const ok = await performLogin(page, loginUrls, account);
+      if (!ok) return "";
+      return await saveContextSession(isolated, account.role);
+    } finally {
+      await page.close().catch(() => undefined);
+    }
+  } catch {
+    return "";
+  } finally {
+    await isolated.close().catch(() => undefined);
+  }
 }
 
 // ================================================================
@@ -511,9 +616,17 @@ export async function runAccountManager(
   if (!loggedIn) {
     console.warn("[account-manager] seed login failed — skipping role discovery, still trying known accounts");
     await page.close();
-    return persistKnownAccounts(loginUrls, context, collectAccountsToPersist(credentials, existingAccounts, []));
+    return persistKnownAccounts(
+      loginUrls,
+      context,
+      collectAccountsToPersist(credentials, existingAccounts, []),
+      { [credentials.email]: "" },
+    );
   }
   console.log("[account-manager] login succeeded");
+
+  const seedRole = existingAccounts.find((a) => a.email === credentials.email)?.role || "user";
+  const seedStatePath = await saveContextSession(context, seedRole);
 
   const initialScreenshot = await takeScreenshot(page, "initial");
   const savedAccounts: Omit<TestAccount, "storageStatePath">[] = [];
@@ -693,6 +806,7 @@ If user management is not accessible from this account, or the app has no role s
     loginUrls,
     context,
     collectAccountsToPersist(credentials, existingAccounts, savedAccounts),
+    { [credentials.email]: seedStatePath },
   );
 }
 
@@ -700,28 +814,20 @@ async function persistKnownAccounts(
   loginUrls: string[],
   context: BrowserContext,
   accounts: Array<{ email: string; password: string; role: string }>,
+  alreadySaved: Record<string, string> = {},
 ): Promise<TestAccount[]> {
   const testAccounts: TestAccount[] = [];
   for (const account of accounts) {
-    const stateDir = path.join(ACCOUNTS_DIR, "states");
-    fs.mkdirSync(stateDir, { recursive: true });
-    const statePath = path.join(stateDir, `${account.role.replace(/[^a-zA-Z0-9]/g, "_")}.json`);
-
     console.log(`  [account-manager] saving session for ${account.email} (role: ${account.role})`);
-    if (typeof context.clearCookies === "function") {
-      await context.clearCookies().catch(() => undefined);
-    }
-    const loginPage = await context.newPage();
-    const ok = await performLogin(loginPage, loginUrls, account);
-    if (ok) {
-      await context.storageState({ path: statePath });
+    const statePath = Object.prototype.hasOwnProperty.call(alreadySaved, account.email)
+      ? alreadySaved[account.email]
+      : await captureAccountSession(loginUrls, context, account);
+    if (statePath) {
       console.log(`    saved: ${statePath}`);
     } else {
       console.warn(`    login failed for ${account.email} — storageState not saved; credentials kept for browser-agent handoff`);
     }
-    await loginPage.close();
-
-    testAccounts.push({ ...account, storageStatePath: ok ? statePath : "" });
+    testAccounts.push({ ...account, storageStatePath: statePath });
   }
 
   saveTestAccounts(testAccounts);
