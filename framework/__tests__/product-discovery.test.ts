@@ -68,7 +68,16 @@ describe("loadCachedSpec", () => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
     const spec = makeOutputSpecInput();
     vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(spec) as unknown as ReturnType<typeof fs.readFileSync>);
-    expect(loadCachedSpec("https://example.com")).toEqual(spec);
+    expect(loadCachedSpec("https://example.com")).toEqual({ ...spec, thresholdCandidates: [] });
+  });
+
+  it("キャッシュの不正 thresholdCandidates は空配列に正規化する", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    const spec = makeOutputSpecInput({
+      thresholdCandidates: [{ id: "x", kind: "bad" }] as never,
+    });
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(spec) as unknown as ReturnType<typeof fs.readFileSync>);
+    expect(loadCachedSpec("https://example.com")?.thresholdCandidates).toEqual([]);
   });
 
   it("壊れた JSON の場合は null を返す", () => {
@@ -85,7 +94,30 @@ describe("discoverProduct", () => {
     const result = await discoverProduct("https://example.com", makeFakePage(), {} as LLMClient, "m");
     expect(result.appName).toBe("Discovered");
     expect(result.discoveredAt).toBeDefined();
+    expect(result.thresholdCandidates).toEqual([]);
     expect(fs.writeFileSync).toHaveBeenCalled();
+  });
+
+  it("thresholdCandidates を normalize して保存する", async () => {
+    vi.mocked(createMessageWithRetry)
+      .mockResolvedValueOnce(toolUseResponse("output_spec", makeOutputSpecInput({
+        thresholdCandidates: [
+          { id: "ok", kind: "business", area: "/billing", signal: "seat cap", howToProbe: "add seats", priority: 1 },
+          { id: "bad", kind: "nope", area: "/x", signal: "s", howToProbe: "h", priority: 1 },
+        ],
+      })) as never);
+    const result = await discoverProduct("https://example.com", makeFakePage(), {} as LLMClient, "m");
+    expect(result.thresholdCandidates).toHaveLength(1);
+    expect(result.thresholdCandidates![0].id).toBe("ok");
+  });
+
+  it("thresholdCandidates 欠落・不正は空配列として扱う", async () => {
+    vi.mocked(createMessageWithRetry)
+      .mockResolvedValueOnce(toolUseResponse("output_spec", makeOutputSpecInput({
+        thresholdCandidates: "not-an-array" as unknown as [],
+      })) as never);
+    const result = await discoverProduct("https://example.com", makeFakePage(), {} as LLMClient, "m");
+    expect(result.thresholdCandidates).toEqual([]);
   });
 
   it("output_spec が一度も呼ばれない場合はフォールバック spec を使う（8イテレーション後）", async () => {
