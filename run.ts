@@ -235,7 +235,7 @@ const EXPLORER_TOOLS: Tool[] = [...APP_TOOLS, POST_FEEDBACK_TOOL, POST_OUTCOME_T
 
 function goalsSection(spec: ProductSpec): string {
   if (!spec.appGoals?.length) return "";
-  return `\n[App Goals]\nThis app is designed to achieve the following goals. If you find anything that prevents these goals from being met, use category "goal-gap" when posting feedback.\n${spec.appGoals.map((g) => `- ${g}`).join("\n")}\n`;
+  return `\n[App Goals]\nThese are user/business success conditions (outcomes), not a UI widget checklist. Use category "goal-gap" only when an outcome is blocked. Do not treat missing or mismatched controls (search, filters, sort, badges, etc.) as goal-gap — file those as bug / ux / feature-request instead.\n${spec.appGoals.map((g) => `- ${g}`).join("\n")}\n`;
 }
 const REGRESSION_TOOLS: Tool[] = [...APP_TOOLS, REPORT_REGRESSION_TOOL, MARK_VERIFIED_TOOL];
 
