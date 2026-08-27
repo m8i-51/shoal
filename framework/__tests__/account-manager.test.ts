@@ -7,7 +7,7 @@ vi.mock("../findings", () => ({ saveFinding: vi.fn() }));
 import * as fs from "fs";
 import { createMessageWithRetry } from "../agent-loop";
 import { saveFinding } from "../findings";
-import { loadTestAccounts, inspectAccountsFile, resolveAccountSetup, runAccountManager, loginCandidateUrls, resolveLoginUrl, planBrowserAuth, authPrompt, describeAuthPlan, type TestAccount } from "../account-manager";
+import { loadTestAccounts, inspectAccountsFile, resolveAccountSetup, runAccountManager, loginCandidateUrls, resolveLoginUrl, planBrowserAuth, authPrompt, describeAuthPlan, loginLooksEstablished, storageStateHasSession, type TestAccount } from "../account-manager";
 import type { ProductSpec } from "../product-discovery";
 import type { LLMClient } from "../llm-client";
 import type { Page, BrowserContext } from "playwright";
@@ -24,9 +24,16 @@ function makeFakeLocator(overrides: Record<string, unknown> = {}) {
   return locator;
 }
 
+const SAVED_SESSION_STATE = {
+  cookies: [{ name: "session", value: "abc" }],
+  origins: [{ origin: "https://example.com", localStorage: [{ name: "token", value: "t" }] }],
+};
+
 function makeFakePage(overrides: Record<string, unknown> = {}): Page {
+  let currentUrl = "";
   return {
-    goto: vi.fn().mockResolvedValue(undefined),
+    goto: vi.fn(async (url: string) => { currentUrl = url; }),
+    url: vi.fn(() => currentUrl),
     waitForTimeout: vi.fn().mockResolvedValue(undefined),
     locator: vi.fn(() => makeFakeLocator()),
     getByRole: vi.fn(() => makeFakeLocator()),
@@ -42,21 +49,75 @@ function makeFakePage(overrides: Record<string, unknown> = {}): Page {
   } as unknown as Page;
 }
 
-function makeLoggedInPage(overrides: Record<string, unknown> = {}): Page {
-  const emailLocator = makeFakeLocator({ isVisible: vi.fn().mockResolvedValue(true) });
-  const passLocator = makeFakeLocator({ isVisible: vi.fn().mockResolvedValue(true) });
-  const submitLocator = makeFakeLocator({ isVisible: vi.fn().mockResolvedValue(true) });
+/** Login form that can stay put, hide in-place (SPA), or navigate away after submit. */
+function makeSessionPage(opts: {
+  formVisibleOn?: (url: string) => boolean;
+  afterSubmit?: "leave-login" | "spa-hide-form" | "stay-on-form";
+  overrides?: Record<string, unknown>;
+} = {}): Page {
+  let currentUrl = "";
+  let formVisible = false;
+  let sessionHeld = false;
+  const formVisibleOn = opts.formVisibleOn ?? ((url: string) => url.length > 0);
+  const afterSubmit = opts.afterSubmit ?? "leave-login";
+
+  const showFormIfOnLogin = () => {
+    // SPA / localStorage auth: the form does not come back after a session is held.
+    if (sessionHeld) {
+      formVisible = false;
+      return;
+    }
+    formVisible = formVisibleOn(currentUrl);
+  };
+
+  const emailLocator = makeFakeLocator({ isVisible: vi.fn(async () => formVisible) });
+  const passLocator = makeFakeLocator({ isVisible: vi.fn(async () => formVisible) });
+  const submitLocator = makeFakeLocator({
+    isVisible: vi.fn(async () => formVisible),
+    click: vi.fn(async () => {
+      if (afterSubmit === "leave-login") {
+        try {
+          currentUrl = new URL("/", currentUrl).toString();
+        } catch {
+          currentUrl = "https://example.com/";
+        }
+        formVisible = false;
+        sessionHeld = true;
+      } else if (afterSubmit === "spa-hide-form") {
+        formVisible = false;
+        sessionHeld = true;
+      }
+    }),
+  });
+
   return makeFakePage({
-    locator: vi.fn((sel: string) => sel.includes("password") ? passLocator : sel.includes("submit") ? submitLocator : emailLocator),
-    ...overrides,
+    goto: vi.fn(async (url: string) => {
+      currentUrl = url;
+      showFormIfOnLogin();
+    }),
+    url: vi.fn(() => currentUrl),
+    locator: vi.fn((sel: string) => {
+      if (sel.includes("password")) return passLocator;
+      if (sel.includes("submit") || sel.includes("Login") || sel.includes("Sign in") || sel.includes("ログイン") || sel.includes("サインイン")) {
+        return submitLocator;
+      }
+      return emailLocator;
+    }),
+    ...opts.overrides,
   });
 }
 
-function makeFakeContext(page: Page): BrowserContext {
+function makeLoggedInPage(overrides: Record<string, unknown> = {}): Page {
+  return makeSessionPage({ afterSubmit: "leave-login", overrides });
+}
+
+function makeFakeContext(page: Page, extras: Record<string, unknown> = {}): BrowserContext {
   return {
     newPage: vi.fn().mockResolvedValue(page),
-    storageState: vi.fn().mockResolvedValue({}),
+    storageState: vi.fn().mockResolvedValue(SAVED_SESSION_STATE),
     clearCookies: vi.fn().mockResolvedValue(undefined),
+    browser: vi.fn().mockReturnValue(null),
+    ...extras,
   } as unknown as BrowserContext;
 }
 
@@ -226,16 +287,7 @@ describe("runAccountManager", () => {
   });
 
   it("ログイン成功後 done が即座に呼ばれた場合はシードアカウントのセッションを返す", async () => {
-    const emailLocator = makeFakeLocator({ isVisible: vi.fn().mockResolvedValue(true) });
-    const passLocator = makeFakeLocator({ isVisible: vi.fn().mockResolvedValue(true) });
-    const submitLocator = makeFakeLocator({ isVisible: vi.fn().mockResolvedValue(true) });
-    const page = makeFakePage({
-      locator: vi.fn((sel: string) => {
-        if (sel.includes("password")) return passLocator;
-        if (sel.includes("submit") || sel.includes("Login") || sel.includes("Sign in")) return submitLocator;
-        return emailLocator;
-      }),
-    });
+    const page = makeLoggedInPage();
     const context = makeFakeContext(page);
     vi.mocked(createMessageWithRetry).mockResolvedValueOnce(toolUseResponse("done", {}) as never);
 
@@ -247,12 +299,7 @@ describe("runAccountManager", () => {
   });
 
   it("end_turn（tool_use なし）でもループを終了する", async () => {
-    const emailLocator = makeFakeLocator({ isVisible: vi.fn().mockResolvedValue(true) });
-    const passLocator = makeFakeLocator({ isVisible: vi.fn().mockResolvedValue(true) });
-    const submitLocator = makeFakeLocator({ isVisible: vi.fn().mockResolvedValue(true) });
-    const page = makeFakePage({
-      locator: vi.fn((sel: string) => sel.includes("password") ? passLocator : sel.includes("submit") ? submitLocator : emailLocator),
-    });
+    const page = makeLoggedInPage();
     const context = makeFakeContext(page);
     vi.mocked(createMessageWithRetry).mockResolvedValueOnce(endTurn() as never);
 
@@ -261,25 +308,16 @@ describe("runAccountManager", () => {
     expect(result[0].email).toBe("seed@example.com");
   });
 
-  it("save_account で保存したアカウントは done 後にログイン・storageState 保存される", async () => {
-    const emailLocator = makeFakeLocator({ isVisible: vi.fn().mockResolvedValue(true) });
-    const passLocator = makeFakeLocator({ isVisible: vi.fn().mockResolvedValue(true) });
-    const submitLocator = makeFakeLocator({ isVisible: vi.fn().mockResolvedValue(true) });
-    const seedPage = makeFakePage({
-      locator: vi.fn((sel: string) => sel.includes("password") ? passLocator : sel.includes("submit") ? submitLocator : emailLocator),
-    });
-    const newAccountPage = makeFakePage({
-      locator: vi.fn((sel: string) => sel.includes("password") ? passLocator : sel.includes("submit") ? submitLocator : emailLocator),
-    });
-    let pageCallCount = 0;
-    const context = {
-      newPage: vi.fn().mockImplementation(() => {
-        pageCallCount++;
-        return Promise.resolve(pageCallCount === 1 ? seedPage : newAccountPage);
-      }),
-      storageState: vi.fn().mockResolvedValue({}),
-      clearCookies: vi.fn().mockResolvedValue(undefined),
-    } as unknown as BrowserContext;
+  it("save_account で保存したアカウントは done 後に isolated context で storageState 保存される", async () => {
+    const seedPage = makeLoggedInPage();
+    const extraPage = makeSessionPage({ afterSubmit: "leave-login" });
+    const isolatedContext = {
+      newPage: vi.fn().mockResolvedValue(extraPage),
+      storageState: vi.fn().mockResolvedValue(SAVED_SESSION_STATE),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    const browser = { newContext: vi.fn().mockResolvedValue(isolatedContext) };
+    const context = makeFakeContext(seedPage, { browser: vi.fn().mockReturnValue(browser) });
 
     vi.mocked(createMessageWithRetry)
       .mockResolvedValueOnce(toolUseResponse("save_account", { email: "test-admin@example.com", password: "pw123", role: "admin" }) as never)
@@ -290,17 +328,14 @@ describe("runAccountManager", () => {
     expect(result.map((a) => a.email)).toEqual(["seed@example.com", "test-admin@example.com"]);
     expect(result[1]).toMatchObject({ email: "test-admin@example.com", role: "admin" });
     expect(result[1].storageStatePath).not.toBe("");
-    expect(context.storageState).toHaveBeenCalled();
+    expect(context.clearCookies).not.toHaveBeenCalled();
+    expect(browser.newContext).toHaveBeenCalled();
+    expect(isolatedContext.storageState).toHaveBeenCalled();
     expect(fs.writeFileSync).toHaveBeenCalled();
   });
 
   it("save_account で必須フィールドが欠けている場合は保存しない", async () => {
-    const emailLocator = makeFakeLocator({ isVisible: vi.fn().mockResolvedValue(true) });
-    const passLocator = makeFakeLocator({ isVisible: vi.fn().mockResolvedValue(true) });
-    const submitLocator = makeFakeLocator({ isVisible: vi.fn().mockResolvedValue(true) });
-    const page = makeFakePage({
-      locator: vi.fn((sel: string) => sel.includes("password") ? passLocator : sel.includes("submit") ? submitLocator : emailLocator),
-    });
+    const page = makeLoggedInPage();
     const context = makeFakeContext(page);
 
     vi.mocked(createMessageWithRetry)
@@ -313,12 +348,7 @@ describe("runAccountManager", () => {
   });
 
   it("post_finding で saveFinding が呼ばれる", async () => {
-    const emailLocator = makeFakeLocator({ isVisible: vi.fn().mockResolvedValue(true) });
-    const passLocator = makeFakeLocator({ isVisible: vi.fn().mockResolvedValue(true) });
-    const submitLocator = makeFakeLocator({ isVisible: vi.fn().mockResolvedValue(true) });
-    const page = makeFakePage({
-      locator: vi.fn((sel: string) => sel.includes("password") ? passLocator : sel.includes("submit") ? submitLocator : emailLocator),
-    });
+    const page = makeLoggedInPage();
     const context = makeFakeContext(page);
 
     vi.mocked(createMessageWithRetry)
@@ -330,12 +360,7 @@ describe("runAccountManager", () => {
   });
 
   it("12 イテレーションに達するとループを終了する", async () => {
-    const emailLocator = makeFakeLocator({ isVisible: vi.fn().mockResolvedValue(true) });
-    const passLocator = makeFakeLocator({ isVisible: vi.fn().mockResolvedValue(true) });
-    const submitLocator = makeFakeLocator({ isVisible: vi.fn().mockResolvedValue(true) });
-    const page = makeFakePage({
-      locator: vi.fn((sel: string) => sel.includes("password") ? passLocator : sel.includes("submit") ? submitLocator : emailLocator),
-    });
+    const page = makeLoggedInPage();
     const context = makeFakeContext(page);
     vi.mocked(createMessageWithRetry).mockResolvedValue(toolUseResponse("view_screen", {}) as never);
 
@@ -363,8 +388,8 @@ describe("runAccountManager", () => {
       .mockResolvedValueOnce(toolUseResponse("done", {}) as never);
 
     await runAccountManager("https://example.com", credentials, makeSpec(), context, {} as LLMClient, "m", "run_1");
-    // ログイン時 + セッション保存時の goto 以外で呼ばれていないことを確認
-    expect(vi.mocked(page.goto).mock.calls).toHaveLength(2);
+    // ログイン時の goto 以外で呼ばれていないことを確認（セッションは同じ context から保存し、再ログインしない）
+    expect(vi.mocked(page.goto).mock.calls).toHaveLength(1);
   });
 
   it("click は getByRole(button) で見つかった要素をクリックする", async () => {
@@ -463,9 +488,16 @@ describe("runAccountManager", () => {
     expect(page.ariaSnapshot).toHaveBeenCalled();
   });
 
-  it("accounts.json の既存アカウントもセッション保存する（LLM が新規作成しなくても）", async () => {
+  it("accounts.json の既存アカウントも isolated context でセッション保存する（LLM が新規作成しなくても）", async () => {
     const page = makeLoggedInPage();
-    const context = makeFakeContext(page);
+    const extraPage = makeSessionPage({ afterSubmit: "leave-login" });
+    const isolatedContext = {
+      newPage: vi.fn().mockResolvedValue(extraPage),
+      storageState: vi.fn().mockResolvedValue(SAVED_SESSION_STATE),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    const browser = { newContext: vi.fn().mockResolvedValue(isolatedContext) };
+    const context = makeFakeContext(page, { browser: vi.fn().mockReturnValue(browser) });
     vi.mocked(createMessageWithRetry).mockResolvedValueOnce(toolUseResponse("done", {}) as never);
 
     const existing: TestAccount[] = [
@@ -484,7 +516,9 @@ describe("runAccountManager", () => {
     );
     expect(result.map((a) => a.email)).toEqual(["seed@example.com", "member@example.com"]);
     expect(result.every((a) => a.storageStatePath)).toBe(true);
-    expect(context.storageState).toHaveBeenCalledTimes(2);
+    expect(context.clearCookies).not.toHaveBeenCalled();
+    expect(context.storageState).toHaveBeenCalledTimes(1);
+    expect(browser.newContext).toHaveBeenCalledTimes(1);
   });
 
   it("spec.loginPath があれば BASE_URL より先にそこにログインする", async () => {
@@ -505,13 +539,9 @@ describe("runAccountManager", () => {
   });
 
   it("トップにフォームが無くても loginPath でログインできる", async () => {
-    let currentUrl = "";
-    const page = makeFakePage({
-      goto: vi.fn(async (url: string) => { currentUrl = url; }),
-      locator: vi.fn(() => {
-        const onLogin = currentUrl.includes("/signin");
-        return makeFakeLocator({ isVisible: vi.fn().mockResolvedValue(onLogin) });
-      }),
+    const page = makeSessionPage({
+      formVisibleOn: (url) => url.includes("/signin"),
+      afterSubmit: "leave-login",
     });
     const context = makeFakeContext(page);
     vi.mocked(createMessageWithRetry).mockResolvedValueOnce(toolUseResponse("done", {}) as never);
@@ -530,13 +560,9 @@ describe("runAccountManager", () => {
   });
 
   it("loginPath にフォームが無ければ BASE_URL を試す", async () => {
-    let currentUrl = "";
-    const page = makeFakePage({
-      goto: vi.fn(async (url: string) => { currentUrl = url; }),
-      locator: vi.fn(() => {
-        const onRoot = currentUrl === "https://example.com" || currentUrl === "https://example.com/";
-        return makeFakeLocator({ isVisible: vi.fn().mockResolvedValue(onRoot) });
-      }),
+    const page = makeSessionPage({
+      formVisibleOn: (url) => url === "https://example.com" || url === "https://example.com/",
+      afterSubmit: "leave-login",
     });
     const context = makeFakeContext(page);
     vi.mocked(createMessageWithRetry).mockResolvedValueOnce(toolUseResponse("done", {}) as never);
@@ -553,6 +579,83 @@ describe("runAccountManager", () => {
     expect(page.goto).toHaveBeenCalledWith("https://example.com/missing", expect.any(Object));
     expect(page.goto).toHaveBeenCalledWith("https://example.com", expect.any(Object));
     expect(result[0].storageStatePath).not.toBe("");
+  });
+
+  it("フォームを送信できてもログインページにフォームが残っていれば成功にしない", async () => {
+    const page = makeSessionPage({ afterSubmit: "stay-on-form" });
+    const context = makeFakeContext(page);
+    vi.mocked(createMessageWithRetry).mockResolvedValueOnce(endTurn() as never);
+    const result = await runAccountManager("https://example.com", credentials, makeSpec(), context, {} as LLMClient, "m", "run_1");
+    expect(result).toEqual([{ email: "seed@example.com", password: "pw", role: "user", storageStatePath: "" }]);
+    expect(createMessageWithRetry).not.toHaveBeenCalled();
+    expect(context.storageState).not.toHaveBeenCalled();
+  });
+
+  it("SPA で送信後にフォームが消えたら同じ URL でも seed セッションを同じ context から保存する", async () => {
+    const page = makeSessionPage({ afterSubmit: "spa-hide-form" });
+    const context = makeFakeContext(page);
+    vi.mocked(createMessageWithRetry).mockResolvedValueOnce(toolUseResponse("done", {}) as never);
+
+    const result = await runAccountManager("https://example.com", credentials, makeSpec(), context, {} as LLMClient, "m", "run_1");
+
+    expect(result[0].storageStatePath).not.toBe("");
+    expect(context.clearCookies).not.toHaveBeenCalled();
+    expect(context.newPage).toHaveBeenCalledTimes(1);
+    expect(context.storageState).toHaveBeenCalledTimes(1);
+    expect(createMessageWithRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it("seed ログイン成功後は cookie を消して取り直さず、storageState が空ならパスを残さない", async () => {
+    const page = makeSessionPage({ afterSubmit: "leave-login" });
+    const context = makeFakeContext(page, {
+      storageState: vi.fn().mockResolvedValue({ cookies: [], origins: [] }),
+    });
+    vi.mocked(createMessageWithRetry).mockResolvedValueOnce(toolUseResponse("done", {}) as never);
+
+    const result = await runAccountManager("https://example.com", credentials, makeSpec(), context, {} as LLMClient, "m", "run_1");
+    expect(context.clearCookies).not.toHaveBeenCalled();
+    expect(result[0].storageStatePath).toBe("");
+    expect(result[0].email).toBe("seed@example.com");
+  });
+
+  it("追加アカウントは seed context をログアウトせず isolated context でセッションを取る", async () => {
+    const seedPage = makeSessionPage({ afterSubmit: "spa-hide-form" });
+    const extraPage = makeSessionPage({ afterSubmit: "leave-login" });
+    const isolatedContext = {
+      newPage: vi.fn().mockResolvedValue(extraPage),
+      storageState: vi.fn().mockResolvedValue(SAVED_SESSION_STATE),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    const browser = { newContext: vi.fn().mockResolvedValue(isolatedContext) };
+    const context = makeFakeContext(seedPage, {
+      browser: vi.fn().mockReturnValue(browser),
+    });
+    vi.mocked(createMessageWithRetry)
+      .mockResolvedValueOnce(toolUseResponse("save_account", { email: "test-admin@example.com", password: "pw123", role: "admin" }) as never)
+      .mockResolvedValueOnce(toolUseResponse("done", {}) as never);
+
+    const result = await runAccountManager("https://example.com", credentials, makeSpec(), context, {} as LLMClient, "m", "run_1");
+
+    expect(context.clearCookies).not.toHaveBeenCalled();
+    expect(browser.newContext).toHaveBeenCalledTimes(1);
+    expect(isolatedContext.storageState).toHaveBeenCalled();
+    expect(isolatedContext.close).toHaveBeenCalled();
+    expect(context.storageState).toHaveBeenCalledTimes(1);
+    expect(result.map((a) => a.email)).toEqual(["seed@example.com", "test-admin@example.com"]);
+    expect(result.every((a) => a.storageStatePath)).toBe(true);
+  });
+
+  it("isolated context が無い追加アカウントは資格情報だけ残す", async () => {
+    const page = makeSessionPage({ afterSubmit: "leave-login" });
+    const context = makeFakeContext(page);
+    vi.mocked(createMessageWithRetry)
+      .mockResolvedValueOnce(toolUseResponse("save_account", { email: "test-admin@example.com", password: "pw123", role: "admin" }) as never)
+      .mockResolvedValueOnce(toolUseResponse("done", {}) as never);
+
+    const result = await runAccountManager("https://example.com", credentials, makeSpec(), context, {} as LLMClient, "m", "run_1");
+    expect(context.clearCookies).not.toHaveBeenCalled();
+    expect(result[0].storageStatePath).not.toBe("");
+    expect(result[1]).toMatchObject({ email: "test-admin@example.com", role: "admin", storageStatePath: "" });
   });
 });
 
@@ -658,5 +761,73 @@ describe("planBrowserAuth / authPrompt", () => {
     expect(prompt).toMatch(/Do NOT invent, guess/i);
     expect(prompt).not.toContain("Password:");
     expect(describeAuthPlan("Bea", plan)).toContain("guest");
+  });
+});
+
+describe("loginLooksEstablished", () => {
+  it("送信後もログイン URL にパスワード欄があれば失敗", () => {
+    expect(loginLooksEstablished({
+      currentUrl: "https://example.com/login",
+      submittedFromUrl: "https://example.com/login",
+      passwordFieldVisible: true,
+    })).toBe(false);
+  });
+
+  it("ログインページを抜けていれば成功", () => {
+    expect(loginLooksEstablished({
+      currentUrl: "https://example.com/dashboard",
+      submittedFromUrl: "https://example.com/login",
+      passwordFieldVisible: false,
+    })).toBe(true);
+  });
+
+  it("同じ URL でもパスワード欄が消えていれば成功（SPA）", () => {
+    expect(loginLooksEstablished({
+      currentUrl: "https://example.com/login",
+      submittedFromUrl: "https://example.com/login",
+      passwordFieldVisible: false,
+    })).toBe(true);
+  });
+
+  it("トップのフォームが残っていれば失敗", () => {
+    expect(loginLooksEstablished({
+      currentUrl: "https://example.com/",
+      submittedFromUrl: "https://example.com",
+      passwordFieldVisible: true,
+    })).toBe(false);
+  });
+
+  it("トップでフォームが消えていれば成功", () => {
+    expect(loginLooksEstablished({
+      currentUrl: "https://example.com/",
+      submittedFromUrl: "https://example.com",
+      passwordFieldVisible: false,
+    })).toBe(true);
+  });
+
+  it("遷移先がまだ login パスでフォームも残っていれば失敗", () => {
+    expect(loginLooksEstablished({
+      currentUrl: "https://example.com/login/success",
+      submittedFromUrl: "https://example.com/login",
+      passwordFieldVisible: true,
+    })).toBe(false);
+  });
+});
+
+describe("storageStateHasSession", () => {
+  it("cookie があれば true", () => {
+    expect(storageStateHasSession({ cookies: [{ name: "sid" }], origins: [] })).toBe(true);
+  });
+
+  it("localStorage があれば true", () => {
+    expect(storageStateHasSession({
+      cookies: [],
+      origins: [{ localStorage: [{ name: "token", value: "t" }] }],
+    })).toBe(true);
+  });
+
+  it("空なら false", () => {
+    expect(storageStateHasSession({ cookies: [], origins: [] })).toBe(false);
+    expect(storageStateHasSession({})).toBe(false);
   });
 });
