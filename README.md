@@ -34,14 +34,14 @@ Target App (any URL)
         ▼  creates and maintains the agent roster
   HR Agent
         │
-        ├──────────────────────────────────┐
-        ▼                                  ▼
-  API Agents  ×N                   Browser Agents  ×N
-  explore via API                  browse the real UI
-        │                                  │
-        └──────────────┬───────────────────┘
-                       ▼  deduplicates and files issue tickets
-                 Triage Agent
+        ├──────────────────────────────────┬──────────────────┐
+        ▼                                  ▼                  ▼
+  API Agents  ×N                   Browser Agents  ×N   Threshold Agents ×M
+  explore via API                  browse the real UI   probe boundaries
+        │                                  │                  │
+        └──────────────────┬───────────────┴──────────────────┘
+                           ▼  deduplicates and files issue tickets
+                     Triage Agent
 ```
 
 Each agent carries a distinct perspective — accessibility, security, business logic, UI design, new user experience, and more. They operate on a shared understanding of the app's purpose and goals. Coverage is tracked across runs, so each session naturally focuses on areas that haven't been explored yet.
@@ -200,6 +200,7 @@ shoal serve --env-file apps/shoal/.env
 | `BASE_URL` | `http://localhost:3000` | Target app URL |
 | `MAX_EXPLORERS` | `4` | API explorer agent count (0 to disable) |
 | `MAX_BROWSERS` | `2` | Browser agent count |
+| `MAX_THRESHOLDS` | `1` | Threshold agent count (0 to disable). Probes input/business/experience boundaries inferred by Product Discovery (browser-primary). Cached specs without `thresholdCandidates` need `REFRESH_SPEC=1` |
 | `ANTHROPIC_API_KEY` | — | Required |
 | `ISSUE_TRACKERS` | — | Comma-separated list of active trackers: `github`, `jira`, `notion`, `backlog`, `asana` |
 | `SHOAL_MODE` | `safe` | Safety mode: `read-only` \| `safe` \| `full` (see below) |

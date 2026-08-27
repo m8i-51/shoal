@@ -13,6 +13,20 @@ import { findCrossRunDuplicates } from "../framework/cross-run-dedup.js";
 import { computeExperienceScore } from "../framework/experience-score.js";
 import { isFinding, type Finding } from "../framework/types.js";
 import { buildSafeProxyUrl } from "./proxy-url.js";
+import {
+  addAgent,
+  archiveAgent,
+  listFixedPersonas,
+  restoreAgent,
+  updateAgent,
+  isFixedAgent,
+  loadAgents,
+} from "../framework/agent-store.js";
+import {
+  generatePersonaFromSeed,
+  PersonaGenerationError,
+} from "../framework/persona-from-seed.js";
+import type { ProductSpec } from "../framework/product-discovery.js";
 
 function specFilePath(baseUrl: string): string {
   try {
@@ -78,6 +92,115 @@ app.patch("/api/spec/goals", (req, res) => {
   } catch {
     res.status(500).json({ error: "failed to update spec" });
   }
+});
+
+// ----------------------------------------------------------------
+// API: fixed personas (seed → generate)
+// ----------------------------------------------------------------
+function loadProductSpecOrNull(): ProductSpec | null {
+  const baseUrl = process.env.BASE_URL ?? "http://localhost:3000";
+  const filePath = specFilePath(baseUrl);
+  if (!filePath || !existsSync(filePath)) return null;
+  try {
+    return JSON.parse(readFileSync(filePath, "utf-8")) as ProductSpec;
+  } catch {
+    return null;
+  }
+}
+
+const personaCreateLimiter = rateLimit({ windowMs: 60_000, limit: 10 });
+
+app.get("/api/personas", (req, res) => {
+  const includeArchived = req.query.archived === "1" || req.query.archived === "true";
+  res.json(listFixedPersonas({ includeArchived }));
+});
+
+app.post("/api/personas", personaCreateLimiter, async (req, res) => {
+  const seed = typeof req.body?.seed === "string" ? req.body.seed.trim() : "";
+  if (!seed) {
+    res.status(400).json({ error: "seed is required" });
+    return;
+  }
+  const spec = loadProductSpecOrNull();
+  if (!spec) {
+    res.status(400).json({
+      error: "product spec required — start a run or set app goals first",
+    });
+    return;
+  }
+  try {
+    const generated = await generatePersonaFromSeed(seed, spec);
+    const agent = addAgent({
+      name: generated.name,
+      role: generated.role,
+      persona: generated.persona,
+      lenses: generated.lenses,
+      origin: "fixed",
+      status: "active",
+      seed,
+    });
+    res.status(201).json(agent);
+  } catch (e) {
+    if (e instanceof PersonaGenerationError) {
+      res.status(502).json({ error: e.message });
+      return;
+    }
+    console.error("[personas] generate failed:", e);
+    res.status(502).json({ error: "persona generation failed" });
+  }
+});
+
+app.patch("/api/personas/:id", (req, res) => {
+  const id = req.params.id;
+  const existing = loadAgents().find((a) => a.id === id);
+  if (!existing || !isFixedAgent(existing)) {
+    res.status(404).json({ error: "persona not found" });
+    return;
+  }
+  const { name, role, persona, lenses } = req.body as {
+    name?: unknown;
+    role?: unknown;
+    persona?: unknown;
+    lenses?: unknown;
+  };
+  if (lenses !== undefined && (!Array.isArray(lenses) || !lenses.every((l) => typeof l === "string"))) {
+    res.status(400).json({ error: "lenses must be an array of strings" });
+    return;
+  }
+  try {
+    const updated = updateAgent(id, {
+      ...(typeof name === "string" ? { name } : {}),
+      ...(typeof role === "string" ? { role } : {}),
+      ...(typeof persona === "string" ? { persona } : {}),
+      ...(lenses !== undefined ? { lenses: lenses as string[] } : {}),
+    });
+    if (!updated) {
+      res.status(400).json({ error: "persona must be active fixed to edit — restore first" });
+      return;
+    }
+    res.json(updated);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    res.status(400).json({ error: message });
+  }
+});
+
+app.post("/api/personas/:id/archive", (req, res) => {
+  const agent = archiveAgent(req.params.id);
+  if (!agent) {
+    res.status(404).json({ error: "persona not found" });
+    return;
+  }
+  res.json(agent);
+});
+
+app.post("/api/personas/:id/restore", (req, res) => {
+  const agent = restoreAgent(req.params.id);
+  if (!agent) {
+    res.status(404).json({ error: "persona not found" });
+    return;
+  }
+  res.json(agent);
 });
 
 // ----------------------------------------------------------------
@@ -237,10 +360,11 @@ app.get("/api/runs/:runId/report", (req, res) => {
 // API: start a run
 // ----------------------------------------------------------------
 app.post("/api/runs/start", (req, res) => {
-  const { baseUrl, maxBrowsers, maxExplorers, mode, llmBaseUrl, llmApiKey, llmModel } = req.body as {
+  const { baseUrl, maxBrowsers, maxExplorers, maxThresholds, mode, llmBaseUrl, llmApiKey, llmModel } = req.body as {
     baseUrl?: string;
     maxBrowsers?: number;
     maxExplorers?: number;
+    maxThresholds?: number;
     mode?: string;
     llmBaseUrl?: string;
     llmApiKey?: string;
@@ -250,7 +374,7 @@ app.post("/api/runs/start", (req, res) => {
     res.status(400).json({ error: "mode must be one of: read-only, safe, full" });
     return;
   }
-  const sessionId = spawnRun({ baseUrl, maxBrowsers, maxExplorers, mode, llmBaseUrl, llmApiKey, llmModel });
+  const sessionId = spawnRun({ baseUrl, maxBrowsers, maxExplorers, maxThresholds, mode, llmBaseUrl, llmApiKey, llmModel });
   res.json({ sessionId });
 });
 

@@ -1,6 +1,6 @@
 /**
  * run.ts — Multi-agent runner
- * hr → product discovery → api agents + browser agents → triage
+ * hr → product discovery → api agents + browser agents + threshold agents → triage
  *
  * Usage:
  *   ANTHROPIC_API_KEY=xxx GITHUB_TOKEN=xxx GITHUB_REPO=owner/repo npx tsx run.ts
@@ -16,7 +16,8 @@ import { createLLMClient } from "./framework/llm-client";
 import type { Tool } from "./framework/llm-client";
 import { createMessageWithRetry, runAgentLoop, sleep, rateLimitRetries } from "./framework/agent-loop";
 import { collectedFindings, initRunLog, saveRunLog, saveFinding, getSwarmSignals, runLog } from "./framework/findings";
-import { loadAgents, addAgent, retireAgent, recordAgentMemories, formatAgentMemories, buildMemoryInputs, type Agent } from "./framework/agent-store";
+import { loadAgents, addAgent, retireAgent, recordAgentMemories, formatAgentMemories, buildMemoryInputs, isFixedAgent, agentOrigin, type Agent } from "./framework/agent-store";
+import { computeRosterSlots, buildRunRoster, splitRosterForDispatch, partitionActiveAgents } from "./framework/roster";
 import { updateCoverage, computeWeightedSummary, getLastRunPaths, getFindingHotspots } from "./framework/coverage";
 import {
   loadSiteMap,
@@ -54,13 +55,19 @@ import {
 } from "./framework/observation";
 import { discoverProduct, loadCachedSpec, resolveLoginPath, type ProductSpec } from "./framework/product-discovery";
 import { designOrg, UNIVERSAL_LENSES } from "./framework/org-designer";
-import { designScenarios, findMultiActorScenario, soloScenarios, pairAgentsToActors, pickBrowserAgents, type Scenario, type ScenarioActor, type ScenarioOutcome } from "./framework/scenario-designer";
+import { designScenarios, findMultiActorScenario, soloScenarios, pairAgentsToActors, type Scenario, type ScenarioActor, type ScenarioOutcome } from "./framework/scenario-designer";
 import { runTriageAgent } from "./framework/triage";
 import { generateReport } from "./framework/report";
 import type { AgentLog, Finding, RegressionCheck } from "./framework/types";
 import { loadTarget, applyLoadedTarget } from "./targets";
 import { runAccountManager, resolveAccountSetup, planBrowserAuth, authPrompt, describeAuthPlan, resolveLoginUrl, type TestAccount, type BrowserAuthPlan } from "./framework/account-manager";
 import { estimateCost, formatCostUSD } from "./framework/cost";
+import {
+  normalizeThresholdCandidates,
+  sortThresholdCandidates,
+  assignThresholdCandidates,
+  type ThresholdCandidate,
+} from "./framework/threshold";
 import { clickDescribedElement } from "./framework/click-target";
 
 const BASE_URL = process.env.BASE_URL ?? "http://localhost:3000";
@@ -94,10 +101,11 @@ if (SHOAL_MODE !== "full") console.log(`[guardrails] mode: ${SHOAL_MODE}`);
 const APP_TOOLS = filterAppTools(targetConfig.appTools, SHOAL_MODE);
 
 // skip exploration when no API tools are configured (after guardrail filtering)
-const MAX_EXPLORERS = APP_TOOLS.length > 0
+let MAX_EXPLORERS = APP_TOOLS.length > 0
   ? parseInt(process.env.MAX_EXPLORERS ?? "4", 10)
   : 0;
-const MAX_BROWSERS = parseInt(process.env.MAX_BROWSERS ?? "2", 10);
+let MAX_BROWSERS = parseInt(process.env.MAX_BROWSERS ?? "2", 10);
+const MAX_THRESHOLDS = parseInt(process.env.MAX_THRESHOLDS ?? "1", 10);
 
 const { client, defaultModel, provider: llmProvider } = createLLMClient();
 
@@ -574,6 +582,7 @@ async function runPersonaDesigner(
   lastRunPaths: { visitedPaths: string[]; runId: string } | null = null,
   personaPack: PersonaPack | null = null,
   siteMap: SiteMap | null = null,
+  autoSlots = 2,
 ): Promise<void> {
   console.log("\n[persona-designer] starting...");
   const messages: Anthropic.MessageParam[] = [
@@ -596,16 +605,23 @@ You create and manage test agents that simulate real users of the app.
 [Organization Design Guidelines]
 ${orgGuidance}${accountContext}
 
+[Fixed roster rules]
+- Agents with origin "fixed" are team-curated permanent members. NEVER call retire_agent on them.
+- Align the number of ACTIVE auto agents (origin "auto" or missing) to exactly ${autoSlots}.
+  — If fewer than ${autoSlots} active autos exist, add_agent until you reach ${autoSlots}.
+  — If more than ${autoSlots} active autos exist, retire_agent the excess autos only (oldest first).
+  — If autoSlots is 0, do not add autos; retire excess autos if any.
+
 [Steps]
 1. Call get_coverage to review which lenses and categories are underrepresented in past runs
 ${personaTemplateStep}
 ${pathCoverageStep}
 5. Call get_open_issues to understand what problems are already known — recruit agents likely to find DIFFERENT issues in unexplored areas
 6. Call get_scenarios to see the user test scenarios generated for this run — about 70% of agents will be assigned a scenario, so recruit personas whose background fits those scenarios
-7. Call get_agents to check the current agent roster
-8. Add 2–3 agents with add_agent — balance between scenario-fit personas (step 6), underrepresented lenses (step 1), unexplored paths (step 3), finding hotspots (step 4), and unexplored areas (step 5)${testAccounts.length > 0 ? "\n   — assign each agent a role that matches one of the available test accounts" : ""}
-   — give 1–2 recruits an "environment" (mobile device, dark mode, non-default locale, slow connection) that naturally fits their persona's life; leave the rest on desktop
-9. If there are agents with old createdAt dates (oldest 1–2), retire them with retire_agent`;
+7. Call get_agents to check the current agent roster (archived agents are omitted; origin is included)
+8. Adjust AUTO agents only so that active autos == ${autoSlots}${testAccounts.length > 0 ? "\n   — assign each new agent a role that matches one of the available test accounts" : ""}
+   — give 1–2 new recruits an "environment" (mobile device, dark mode, non-default locale, slow connection) that naturally fits their persona's life; leave the rest on desktop
+9. Do not retire fixed agents. Only retire autos when above the autoSlots target.`;
 
   try {
     let iterations = 0;
@@ -674,8 +690,15 @@ ${pathCoverageStep}
           }
           console.log(`  [persona-designer] scenarios fetched (${scenarios.length})`);
         } else if (toolUse.name === "get_agents") {
-          const agents = loadAgents();
-          result = agents.map((a) => ({ id: a.id, name: a.name, role: a.role, createdAt: a.createdAt }));
+          const agents = loadAgents().filter((a) => (a.status ?? "active") !== "archived");
+          result = agents.map((a) => ({
+            id: a.id,
+            name: a.name,
+            role: a.role,
+            createdAt: a.createdAt,
+            origin: agentOrigin(a),
+            status: a.status ?? "active",
+          }));
           console.log(`  [persona-designer] current agents: ${agents.length}`);
         } else if (toolUse.name === "add_agent") {
           const { name, role, persona, environment } = toolUse.input as {
@@ -691,6 +714,8 @@ ${pathCoverageStep}
               role: role ?? "",
               persona: persona ?? "",
               environment: cleanEnv,
+              origin: "auto",
+              status: "active",
             });
             result = agent;
             console.log(`  [persona-designer] created: ${agent.name} (${agent.role})${cleanEnv ? ` [env: ${Object.entries(cleanEnv).map(([k, v]) => `${k}=${v}`).join(", ")}]` : ""}`);
@@ -701,8 +726,17 @@ ${pathCoverageStep}
           }
         } else if (toolUse.name === "retire_agent") {
           const { agentId, reason } = toolUse.input as { agentId: string; reason: string };
-          result = { success: retireAgent(agentId) };
-          console.log(`  [persona-designer] retired: ${agentId} — ${reason}`);
+          const existing = loadAgents().find((a) => a.id === agentId);
+          if (existing && isFixedAgent(existing)) {
+            result = { success: false, error: "cannot retire fixed persona" };
+            console.log(`  [persona-designer] retire blocked (fixed): ${agentId} — ${reason}`);
+          } else {
+            const success = retireAgent(agentId);
+            result = success
+              ? { success: true }
+              : { success: false, error: "agent not found or not retiring" };
+            console.log(`  [persona-designer] retired: ${agentId} — ${reason} (success=${success})`);
+          }
         } else {
           result = { error: "unknown tool" };
         }
@@ -741,9 +775,13 @@ interface BrowserAgentLog {
   error: string | null;
 }
 
-function browserLogToAgentLog(agent: Agent, log: BrowserAgentLog): AgentLog {
+function browserLogToAgentLog(
+  agent: Agent,
+  log: BrowserAgentLog,
+  agentType: AgentLog["agentType"] = "browser",
+): AgentLog {
   return {
-    agentType: "browser",
+    agentType,
     agentId: agent.id,
     agentName: log.agentName,
     role: agent.role,
@@ -777,7 +815,13 @@ function applyAgentSummary(agentLog: AgentLog): void {
 }
 
 function recordBrowserAgentRun(agent: Agent, browserLog: BrowserAgentLog): void {
-  const agentLog = browserLogToAgentLog(agent, browserLog);
+  const agentLog = browserLogToAgentLog(agent, browserLog, "browser");
+  runLog.agents.push(agentLog);
+  applyAgentSummary(agentLog);
+}
+
+function recordThresholdAgentRun(agent: Agent, browserLog: BrowserAgentLog): void {
+  const agentLog = browserLogToAgentLog(agent, browserLog, "threshold");
   runLog.agents.push(agentLog);
   applyAgentSummary(agentLog);
 }
@@ -1368,6 +1412,226 @@ ${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\
   return agentLog;
 }
 
+function formatThresholdCandidatesForPrompt(candidates: ThresholdCandidate[]): string {
+  if (candidates.length === 0) return "(none assigned)";
+  return candidates
+    .map(
+      (c, i) =>
+        `${i + 1}. [${c.kind}/p${c.priority}] id=${c.id}\n` +
+        `   area: ${c.area}\n` +
+        `   signal: ${c.signal}\n` +
+        `   howToProbe: ${c.howToProbe}`,
+    )
+    .join("\n");
+}
+
+function makeThresholdProbers(count: number): Agent[] {
+  const now = new Date().toISOString();
+  return Array.from({ length: count }, (_, i) => ({
+    id: `agent_threshold_${i + 1}`,
+    name: count === 1 ? "Threshold Prober" : `Threshold Prober ${i + 1}`,
+    role: "threshold-prober",
+    persona:
+      "A careful boundary probe who pushes limits the way a power user would — form maxima, plan quotas, permission edges, and moments where the experience falls apart — then reports what actually broke or felt ambiguous. Does not invent findings when the boundary behaves clearly.",
+    createdAt: now,
+  }));
+}
+
+function pickThresholdAuthRole(testAccounts: TestAccount[], fallbackRole: string): string {
+  return testAccounts[0]?.role ?? fallbackRole;
+}
+
+async function runThresholdAgent(
+  agent: Agent,
+  page: Page,
+  productSpec: ProductSpec,
+  candidates: ThresholdCandidate[],
+  authPlan: BrowserAuthPlan = { handoff: { kind: "guest" }, startPath: "/" },
+): Promise<BrowserAgentLog> {
+  console.log(`\n[threshold] ${agent.name} start (${candidates.length} candidate(s))`);
+
+  const agentLog: BrowserAgentLog = {
+    agentName: agent.name,
+    persona: agent.persona,
+    startedAt: new Date().toISOString(),
+    completedAt: null,
+    status: "completed",
+    iterations: 0,
+    actions: [],
+    visitedPaths: [],
+    feedbacksSaved: [],
+    error: null,
+  };
+
+  const observation = setupObservation(page);
+  const host = new URL(BASE_URL).host;
+  const cachedHashes = loadPageHashes(host);
+  const pageHashUpdates: Record<string, string> = {};
+
+  const systemPrompt = `You are "${agent.name}".
+Role: ${agent.role}
+Persona: ${agent.persona}
+
+You probe boundaries of "${productSpec.appName}" — not free exploration.
+Work through your assigned threshold candidates. Prefer evidence over speculation.
+
+[App Overview]
+${productSpec.appDescription}
+
+[Assigned Threshold Candidates]
+${formatThresholdCandidatesForPrompt(candidates)}
+
+[How to Proceed]
+1. Pick the highest-priority remaining candidate
+2. Navigate to its area; if needed, use [API check] tools to seed a near-limit state
+3. Follow howToProbe in the browser (fill/click/select as a real user would)
+4. If the boundary crashes, silently fails, loses data, or shows an unclear/wrong message — report with post_feedback
+5. If the boundary behaves clearly and safely, do NOT invent a finding — move to the next candidate
+6. If an area does not exist, skip that candidate
+7. Finish after probing your list (about 8–10 actions)
+
+When writing the body, match the tone to the category:
+- bug: technical ("Submitting 501 chars returned 500 with no validation...", "Expected a 403 at the plan limit but the create succeeded")
+- ux: experiential ("I hit the seat limit and had no idea what to do next...", "The error appeared after I left the field and I could not tell which limit I crossed")
+- feature-request / goal-gap: only if a missing affordance at the boundary clearly blocks a user outcome
+
+[Using Observation Tools]
+- After probing, call diff_since_last_action / read_network_errors / read_console_logs when the UI reaction is unclear
+- Use check_swarm_signals once mid-session; if another agent reported something in your area, try to reproduce it as a threshold probe and report in your own words
+
+[Reference: Implemented Features]
+${productSpec.features}
+${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${goalsSection(productSpec)}${guardrailPrompt(SHOAL_MODE)}${authPrompt(authPlan.handoff)}`;
+
+  const startUrl = resolveLoginUrl(BASE_URL, authPlan.startPath);
+  await page.goto(startUrl, { waitUntil: "networkidle" });
+  await page.waitForTimeout(5000);
+  const initialScreenshot = await takeScreenshot(page, "initial");
+
+  const opening = (() => {
+    switch (authPlan.handoff.kind) {
+      case "credentials":
+        return "The login page is open. Sign in with the exact credentials in [Authentication], then probe your assigned thresholds. Do not invent other usernames or passwords.";
+      case "guest":
+        return "The app is open. Start probing your assigned thresholds. If you see a login form, do not guess usernames or passwords — probe only what is available without an account.";
+      case "session":
+        return "The app is open and you are already logged in. Start probing your assigned thresholds.";
+      default: {
+        const _exhaustive: never = authPlan.handoff;
+        return `The app is open. Start probing. (${String(_exhaustive)})`;
+      }
+    }
+  })();
+
+  const messages: Anthropic.MessageParam[] = [
+    {
+      role: "user",
+      content: [
+        { type: "image", source: { type: "base64", media_type: "image/png", data: initialScreenshot.base64 } },
+        { type: "text", text: opening },
+      ],
+    },
+  ];
+
+  try {
+    while (agentLog.iterations < 12) {
+      agentLog.iterations++;
+
+      const response = await createMessageWithRetry(client, {
+        model: defaultModel,
+        max_tokens: 1024,
+        system: systemPrompt,
+        tools: BROWSER_TOOLS,
+        messages,
+      });
+
+      const assistantContent = response.content;
+      messages.push({ role: "assistant", content: assistantContent });
+
+      const toolUses = assistantContent.filter(
+        (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
+      );
+
+      if (toolUses.length === 0 || response.stop_reason === "end_turn") {
+        agentLog.status = "completed";
+        break;
+      }
+
+      if (agentLog.iterations >= 12) agentLog.status = "iteration_limit";
+
+      const toolResults: Anthropic.ToolResultBlockParam[] = [];
+      for (const toolUse of toolUses) {
+        console.log(`  → ${toolUse.name}(${JSON.stringify(toolUse.input).slice(0, 60)})`);
+
+        const { text, screenshot, sendToClaude } = await executeBrowserTool(
+          toolUse.name,
+          toolUse.input as Record<string, unknown>,
+          page,
+          agentLog,
+          observation,
+          agent.id,
+          [],
+          cachedHashes,
+          pageHashUpdates,
+          undefined,
+        );
+
+        const content: Anthropic.ToolResultBlockParam["content"] =
+          sendToClaude && screenshot
+            ? [
+                { type: "text", text },
+                { type: "image", source: { type: "base64", media_type: "image/png", data: screenshot.base64 } },
+              ]
+            : text;
+
+        toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content });
+      }
+
+      const MAX_ITERATIONS = 12;
+      const remaining = MAX_ITERATIONS - agentLog.iterations;
+      let budgetHint = `[${remaining} turns remaining]`;
+      if (remaining <= 2) {
+        budgetHint += " Last turns. Post any remaining threshold findings with post_feedback, then finish.";
+      } else if (remaining <= 4) {
+        budgetHint += " Start wrapping up remaining candidates.";
+      }
+
+      const PROGRESS_TOOLS = new Set(["navigate", "fill", "post_feedback"]);
+      const recent = agentLog.actions.slice(-5).map((a) => a.tool);
+      if (recent.length >= 5 && !recent.some((t) => PROGRESS_TOOLS.has(t))) {
+        budgetHint += " You seem stuck. Move to the next threshold candidate or a different area.";
+      }
+
+      const observationWarning = buildObservationWarning(observation);
+      if (observationWarning) {
+        budgetHint += `\n\n${observationWarning}\nUse read_console_logs or read_network_errors for details.`;
+      }
+
+      const last = toolResults[toolResults.length - 1];
+      const lastContent = last.content;
+      toolResults[toolResults.length - 1] = {
+        ...last,
+        content:
+          typeof lastContent === "string"
+            ? `${lastContent}\n\n${budgetHint}`
+            : ([...(lastContent as unknown[]), { type: "text" as const, text: budgetHint }] as Anthropic.ToolResultBlockParam["content"]),
+      };
+
+      messages.push({ role: "user", content: toolResults });
+    }
+  } catch (e) {
+    agentLog.status = "error";
+    agentLog.error = String(e);
+    console.error(`[${agent.name}] error:`, e);
+  } finally {
+    agentLog.completedAt = new Date().toISOString();
+    updatePageHashes(host, pageHashUpdates);
+  }
+
+  console.log(`[threshold] ${agent.name} done (feedback: ${agentLog.feedbacksSaved.length})`);
+  return agentLog;
+}
+
 // ================================================================
 // Main
 // ================================================================
@@ -1422,10 +1686,6 @@ async function runVerifyMode(
   fs.writeFileSync(outPath, JSON.stringify(result, null, 2), "utf-8");
   console.log(`\n[verify] ${result.status}: ${result.reason}`);
   console.log(`[verify] result saved: ${outPath}`);
-}
-
-function pickAgents<T>(agents: T[], count: number): T[] {
-  return [...agents].sort(() => Math.random() - 0.5).slice(0, count);
 }
 
 // 7:3 ratio: indices where (idx % 10) < 7 get a scenario, rest get a lens
@@ -1538,25 +1798,56 @@ async function main() {
     const discoverBudget = { used: 0 };
 
     // 5.5 HR agent
+    // 5.5 HR agent — fixed members first, then align autos to autoSlots
+    const preFixed = partitionActiveAgents(loadAgents()).fixed;
+    const slots = computeRosterSlots({
+      maxBrowsers: MAX_BROWSERS,
+      maxExplorers: MAX_EXPLORERS,
+      fixedCount: preFixed.length,
+    });
+    if (slots.maxBrowsers !== MAX_BROWSERS || slots.maxExplorers !== MAX_EXPLORERS) {
+      console.log(
+        `[roster] bumping caps for fixed members: browsers ${MAX_BROWSERS}→${slots.maxBrowsers}, explorers ${MAX_EXPLORERS}→${slots.maxExplorers} (fixed=${slots.F}, N=${slots.N}, effectiveN=${slots.effectiveN})`,
+      );
+      MAX_BROWSERS = slots.maxBrowsers;
+      MAX_EXPLORERS = slots.maxExplorers;
+    } else {
+      console.log(
+        `[roster] fixed=${slots.F} autoSlots=${slots.autoSlots} (N=${slots.N}, effectiveN=${slots.effectiveN})`,
+      );
+    }
+
     const lastRunPaths = getLastRunPaths();
     const personaPack = await loadPersonaPack();
-    await runPersonaDesigner(productSpec, orgDesign.personaGuidance, openIssues, scenarios, testAccounts, lastRunPaths, personaPack, sharedSiteMap);
+    await runPersonaDesigner(
+      productSpec,
+      orgDesign.personaGuidance,
+      openIssues,
+      scenarios,
+      testAccounts,
+      lastRunPaths,
+      personaPack,
+      sharedSiteMap,
+      slots.autoSlots,
+    );
 
-    // 6. load agents (closed issues は step 2 で取得済み)
-    const allAgents = loadAgents();
-    if (allAgents.length === 0) {
-      console.error("No agents found. Check agents.json.");
+    // 6. Deterministic run roster (surplus autos excluded even if HR over-recruited)
+    const { fixed, autos } = partitionActiveAgents(loadAgents());
+    const runRoster = buildRunRoster({ fixed, autos, autoSlots: slots.autoSlots });
+    if (runRoster.length === 0) {
+      console.error("No agents found. Check agents.json or create fixed personas in the dashboard.");
       process.exit(1);
     }
 
-    // 6.5. roster サイズを記録（実際に走った agent 数は run 終了時に runLog.agents.length で確定）
-    runLog.summary.totalAgents = allAgents.length;
+    const { explorers: explorerAgents, browsers: browserAgents, regression: regressionAgent } =
+      splitRosterForDispatch(runRoster, { maxBrowsers: MAX_BROWSERS, maxExplorers: MAX_EXPLORERS });
 
-    // 7. API agents (exploration + regression)
-    const allExplorers = allAgents.slice(0, -1);
-    const explorerAgents = pickAgents(allExplorers, Math.min(MAX_EXPLORERS, allExplorers.length));
-    const regressionAgent = allAgents[allAgents.length - 1];
-    console.log(`\nexplorers: ${explorerAgents.length} (max: ${MAX_EXPLORERS}) / regression: 1`);
+    // 6.5. roster サイズを記録（実際に走った agent 数は run 終了時に runLog.agents.length で確定）
+    runLog.summary.totalAgents = runRoster.length;
+    console.log(
+      `\nroster: ${runRoster.length} (fixed ${fixed.length} + auto ${Math.min(autos.length, slots.autoSlots)})`,
+    );
+    console.log(`explorers: ${explorerAgents.length} (max: ${MAX_EXPLORERS}) / regression: ${regressionAgent ? 1 : 0} / browsers: ${browserAgents.length} (max: ${MAX_BROWSERS})`);
 
     // agentId → assignment（coverage 計算・レポート生成に使う）
     const agentAssignments = new Map<string, Assignment>();
@@ -1581,8 +1872,8 @@ async function main() {
       }
     }
 
-    if (MAX_EXPLORERS === 0) {
-      console.log("\n[regression] skipped (MAX_EXPLORERS=0)");
+    if (MAX_EXPLORERS === 0 || !regressionAgent) {
+      console.log("\n[regression] skipped (no regression slot)");
     } else if (closedIssues.length > 0) {
       await sleep(3000);
       await runRegressionAgent(regressionAgent, closedIssues, productSpec);
@@ -1595,10 +1886,8 @@ async function main() {
 
     // 8. browser agents
     const multiScenario = findMultiActorScenario(scenarios);
-    const actorRoles = multiScenario?.actors?.map((a) => a.role) ?? [];
-    const browserAgents = pickBrowserAgents(allAgents, Math.min(MAX_BROWSERS, allAgents.length), actorRoles);
     console.log(`\nlaunching ${browserAgents.length} browser agents in parallel (max: ${MAX_BROWSERS})`);
-    browserAgents.forEach((a) => console.log(`  - ${a.name} (${a.role})`));
+    browserAgents.forEach((a) => console.log(`  - ${a.name} (${a.role}) [${agentOrigin(a)}]`));
 
     // マルチアクターシナリオ: ペルソナ role と actor / テストアカウント role が合う 2 体を同時操作させる
     const pairAssignments = new Map<string, Assignment>();
@@ -1615,8 +1904,31 @@ async function main() {
     }
 
     await sleep(2000);
-    const browserLogs = await Promise.all(
-      browserAgents.map(async (agent) => {
+
+    const thresholdCandidates = sortThresholdCandidates(
+      normalizeThresholdCandidates(productSpec.thresholdCandidates),
+    );
+    let thresholdAgents: Agent[] = [];
+    let thresholdSlices: ThresholdCandidate[][] = [];
+    if (MAX_THRESHOLDS <= 0) {
+      console.log("\n[threshold] skipped (MAX_THRESHOLDS=0)");
+    } else if (thresholdCandidates.length === 0) {
+      console.log("\n[threshold] skipped (no thresholdCandidates — set REFRESH_SPEC=1 to rediscover)");
+    } else {
+      const m = Math.min(MAX_THRESHOLDS, thresholdCandidates.length);
+      thresholdAgents = makeThresholdProbers(m);
+      thresholdSlices = assignThresholdCandidates(thresholdCandidates, m);
+      console.log(`\nlaunching ${thresholdAgents.length} threshold agents in parallel with browsers (max: ${MAX_THRESHOLDS})`);
+      thresholdAgents.forEach((a, i) =>
+        console.log(`  - ${a.name} (${thresholdSlices[i]?.length ?? 0} candidate(s))`),
+      );
+    }
+
+    type LaneResult =
+      | { kind: "browser"; agent: Agent; log: BrowserAgentLog }
+      | { kind: "threshold"; agent: Agent; log: BrowserAgentLog };
+
+    const browserJobs = browserAgents.map(async (agent): Promise<LaneResult> => {
         const assignment = pairAssignments.get(agent.id) ?? pickAssignment(dispatchIdx++, dispatchScenarios);
         agentAssignments.set(agent.id, assignment);
 
@@ -1653,7 +1965,8 @@ async function main() {
         const page = await context.newPage();
         await applyNetworkThrottle(page, agent.environment?.networkThrottle);
         try {
-          return await runBrowserAgent(agent, page, productSpec, assignment, scenarioOutcomes, authPlan, sharedSiteMap, runLog.runId, discoverBudget);
+          const log = await runBrowserAgent(agent, page, productSpec, assignment, scenarioOutcomes, authPlan, sharedSiteMap, runLog.runId, discoverBudget);
+          return { kind: "browser", agent, log };
         } finally {
           // 次の run で「再訪ユーザー」になれるようセッションを保存（close 前に呼ぶ）
           await saveAgentSession(context, agent.id);
@@ -1668,17 +1981,64 @@ async function main() {
           }
           await context.close();
         }
-      })
-    );
-    const allVisitedPaths = browserLogs.flatMap((log) => log.visitedPaths);
+      });
+
+    const thresholdJobs = thresholdAgents.map(async (agent, i): Promise<LaneResult> => {
+      const slice = thresholdSlices[i] ?? [];
+      const accountRole = pickThresholdAuthRole(testAccounts, agent.role);
+      const authPlan = planBrowserAuth({
+        testAccounts,
+        accountRole,
+        loginPath: resolveLoginPath(productSpec),
+        returningSessionPath: undefined,
+        preferAccountSession: false,
+      });
+      console.log(describeAuthPlan(agent.name, authPlan));
+      const baseOptions: Parameters<typeof browser.newContext>[0] = {
+        viewport: { width: 1024, height: 640 },
+      };
+      if (authPlan.storageStatePath) {
+        baseOptions.storageState = authPlan.storageStatePath;
+      }
+      const context = await browser.newContext(baseOptions);
+      await applyBrowserGuardrails(context, SHOAL_MODE);
+      if (TRACE_ENABLED) {
+        try {
+          await context.tracing.start({ screenshots: true, snapshots: true });
+        } catch (e) {
+          console.warn(`[trace] failed to start for ${agent.name}:`, e);
+        }
+      }
+      const page = await context.newPage();
+      try {
+        const log = await runThresholdAgent(agent, page, productSpec, slice, authPlan);
+        return { kind: "threshold", agent, log };
+      } finally {
+        // ephemeral — do not saveAgentSession
+        if (TRACE_ENABLED) {
+          const tracePath = traceAgentZipPath(runLog.runId, agent.id);
+          try {
+            fs.mkdirSync(path.dirname(tracePath), { recursive: true });
+            await context.tracing.stop({ path: tracePath });
+          } catch (e) {
+            console.warn(`[trace] failed to save for ${agent.name}:`, e);
+          }
+        }
+        await context.close();
+      }
+    });
+
+    const laneResults = await Promise.all([...browserJobs, ...thresholdJobs]);
+    const allVisitedPaths = laneResults.flatMap((r) => r.log.visitedPaths);
     saveSiteMap(sharedSiteMap);
     console.log(`  ${formatSiteMapLogLine(sharedSiteMap)}`);
-    for (let i = 0; i < browserAgents.length; i++) {
-      recordBrowserAgentRun(browserAgents[i], browserLogs[i]);
+    for (const result of laneResults) {
+      if (result.kind === "browser") recordBrowserAgentRun(result.agent, result.log);
+      else recordThresholdAgentRun(result.agent, result.log);
     }
     runLog.summary.totalAgents = runLog.agents.length;
 
-    // 9. triage (API + browser findings)
+    // 9. triage (API + browser + threshold findings)
     await sleep(2000);
     console.log(`\n[triage] collected findings: ${collectedFindings.length}`);
     let triageResult = { issued: [] as string[], skipped: [] as string[], unprocessed: [] as string[], issuesCreated: 0 };

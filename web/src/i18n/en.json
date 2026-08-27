@@ -46,6 +46,7 @@
     "baseUrlPlaceholder": "http://localhost:3000",
     "maxBrowsers": "Browser agents",
     "maxExplorers": "API agents",
+    "maxThresholds": "Threshold agents",
     "start": "Start",
     "cancel": "Cancel",
     "running": "Running…",
@@ -63,7 +64,8 @@
       "read-only": "All writes are blocked at the network layer. For observing production.",
       "safe": "Creating/editing data is allowed; irreversible actions (delete / pay / send) are avoided.",
       "full": "No restrictions. Use only against disposable environments."
-    }
+    },
+    "fixedRosterHint": "If you have fixed personas, the run may raise agent counts so all of them join."
   },
   "duration": {
     "seconds": "{{count}}s",
@@ -113,6 +115,26 @@
     "placeholder": "e.g. Users can complete the intended work without training",
     "hint": "Write outcome success conditions only — not UI widgets (search, filters, badges belong in features). Edit UI-only drafts here in Hall.",
     "goalGapHint": "Agents report \"goal-gap\" only when an outcome is blocked — not for missing UI controls."
+  },
+  "personas": {
+    "title": "Fixed Personas",
+    "hint": "Type a short seed (e.g. \"grumpy uncle\"). AI expands it using the app's product spec. Fixed members always join runs.",
+    "seedPlaceholder": "e.g. grumpy uncle / someone hunting for bugs",
+    "create": "Create",
+    "empty": "No fixed personas yet.",
+    "edit": "Edit",
+    "save": "Save",
+    "cancel": "Cancel",
+    "archive": "Retire",
+    "restore": "Restore",
+    "showArchived": "Show retired",
+    "hideArchived": "Hide retired",
+    "name": "Name",
+    "role": "Role",
+    "lensesPlaceholder": "Lenses (comma-separated)",
+    "seedLabel": "Seed",
+    "createFailed": "Could not create persona",
+    "saveFailed": "Could not save persona"
   },
   "experience": {
     "title": "Experience Score",
