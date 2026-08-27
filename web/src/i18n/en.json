@@ -46,6 +46,7 @@
     "baseUrlPlaceholder": "http://localhost:3000",
     "maxBrowsers": "Browser agents",
     "maxExplorers": "API agents",
+    "maxThresholds": "Threshold agents",
     "start": "Start",
     "cancel": "Cancel",
     "running": "Running…",

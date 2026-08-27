@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect, useRef } from "react";
 
-type AgentType = "explorer" | "browser" | "regression";
+type AgentType = "explorer" | "browser" | "regression" | "threshold";
 
 interface AgentState {
   id: string;
@@ -24,12 +24,14 @@ const COLORS: Record<AgentType, { bg: string; text: string; dot: string; glow: s
   explorer:   { bg: "rgba(59,130,246,0.12)",  text: "#93c5fd", dot: "#3b82f6", glow: "#3b82f620" },
   browser:    { bg: "rgba(34,197,94,0.12)",   text: "#86efac", dot: "#22c55e", glow: "#22c55e20" },
   regression: { bg: "rgba(249,115,22,0.12)",  text: "#fdba74", dot: "#f97316", glow: "#f9731620" },
+  threshold:  { bg: "rgba(168,85,247,0.12)",  text: "#d8b4fe", dot: "#a855f7", glow: "#a855f720" },
 };
 
 const TYPE_LABEL: Record<AgentType, string> = {
   explorer: "EX",
   browser: "BR",
   regression: "RG",
+  threshold: "TH",
 };
 
 function parseAgents(lines: string[]): AgentState[] {
@@ -38,7 +40,7 @@ function parseAgents(lines: string[]): AgentState[] {
   let count = 0;
 
   for (const line of lines) {
-    const startM = line.match(/^\[(explorer|browser|regression)\] (.+?) start/);
+    const startM = line.match(/^\[(explorer|browser|regression|threshold)\] (.+?) start/);
     if (startM) {
       const type = startM[1] as AgentType;
       const name = startM[2];
@@ -65,7 +67,7 @@ function parseAgents(lines: string[]): AgentState[] {
       continue;
     }
 
-    const doneM = line.match(/^\[(explorer|browser|regression)\] (.+?) (?:done|cancelled)/);
+    const doneM = line.match(/^\[(explorer|browser|regression|threshold)\] (.+?) (?:done|cancelled)/);
     if (doneM) {
       const id = `${doneM[1]}:${doneM[2]}`;
       if (map.has(id)) map.get(id)!.status = "done";

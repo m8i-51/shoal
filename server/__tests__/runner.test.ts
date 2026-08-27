@@ -56,14 +56,15 @@ describe("spawnRun", () => {
     expect((spawnOpts as { env: Record<string, string> }).env.MAX_BROWSERS).toBe("3");
   });
 
-  it("maxExplorers/llmBaseUrl/llmApiKey/llmModel も env 変数として渡す", () => {
+  it("maxExplorers/maxThresholds/llmBaseUrl/llmApiKey/llmModel も env 変数として渡す", () => {
     const fakeChild = createFakeChild();
     vi.mocked(spawn).mockReturnValue(fakeChild as never);
 
-    spawnRun({ maxExplorers: 5, llmBaseUrl: "https://llm.example.com", llmApiKey: "key123", llmModel: "model-x" });
+    spawnRun({ maxExplorers: 5, maxThresholds: 2, llmBaseUrl: "https://llm.example.com", llmApiKey: "key123", llmModel: "model-x" });
     const [, , spawnOpts] = vi.mocked(spawn).mock.calls[0];
     const env = (spawnOpts as { env: Record<string, string> }).env;
     expect(env.MAX_EXPLORERS).toBe("5");
+    expect(env.MAX_THRESHOLDS).toBe("2");
     expect(env.LLM_BASE_URL).toBe("https://llm.example.com");
     expect(env.LLM_API_KEY).toBe("key123");
     expect(env.LLM_MODEL).toBe("model-x");
@@ -73,7 +74,7 @@ describe("spawnRun", () => {
     const fakeChild = createFakeChild();
     vi.mocked(spawn).mockReturnValue(fakeChild as never);
     // シェルの実行環境由来の値を排除し、opts 由来のキーが追加されないことだけを見る
-    const keys = ["BASE_URL", "MAX_BROWSERS", "MAX_EXPLORERS", "LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL"] as const;
+    const keys = ["BASE_URL", "MAX_BROWSERS", "MAX_EXPLORERS", "MAX_THRESHOLDS", "LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL"] as const;
     const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
     for (const k of keys) delete process.env[k];
 

@@ -46,6 +46,7 @@
     "baseUrlPlaceholder": "http://localhost:3000",
     "maxBrowsers": "ブラウザエージェント数",
     "maxExplorers": "API エージェント数",
+    "maxThresholds": "閾値エージェント数",
     "start": "開始",
     "cancel": "キャンセル",
     "running": "実行中…",
