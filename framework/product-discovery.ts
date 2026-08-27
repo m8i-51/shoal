@@ -4,6 +4,9 @@ import type { Page } from "playwright";
 import type { LLMClient } from "./llm-client";
 import { createMessageWithRetry } from "./agent-loop";
 import Anthropic from "@anthropic-ai/sdk";
+import { normalizeThresholdCandidates, type ThresholdCandidate } from "./threshold";
+
+export type { ThresholdCandidate } from "./threshold";
 
 // ================================================================
 // Documentation gathering (local or GitHub)
@@ -90,6 +93,8 @@ export interface ProductSpec {
   discoveredAt?: string;
   /** Path of the login / sign-in page when one was observed (e.g. `/login`). */
   loginPath?: string;
+  /** Inferred boundaries for the threshold agent lane (empty when unknown / cached old specs). */
+  thresholdCandidates?: ThresholdCandidate[];
 }
 
 const LOGIN_SEGMENT = /^(?:log[-_]?in|sign[-_]?in|sign[-_]?on|logon)$/i;
@@ -196,7 +201,11 @@ export function loadCachedSpec(baseUrl: string): ProductSpec | null {
   const filePath = specCachePath(baseUrl);
   if (!fs.existsSync(filePath)) return null;
   try {
-    return JSON.parse(fs.readFileSync(filePath, "utf-8")) as ProductSpec;
+    const parsed = JSON.parse(fs.readFileSync(filePath, "utf-8")) as ProductSpec;
+    return {
+      ...parsed,
+      thresholdCandidates: normalizeThresholdCandidates(parsed.thresholdCandidates),
+    };
   } catch {
     return null;
   }
@@ -224,6 +233,13 @@ function printSpec(spec: ProductSpec): void {
   console.log(`  features:\n${spec.features.split("\n").map((l) => `    ${l}`).join("\n")}`);
   console.log(`  confidence: ${spec.confidence} / sources: ${spec.sources.join(", ")}`);
   if (spec.loginPath) console.log(`  login: ${spec.loginPath}`);
+  const thresholds = spec.thresholdCandidates ?? [];
+  if (thresholds.length > 0) {
+    console.log(`  thresholds: ${thresholds.length} candidate(s)`);
+    for (const t of thresholds.slice(0, 5)) {
+      console.log(`    - [${t.kind}/p${t.priority}] ${t.area}: ${t.signal}`);
+    }
+  }
   console.log(`${"─".repeat(60)}\n`);
 }
 
@@ -290,6 +306,35 @@ const DISCOVERY_TOOLS: Anthropic.Tool[] = [
           items: { type: "string" },
           description: "Sources used (e.g. ['/ (top page)', '/tasks (UI)', 'README'])",
         },
+        thresholdCandidates: {
+          type: "array",
+          description:
+            "Boundaries worth probing (input limits, plan/quota/permission edges, experience degradation). Prefer 8–12 high-signal items; empty array if none are clear. Do not invent quotas you did not see evidence for.",
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "string", description: "Stable short id, e.g. billing-seat-cap" },
+              kind: {
+                type: "string",
+                enum: ["input", "business", "experience"],
+                description: "input=form/field limits; business=plan/quota/permission; experience=degradation under load/size/device",
+              },
+              area: { type: "string", description: "Screen or path hint, e.g. /settings/billing" },
+              signal: { type: "string", description: "What the threshold is" },
+              howToProbe: { type: "string", description: "How an agent should push against it" },
+              priority: {
+                type: "integer",
+                enum: [1, 2, 3],
+                description: "1=highest. Prefer business edges first when unsure",
+              },
+              expectedBehavior: {
+                type: "string",
+                description: "Optional: what should happen at the boundary (unused by MVP agents)",
+              },
+            },
+            required: ["id", "kind", "area", "signal", "howToProbe", "priority"],
+          },
+        },
       },
       required: ["appName", "appDescription", "targetUsers", "features", "designContext", "uiFeatures", "appGoals", "confidence", "sources"],
     },
@@ -327,6 +372,7 @@ Guidelines for output_spec:
 - loginPath: if you saw a login / sign-in form or a link to one, record that path (e.g. /login)
 - confidence: high if README/official docs obtained, medium if mixed, low if UI observation only
 - appGoals: 3–6 outcome sentences from user + business perspective. Write results ("can complete X without training"), never widget names ("using search and filter"). Agents use these as goal-gap criteria, so UI checklists create false visual-regression findings.
+- thresholdCandidates: infer 8–12 (or fewer) probe-worthy boundaries from UI copy, forms (maxlength, required), plan/billing/permission wording, empty/heavy states. Kinds: input | business | experience. priority 1–3 (business edges usually 1). Empty array if unclear — do not invent limits.
 - When evidence is UI observation only: set confidence to low; write at most 2–3 high-level outcome drafts (no control names); treat them as Hall-editable drafts, not verified product goals`
 
   const docs = await gatherDocumentation(projectPath);
@@ -410,6 +456,9 @@ Guidelines for output_spec:
         const loginPath = observedFormPath
           ?? (fromLlm && fromLlm !== "/" ? fromLlm : undefined)
           ?? observedLinkPath;
+        const thresholdCandidates = normalizeThresholdCandidates(
+          (input as { thresholdCandidates?: unknown }).thresholdCandidates,
+        );
         spec = {
           appName: String(input.appName),
           appDescription: String(input.appDescription),
@@ -420,6 +469,7 @@ Guidelines for output_spec:
           appGoals: Array.isArray(input.appGoals) ? input.appGoals.map(String) : [],
           confidence: input.confidence,
           sources: Array.isArray(input.sources) ? input.sources.map(String) : [],
+          thresholdCandidates,
           ...(loginPath ? { loginPath } : {}),
         };
         result = "product spec finalized";
@@ -448,6 +498,7 @@ Guidelines for output_spec:
       appGoals: [],
       confidence: "low",
       sources: [],
+      thresholdCandidates: [],
       ...(loginPath ? { loginPath } : {}),
     };
   }

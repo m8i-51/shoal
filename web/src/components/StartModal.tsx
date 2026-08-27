@@ -11,6 +11,7 @@ export function StartModal({ onClose, onStarted }: Props) {
   const [baseUrl, setBaseUrl] = useState("http://localhost:3000");
   const [maxBrowsers, setMaxBrowsers] = useState(2);
   const [maxExplorers, setMaxExplorers] = useState(0);
+  const [maxThresholds, setMaxThresholds] = useState(1);
   const [mode, setMode] = useState("safe");
   const [llmBaseUrl, setLlmBaseUrl] = useState("");
   const [llmApiKey, setLlmApiKey] = useState("");
@@ -20,7 +21,7 @@ export function StartModal({ onClose, onStarted }: Props) {
 
   const handleStart = async () => {
     setLoading(true);
-    const body: Record<string, unknown> = { baseUrl, maxBrowsers, maxExplorers, mode };
+    const body: Record<string, unknown> = { baseUrl, maxBrowsers, maxExplorers, maxThresholds, mode };
     if (llmBaseUrl) body.llmBaseUrl = llmBaseUrl;
     if (llmApiKey) body.llmApiKey = llmApiKey;
     if (llmModel) body.llmModel = llmModel;
@@ -81,6 +82,17 @@ export function StartModal({ onClose, onStarted }: Props) {
                 max={8}
                 value={maxExplorers}
                 onChange={(e) => setMaxExplorers(Number(e.target.value))}
+                style={{ ...styles.input, width: "80px" }}
+              />
+            </label>
+            <label style={styles.label}>
+              {t("startModal.maxThresholds")}
+              <input
+                type="number"
+                min={0}
+                max={8}
+                value={maxThresholds}
+                onChange={(e) => setMaxThresholds(Number(e.target.value))}
                 style={{ ...styles.input, width: "80px" }}
               />
             </label>

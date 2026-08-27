@@ -41,7 +41,7 @@ function extractEvents(lines: string[]): string[] {
   const events: string[] = [];
   let navCount = 0;
   for (const line of lines) {
-    if (/^\[(explorer|browser|regression)\] .+ (start|done|cancelled)/.test(line)) {
+    if (/^\[(explorer|browser|regression|threshold)\] .+ (start|done|cancelled)/.test(line)) {
       events.push(line.trim());
     } else if (/→ \[findings\] saved:/.test(line)) {
       events.push(line.trim());
@@ -92,7 +92,7 @@ ${eventsText}
 
 ## 作成ルール
 - タイトルは \`# 探索日誌 — ${runId}\`
-- explorer エージェントを「地図製作者」、browser を「現地調査員」、regression を「検証係」として擬人化する
+- explorer エージェントを「地図製作者」、browser を「現地調査員」、regression を「検証係」、threshold を「限界探査係」として擬人化する
 - 各エージェントの動きを旅人の行動として物語る（「〇〇は△△のページへと足を踏み入れた」など）
 - 発見した問題を「驚き」や「発見」として自然に物語に組み込む
 - 全体で 400〜700 字程度のコンパクトな物語にまとめる
