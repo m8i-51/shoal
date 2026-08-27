@@ -14,7 +14,9 @@ import * as fs from "fs";
 import * as path from "path";
 import { createLLMClient } from "./framework/llm-client";
 import type { Tool } from "./framework/llm-client";
-import { createMessageWithRetry, runAgentLoop, sleep, rateLimitRetries } from "./framework/agent-loop";
+import { runAgentLoop, sleep, rateLimitRetries } from "./framework/agent-loop";
+import { runToolSession } from "./framework/tool-session";
+import type { ToolResultContent } from "./framework/tool-types";
 import { collectedFindings, initRunLog, saveRunLog, saveFinding, getSwarmSignals, runLog } from "./framework/findings";
 import { loadAgents, addAgent, retireAgent, recordAgentMemories, formatAgentMemories, buildMemoryInputs, isFixedAgent, agentOrigin, type Agent } from "./framework/agent-store";
 import { computeRosterSlots, buildRunRoster, splitRosterForDispatch, partitionActiveAgents } from "./framework/roster";
@@ -436,7 +438,7 @@ ${productSpec.uiFeatures ? `\n[UI-Only Features]\nThese features exist in the UI
     : ""}${focusPrompt()}${formatAgentMemories(agent)}${guardrailPrompt(SHOAL_MODE)}
 Take 3–5 actions, then finish.`;
 
-  await runAgentLoop(agentLog, systemPrompt, EXPLORER_TOOLS, client, defaultModel, makeExecutor(agentLog, scenarioOutcomes, assignment.scenario));
+  await runAgentLoop(agentLog, systemPrompt, EXPLORER_TOOLS, client, defaultModel, makeExecutor(agentLog, scenarioOutcomes, assignment.scenario), llmProvider);
   console.log(`[explorer] ${agent.name} done`);
 }
 
@@ -484,7 +486,7 @@ ${issueList}
 ${productSpec.features}
 ${productSpec.uiFeatures ? `\n[UI-Only Features]\nThese features exist in the UI but may not be reflected in API responses.\n${productSpec.uiFeatures}\n` : ""}${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${goalsSection(productSpec)}${guardrailPrompt(SHOAL_MODE)}`;
 
-  await runAgentLoop(agentLog, systemPrompt, REGRESSION_TOOLS, client, defaultModel, makeExecutor(agentLog, []));
+  await runAgentLoop(agentLog, systemPrompt, REGRESSION_TOOLS, client, defaultModel, makeExecutor(agentLog, []), llmProvider);
   const checked = agentLog.regressionChecks.length;
   const failed = agentLog.regressionChecks.filter((c) => c.status === "regressed").length;
   console.log(`[regression] ${agent.name} done (checked: ${checked} / regressed: ${failed})`);
@@ -585,9 +587,6 @@ async function runPersonaDesigner(
   autoSlots = 2,
 ): Promise<void> {
   console.log("\n[persona-designer] starting...");
-  const messages: Anthropic.MessageParam[] = [
-    { role: "user", content: "Design and manage user personas for this run." },
-  ];
 
   const accountContext = testAccounts.length > 0
     ? `\n[Available Test Accounts (one per role)]\n${testAccounts.map((a) => `- ${a.role}: ${a.email}`).join("\n")}\nWhen recruiting agents, match each persona's role to one of these accounts so they can operate with appropriate permissions.`
@@ -624,35 +623,23 @@ ${pathCoverageStep}
 9. Do not retire fixed agents. Only retire autos when above the autoSlots target.`;
 
   try {
-    let iterations = 0;
-    while (iterations < 8) {
-      iterations++;
-      const response = await createMessageWithRetry(client, {
-        model: defaultModel,
-        max_tokens: 1024,
-        system: systemPrompt,
-        tools: PERSONA_DESIGNER_TOOLS,
-        messages,
-      });
-      messages.push({ role: "assistant", content: response.content });
-      const toolUses = response.content.filter(
-        (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
-      );
-      if (toolUses.length === 0 || response.stop_reason === "end_turn") break;
-      const toolResults: Anthropic.ToolResultBlockParam[] = [];
-      for (const toolUse of toolUses) {
+    const sessionTools = PERSONA_DESIGNER_TOOLS.map((t) => ({
+      name: t.name,
+      description: t.description ?? t.name,
+      input_schema: t.input_schema as Record<string, unknown>,
+      execute: async (input: Record<string, unknown>): Promise<string> => {
         let result: unknown;
-        if (toolUse.name === "get_coverage") {
+        if (t.name === "get_coverage") {
           result = computeWeightedSummary().formatted;
           console.log("  [persona-designer] coverage summary fetched");
-        } else if (toolUse.name === "get_persona_templates") {
+        } else if (t.name === "get_persona_templates") {
           if (!personaPack) {
             result = "(no persona templates configured — set SHOAL_PERSONAS env var or add personas.yaml to your project)";
           } else {
             result = formatPackForPrompt(personaPack);
           }
           console.log(`  [persona-designer] persona templates fetched (${personaPack?.personas.length ?? 0})`);
-        } else if (toolUse.name === "get_path_coverage") {
+        } else if (t.name === "get_path_coverage") {
           if (siteMap) {
             result = formatSiteMapForPersona(siteMap, {
               recentPaths: lastRunPaths?.visitedPaths ?? [],
@@ -663,7 +650,7 @@ ${pathCoverageStep}
             result = `Paths visited in last run (${lastRunPaths.runId}):\n${lastRunPaths.visitedPaths.map((p) => `- ${p}`).join("\n")}\n\nRecruit agents whose role naturally takes them to paths NOT in this list.`;
           }
           console.log(`  [persona-designer] path coverage fetched (site-map=${Boolean(siteMap)}, recent=${lastRunPaths?.visitedPaths.length ?? 0})`);
-        } else if (toolUse.name === "get_finding_hotspots") {
+        } else if (t.name === "get_finding_hotspots") {
           const hotspots = getFindingHotspots();
           if (hotspots.length === 0) {
             result = "(no past findings data yet — this appears to be the first run)";
@@ -673,14 +660,14 @@ ${pathCoverageStep}
             ).join("\n");
           }
           console.log(`  [persona-designer] finding hotspots fetched (${hotspots.length} areas)`);
-        } else if (toolUse.name === "get_open_issues") {
+        } else if (t.name === "get_open_issues") {
           if (openIssues.length === 0) {
             result = "(no open issues — either GitHub is not configured or there are no known issues yet)";
           } else {
             result = openIssues.map((i) => `- #${i.number}: ${i.title} [${i.labels.join(", ")}]`).join("\n");
           }
           console.log(`  [persona-designer] open issues fetched (${openIssues.length})`);
-        } else if (toolUse.name === "get_scenarios") {
+        } else if (t.name === "get_scenarios") {
           if (scenarios.length === 0) {
             result = "(no scenarios generated — all agents will use free-exploration mode)";
           } else {
@@ -689,7 +676,7 @@ ${pathCoverageStep}
             ).join("\n\n");
           }
           console.log(`  [persona-designer] scenarios fetched (${scenarios.length})`);
-        } else if (toolUse.name === "get_agents") {
+        } else if (t.name === "get_agents") {
           const agents = loadAgents().filter((a) => (a.status ?? "active") !== "archived");
           result = agents.map((a) => ({
             id: a.id,
@@ -700,8 +687,8 @@ ${pathCoverageStep}
             status: a.status ?? "active",
           }));
           console.log(`  [persona-designer] current agents: ${agents.length}`);
-        } else if (toolUse.name === "add_agent") {
-          const { name, role, persona, environment } = toolUse.input as {
+        } else if (t.name === "add_agent") {
+          const { name, role, persona, environment } = input as {
             name?: string;
             role?: string;
             persona?: string;
@@ -724,8 +711,8 @@ ${pathCoverageStep}
             result = { error: message };
             console.log(`  [persona-designer] add_agent rejected: ${message}`);
           }
-        } else if (toolUse.name === "retire_agent") {
-          const { agentId, reason } = toolUse.input as { agentId: string; reason: string };
+        } else if (t.name === "retire_agent") {
+          const { agentId, reason } = input as { agentId: string; reason: string };
           const existing = loadAgents().find((a) => a.id === agentId);
           if (existing && isFixedAgent(existing)) {
             result = { success: false, error: "cannot retire fixed persona" };
@@ -740,10 +727,20 @@ ${pathCoverageStep}
         } else {
           result = { error: "unknown tool" };
         }
-        toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: JSON.stringify(result) });
-      }
-      messages.push({ role: "user", content: toolResults });
-    }
+        return JSON.stringify(result);
+      },
+    }));
+
+    await runToolSession({
+      provider: llmProvider,
+      client,
+      model: defaultModel,
+      system: systemPrompt,
+      userPrompt: "Design and manage user personas for this run.",
+      tools: sessionTools,
+      maxIterations: 8,
+      maxTokens: 1024,
+    });
     console.log("[persona-designer] done");
   } catch (e) {
     console.error("[persona-designer] error:", e);
@@ -1271,134 +1268,119 @@ ${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\
     }
   })();
 
-  const messages: Anthropic.MessageParam[] = [
-    {
-      role: "user",
-      content: [
+  const MAX_ITERATIONS = 12;
+  const sessionTools = BROWSER_TOOLS.map((t) => ({
+    name: t.name,
+    description: t.description ?? t.name,
+    input_schema: t.input_schema as Record<string, unknown>,
+    execute: async (input: Record<string, unknown>): Promise<ToolResultContent> => {
+      console.log(`  → ${t.name}(${JSON.stringify(input).slice(0, 60)})`);
+
+      const { text, screenshot, sendToClaude } = await executeBrowserTool(
+        t.name,
+        input,
+        page,
+        agentLog,
+        observation,
+        agent.id,
+        scenarioOutcomes,
+        cachedHashes,
+        pageHashUpdates,
+        assignment.scenario,
+      );
+
+      if (siteMap) {
+        try {
+          const currentPath = normalizePath(page.url(), siteMapOrigin);
+          if (currentPath) {
+            const isNewEntry = currentPath !== lastTrackedPath;
+            if (isNewEntry) {
+              lastTrackedPath = currentPath;
+              consecutiveOnPath = 1;
+            } else {
+              consecutiveOnPath += 1;
+            }
+            recordVisit(siteMap, currentPath, runId || runLog.runId, {
+              isNewEntry,
+              consecutiveIterations: consecutiveOnPath,
+            });
+          }
+          if (t.name === "navigate" && discoverBudget) {
+            const hrefs = await collectSameOriginHrefs(page, siteMapOrigin);
+            const normalized = hrefs
+              .map((h) => normalizePath(h, siteMapOrigin))
+              .filter((p): p is string => Boolean(p));
+            const ingested = ingestDiscoveredPaths(siteMap, normalized, {
+              runBudget: MAX_DISCOVERED_PER_RUN,
+              usedBudget: discoverBudget.used,
+            });
+            discoverBudget.used = ingested.usedBudget;
+          }
+        } catch (e) {
+          console.warn(`  [site-map] visit/discover update failed:`, e);
+        }
+      }
+
+      return sendToClaude && screenshot
+        ? [
+            { type: "text", text },
+            { type: "image", source: { type: "base64", media_type: "image/png", data: screenshot.base64 } },
+          ]
+        : text;
+    },
+  }));
+
+  try {
+    const result = await runToolSession({
+      provider: llmProvider,
+      client,
+      model: defaultModel,
+      system: systemPrompt,
+      userPrompt: [
         { type: "image", source: { type: "base64", media_type: "image/png", data: initialScreenshot.base64 } },
         { type: "text", text: opening },
       ],
-    },
-  ];
+      tools: sessionTools,
+      maxIterations: MAX_ITERATIONS,
+      maxTokens: 1024,
+      onAfterTools: ({ results, iteration, maxIterations }) => {
+        agentLog.iterations = iteration;
+        if (iteration >= maxIterations) agentLog.status = "iteration_limit";
 
-  try {
-    while (agentLog.iterations < 12) {
-      agentLog.iterations++;
-
-      const response = await createMessageWithRetry(client, {
-        model: defaultModel,
-        max_tokens: 1024,
-        system: systemPrompt,
-        tools: BROWSER_TOOLS,
-        messages,
-      });
-
-      const assistantContent = response.content;
-      messages.push({ role: "assistant", content: assistantContent });
-
-      const toolUses = assistantContent.filter(
-        (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
-      );
-
-      if (toolUses.length === 0 || response.stop_reason === "end_turn") {
-        agentLog.status = "completed";
-        break;
-      }
-
-      if (agentLog.iterations >= 12) agentLog.status = "iteration_limit";
-
-      const toolResults: Anthropic.ToolResultBlockParam[] = [];
-      for (const toolUse of toolUses) {
-        console.log(`  → ${toolUse.name}(${JSON.stringify(toolUse.input).slice(0, 60)})`);
-
-        const { text, screenshot, sendToClaude } = await executeBrowserTool(
-          toolUse.name,
-          toolUse.input as Record<string, unknown>,
-          page,
-          agentLog,
-          observation,
-          agent.id,
-          scenarioOutcomes,
-          cachedHashes,
-          pageHashUpdates,
-          assignment.scenario,
-        );
-
-        if (siteMap) {
-          try {
-            const currentPath = normalizePath(page.url(), siteMapOrigin);
-            if (currentPath) {
-              const isNewEntry = currentPath !== lastTrackedPath;
-              if (isNewEntry) {
-                lastTrackedPath = currentPath;
-                consecutiveOnPath = 1;
-              } else {
-                consecutiveOnPath += 1;
-              }
-              recordVisit(siteMap, currentPath, runId || runLog.runId, {
-                isNewEntry,
-                consecutiveIterations: consecutiveOnPath,
-              });
-            }
-            if (toolUse.name === "navigate" && discoverBudget) {
-              const hrefs = await collectSameOriginHrefs(page, siteMapOrigin);
-              const normalized = hrefs
-                .map((h) => normalizePath(h, siteMapOrigin))
-                .filter((p): p is string => Boolean(p));
-              const ingested = ingestDiscoveredPaths(siteMap, normalized, {
-                runBudget: MAX_DISCOVERED_PER_RUN,
-                usedBudget: discoverBudget.used,
-              });
-              discoverBudget.used = ingested.usedBudget;
-            }
-          } catch (e) {
-            console.warn(`  [site-map] visit/discover update failed:`, e);
-          }
+        const remaining = maxIterations - iteration;
+        let budgetHint = `[${remaining} turns remaining]`;
+        if (remaining <= 2) {
+          budgetHint += " Last turns. Post any remaining findings with post_feedback, then finish.";
+        } else if (remaining <= 4) {
+          budgetHint += " Start wrapping up.";
         }
 
-        const content: Anthropic.ToolResultBlockParam["content"] =
-          sendToClaude && screenshot
-            ? [
-                { type: "text", text },
-                { type: "image", source: { type: "base64", media_type: "image/png", data: screenshot.base64 } },
-              ]
-            : text;
+        const PROGRESS_TOOLS = new Set(["navigate", "fill", "post_feedback"]);
+        const recent = agentLog.actions.slice(-5).map((a) => a.tool);
+        if (recent.length >= 5 && !recent.some((t) => PROGRESS_TOOLS.has(t))) {
+          budgetHint += " You seem stuck on the same page. Navigate to a different page.";
+        }
 
-        toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content });
-      }
+        const observationWarning = buildObservationWarning(observation);
+        if (observationWarning) {
+          budgetHint += `\n\n${observationWarning}\nUse read_console_logs or read_network_errors for details.`;
+        }
 
-      const MAX_ITERATIONS = 12;
-      const remaining = MAX_ITERATIONS - agentLog.iterations;
-      let budgetHint = `[${remaining} turns remaining]`;
-      if (remaining <= 2) {
-        budgetHint += " Last turns. Post any remaining findings with post_feedback, then finish.";
-      } else if (remaining <= 4) {
-        budgetHint += " Start wrapping up.";
-      }
-
-      const PROGRESS_TOOLS = new Set(["navigate", "fill", "post_feedback"]);
-      const recent = agentLog.actions.slice(-5).map((a) => a.tool);
-      if (recent.length >= 5 && !recent.some((t) => PROGRESS_TOOLS.has(t))) {
-        budgetHint += " You seem stuck on the same page. Navigate to a different page.";
-      }
-
-      const observationWarning = buildObservationWarning(observation);
-      if (observationWarning) {
-        budgetHint += `\n\n${observationWarning}\nUse read_console_logs or read_network_errors for details.`;
-      }
-
-      const last = toolResults[toolResults.length - 1];
-      const lastContent = last.content;
-      toolResults[toolResults.length - 1] = {
-        ...last,
-        content:
-          typeof lastContent === "string"
-            ? `${lastContent}\n\n${budgetHint}`
-            : ([...(lastContent as unknown[]), { type: "text" as const, text: budgetHint }] as Anthropic.ToolResultBlockParam["content"]),
-      };
-
-      messages.push({ role: "user", content: toolResults });
-    }
+        const last = results[results.length - 1];
+        if (!last) return;
+        const lastContent = last.content;
+        results[results.length - 1] = {
+          ...last,
+          content:
+            typeof lastContent === "string"
+              ? `${lastContent}\n\n${budgetHint}`
+              : ([...(lastContent as unknown[]), { type: "text" as const, text: budgetHint }] as Anthropic.ToolResultBlockParam["content"]),
+        };
+      },
+    });
+    agentLog.iterations = result.iterations;
+    if (agentLog.status !== "iteration_limit") agentLog.status = "completed";
+    if (result.iterations >= MAX_ITERATIONS) agentLog.status = "iteration_limit";
   } catch (e) {
     agentLog.status = "error";
     agentLog.error = String(e);
@@ -1523,102 +1505,87 @@ ${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\
     }
   })();
 
-  const messages: Anthropic.MessageParam[] = [
-    {
-      role: "user",
-      content: [
+  const MAX_ITERATIONS = 12;
+  const sessionTools = BROWSER_TOOLS.map((t) => ({
+    name: t.name,
+    description: t.description ?? t.name,
+    input_schema: t.input_schema as Record<string, unknown>,
+    execute: async (input: Record<string, unknown>): Promise<ToolResultContent> => {
+      console.log(`  → ${t.name}(${JSON.stringify(input).slice(0, 60)})`);
+
+      const { text, screenshot, sendToClaude } = await executeBrowserTool(
+        t.name,
+        input,
+        page,
+        agentLog,
+        observation,
+        agent.id,
+        [],
+        cachedHashes,
+        pageHashUpdates,
+        undefined,
+      );
+
+      return sendToClaude && screenshot
+        ? [
+            { type: "text", text },
+            { type: "image", source: { type: "base64", media_type: "image/png", data: screenshot.base64 } },
+          ]
+        : text;
+    },
+  }));
+
+  try {
+    const result = await runToolSession({
+      provider: llmProvider,
+      client,
+      model: defaultModel,
+      system: systemPrompt,
+      userPrompt: [
         { type: "image", source: { type: "base64", media_type: "image/png", data: initialScreenshot.base64 } },
         { type: "text", text: opening },
       ],
-    },
-  ];
+      tools: sessionTools,
+      maxIterations: MAX_ITERATIONS,
+      maxTokens: 1024,
+      onAfterTools: ({ results, iteration, maxIterations }) => {
+        agentLog.iterations = iteration;
+        if (iteration >= maxIterations) agentLog.status = "iteration_limit";
 
-  try {
-    while (agentLog.iterations < 12) {
-      agentLog.iterations++;
+        const remaining = maxIterations - iteration;
+        let budgetHint = `[${remaining} turns remaining]`;
+        if (remaining <= 2) {
+          budgetHint += " Last turns. Post any remaining threshold findings with post_feedback, then finish.";
+        } else if (remaining <= 4) {
+          budgetHint += " Start wrapping up remaining candidates.";
+        }
 
-      const response = await createMessageWithRetry(client, {
-        model: defaultModel,
-        max_tokens: 1024,
-        system: systemPrompt,
-        tools: BROWSER_TOOLS,
-        messages,
-      });
+        const PROGRESS_TOOLS = new Set(["navigate", "fill", "post_feedback"]);
+        const recent = agentLog.actions.slice(-5).map((a) => a.tool);
+        if (recent.length >= 5 && !recent.some((t) => PROGRESS_TOOLS.has(t))) {
+          budgetHint += " You seem stuck. Move to the next threshold candidate or a different area.";
+        }
 
-      const assistantContent = response.content;
-      messages.push({ role: "assistant", content: assistantContent });
+        const observationWarning = buildObservationWarning(observation);
+        if (observationWarning) {
+          budgetHint += `\n\n${observationWarning}\nUse read_console_logs or read_network_errors for details.`;
+        }
 
-      const toolUses = assistantContent.filter(
-        (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
-      );
-
-      if (toolUses.length === 0 || response.stop_reason === "end_turn") {
-        agentLog.status = "completed";
-        break;
-      }
-
-      if (agentLog.iterations >= 12) agentLog.status = "iteration_limit";
-
-      const toolResults: Anthropic.ToolResultBlockParam[] = [];
-      for (const toolUse of toolUses) {
-        console.log(`  → ${toolUse.name}(${JSON.stringify(toolUse.input).slice(0, 60)})`);
-
-        const { text, screenshot, sendToClaude } = await executeBrowserTool(
-          toolUse.name,
-          toolUse.input as Record<string, unknown>,
-          page,
-          agentLog,
-          observation,
-          agent.id,
-          [],
-          cachedHashes,
-          pageHashUpdates,
-          undefined,
-        );
-
-        const content: Anthropic.ToolResultBlockParam["content"] =
-          sendToClaude && screenshot
-            ? [
-                { type: "text", text },
-                { type: "image", source: { type: "base64", media_type: "image/png", data: screenshot.base64 } },
-              ]
-            : text;
-
-        toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content });
-      }
-
-      const MAX_ITERATIONS = 12;
-      const remaining = MAX_ITERATIONS - agentLog.iterations;
-      let budgetHint = `[${remaining} turns remaining]`;
-      if (remaining <= 2) {
-        budgetHint += " Last turns. Post any remaining threshold findings with post_feedback, then finish.";
-      } else if (remaining <= 4) {
-        budgetHint += " Start wrapping up remaining candidates.";
-      }
-
-      const PROGRESS_TOOLS = new Set(["navigate", "fill", "post_feedback"]);
-      const recent = agentLog.actions.slice(-5).map((a) => a.tool);
-      if (recent.length >= 5 && !recent.some((t) => PROGRESS_TOOLS.has(t))) {
-        budgetHint += " You seem stuck. Move to the next threshold candidate or a different area.";
-      }
-
-      const observationWarning = buildObservationWarning(observation);
-      if (observationWarning) {
-        budgetHint += `\n\n${observationWarning}\nUse read_console_logs or read_network_errors for details.`;
-      }
-
-      const last = toolResults[toolResults.length - 1];
-      const lastContent = last.content;
-      toolResults[toolResults.length - 1] = {
-        ...last,
-        content:
-          typeof lastContent === "string"
-            ? `${lastContent}\n\n${budgetHint}`
-            : ([...(lastContent as unknown[]), { type: "text" as const, text: budgetHint }] as Anthropic.ToolResultBlockParam["content"]),
-      };
-
-      messages.push({ role: "user", content: toolResults });
-    }
+        const last = results[results.length - 1];
+        if (!last) return;
+        const lastContent = last.content;
+        results[results.length - 1] = {
+          ...last,
+          content:
+            typeof lastContent === "string"
+              ? `${lastContent}\n\n${budgetHint}`
+              : ([...(lastContent as unknown[]), { type: "text" as const, text: budgetHint }] as Anthropic.ToolResultBlockParam["content"]),
+        };
+      },
+    });
+    agentLog.iterations = result.iterations;
+    if (agentLog.status !== "iteration_limit") agentLog.status = "completed";
+    if (result.iterations >= MAX_ITERATIONS) agentLog.status = "iteration_limit";
   } catch (e) {
     agentLog.status = "error";
     agentLog.error = String(e);

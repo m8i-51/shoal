@@ -1,6 +1,5 @@
-import Anthropic from "@anthropic-ai/sdk";
 import type { LLMClient } from "./llm-client";
-import { createMessageWithRetry } from "./agent-loop";
+import { captureStructuredTool } from "./tool-session";
 import type { ProductSpec } from "./product-discovery";
 import { findBestByRole, roleAffinity } from "./role-match";
 
@@ -99,7 +98,7 @@ export interface ScenarioOutcome {
   iterations?: number; // post_outcome 呼び出し時点のエージェントのイテレーション数（タスク完了までの手数）
 }
 
-const OUTPUT_SCENARIOS_TOOL: Anthropic.Tool = {
+const OUTPUT_SCENARIOS_TOOL = {
   name: "output_scenarios",
   description: "Output the generated test scenarios / 生成したテストシナリオを出力する",
   input_schema: {
@@ -172,17 +171,17 @@ export async function designScenarios(
     ? `\n[Available Test Account Roles]\n${distinctRoles.map((r) => `- ${r}`).join("\n")}\nSince multiple roles are available, make EXACTLY ONE scenario a multi-actor scenario: set its "actors" field to 2 actors (roles from the list above) who use the app AT THE SAME TIME in a way that could conflict — e.g. an admin revoking access while a user is mid-flow, or two users editing the same record concurrently.`
     : "";
 
-  const response = await createMessageWithRetry(client, {
+  const raw = await captureStructuredTool<{
+    scenarios: { title: string; context: string; goal: string; constraints: string; actors?: { role: string; goal: string }[] }[];
+  }>({
+    provider: process.env.LLM_PROVIDER ?? "anthropic",
+    client,
     model,
-    max_tokens: 2048,
+    maxTokens: 2048,
     system: `You are a QA scenario designer. Generate realistic user test scenarios for a web app.
 Each scenario represents a believable task a real user would attempt — not a bug hunt, but a natural user journey.
 Scenarios should collectively cover different user types, app areas, and workflows.`,
-    tools: [OUTPUT_SCENARIOS_TOOL],
-    messages: [
-      {
-        role: "user",
-        content: `Generate exactly ${count} test scenarios for this app.
+    userPrompt: `Generate exactly ${count} test scenarios for this app.
 
 [App Overview]
 ${spec.appDescription}
@@ -204,20 +203,16 @@ Guidelines:
 - Constraints should reflect realistic user states (first time, in a hurry, confused, etc.)
 
 Call output_scenarios with exactly ${count} scenarios.`,
-      },
-    ],
+    tool: {
+      ...OUTPUT_SCENARIOS_TOOL,
+      execute: async () => "ok",
+    },
   });
 
-  const toolUse = response.content.find(
-    (b): b is Anthropic.ToolUseBlock => b.type === "tool_use" && b.name === "output_scenarios"
-  );
-
-  if (!toolUse) {
+  if (!raw) {
     console.warn("[scenario-designer] LLM did not call output_scenarios — falling back to lens-only mode");
     return [];
   }
-
-  const raw = toolUse.input as { scenarios: { title: string; context: string; goal: string; constraints: string; actors?: { role: string; goal: string }[] }[] };
 
   if (!Array.isArray(raw.scenarios) || raw.scenarios.length === 0) {
     console.warn("[scenario-designer] empty scenarios array returned");

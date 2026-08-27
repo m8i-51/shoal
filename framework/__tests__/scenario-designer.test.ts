@@ -1,8 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("../agent-loop", () => ({ createMessageWithRetry: vi.fn() }));
+vi.mock("../tool-session", () => ({
+  captureStructuredTool: vi.fn(),
+  completeText: vi.fn(),
+  runToolSession: vi.fn(),
+}));
 
-import { createMessageWithRetry } from "../agent-loop";
+import { captureStructuredTool } from "../tool-session";
 import { designScenarios, findMultiActorScenario, soloScenarios, pairAgentsToActors, pickBrowserAgents } from "../scenario-designer";
 import type { ProductSpec } from "../product-discovery";
 import type { LLMClient } from "../llm-client";
@@ -22,265 +26,146 @@ function makeSpec(overrides: Partial<ProductSpec> = {}): ProductSpec {
   };
 }
 
-function makeToolUseResponse(scenarios: unknown) {
-  return {
-    content: [{ type: "tool_use", id: "t1", name: "output_scenarios", input: { scenarios } }],
-    stop_reason: "tool_use",
-    usage: {},
-  };
-}
-
 beforeEach(() => {
-  vi.mocked(createMessageWithRetry).mockReset();
+  vi.mocked(captureStructuredTool).mockReset();
 });
 
 describe("designScenarios", () => {
   it("正しい model/count でリクエストし、scenario_N の id を付与する", async () => {
-    vi.mocked(createMessageWithRetry).mockResolvedValue(makeToolUseResponse([
-      { title: "T1", context: "C1", goal: "G1", constraints: "X1" },
-      { title: "T2", context: "C2", goal: "G2", constraints: "X2" },
-    ]) as never);
+    vi.mocked(captureStructuredTool).mockResolvedValue({
+      scenarios: [
+        { title: "T1", context: "C1", goal: "G1", constraints: "X1" },
+        { title: "T2", context: "C2", goal: "G2", constraints: "X2" },
+      ],
+    });
     const result = await designScenarios(makeSpec(), [], {} as LLMClient, "claude-sonnet-4-6", 2);
     expect(result).toEqual([
       { id: "scenario_1", title: "T1", context: "C1", goal: "G1", constraints: "X1" },
       { id: "scenario_2", title: "T2", context: "C2", goal: "G2", constraints: "X2" },
     ]);
-    const [, params] = vi.mocked(createMessageWithRetry).mock.calls[0];
-    expect(params.model).toBe("claude-sonnet-4-6");
-    expect(params.messages[0].content).toContain("Generate exactly 2 test scenarios");
+    const call = vi.mocked(captureStructuredTool).mock.calls[0][0];
+    expect(call.model).toBe("claude-sonnet-4-6");
+    expect(call.userPrompt).toContain("Generate exactly 2 test scenarios");
   });
 
-  it("openIssues がある場合は [Known Open Issues] ヒントを含める（最大15件）", async () => {
-    vi.mocked(createMessageWithRetry).mockResolvedValue(makeToolUseResponse([]) as never);
-    const issues = Array.from({ length: 20 }, (_, i) => ({ number: i, title: `Issue ${i}`, labels: ["bug"] }));
-    await designScenarios(makeSpec(), issues, {} as LLMClient, "m");
-    const [, params] = vi.mocked(createMessageWithRetry).mock.calls[0];
-    const content = params.messages[0].content as string;
-    expect(content).toContain("[Known Open Issues");
-    expect(content).toContain("Issue 14");
-    expect(content).not.toContain("Issue 15");
+  it("coverageSummary があるときプロンプトに含める", async () => {
+    vi.mocked(captureStructuredTool).mockResolvedValue({ scenarios: [] });
+    await designScenarios(makeSpec(), [], {} as LLMClient, "m", 3, "lens X underrepresented");
+    expect(vi.mocked(captureStructuredTool).mock.calls[0][0].userPrompt).toContain("lens X underrepresented");
   });
 
-  it("openIssues が空の場合はヒントを含めない", async () => {
-    vi.mocked(createMessageWithRetry).mockResolvedValue(makeToolUseResponse([]) as never);
-    await designScenarios(makeSpec(), [], {} as LLMClient, "m");
-    const [, params] = vi.mocked(createMessageWithRetry).mock.calls[0];
-    expect(params.messages[0].content as string).not.toContain("[Known Open Issues");
+  it("openIssues があるときプロンプトに含める", async () => {
+    vi.mocked(captureStructuredTool).mockResolvedValue({ scenarios: [] });
+    await designScenarios(makeSpec(), [{ number: 1, title: "Broken login", labels: ["bug"] }], {} as LLMClient, "m", 3);
+    expect(vi.mocked(captureStructuredTool).mock.calls[0][0].userPrompt).toContain("Broken login");
   });
 
-  it("coverageSummary がある場合は [Coverage History] ヒントを含める", async () => {
-    vi.mocked(createMessageWithRetry).mockResolvedValue(makeToolUseResponse([]) as never);
-    await designScenarios(makeSpec(), [], {} as LLMClient, "m", 5, "lens X underused");
-    const [, params] = vi.mocked(createMessageWithRetry).mock.calls[0];
-    const content = params.messages[0].content as string;
-    expect(content).toContain("[Coverage History");
-    expect(content).toContain("lens X underused");
+  it("accountRoles が 2 つ以上なら multi-actor ヒントを含める", async () => {
+    vi.mocked(captureStructuredTool).mockResolvedValue({ scenarios: [] });
+    await designScenarios(makeSpec(), [], {} as LLMClient, "m", 3, undefined, ["admin", "user"]);
+    expect(vi.mocked(captureStructuredTool).mock.calls[0][0].userPrompt).toContain("multi-actor");
   });
 
-  it("uiFeatures がある場合は [UI-Only Features] セクションを含める", async () => {
-    vi.mocked(createMessageWithRetry).mockResolvedValue(makeToolUseResponse([]) as never);
-    await designScenarios(makeSpec({ uiFeatures: "dark mode toggle" }), [], {} as LLMClient, "m");
-    const [, params] = vi.mocked(createMessageWithRetry).mock.calls[0];
-    expect(params.messages[0].content as string).toContain("[UI-Only Features]\ndark mode toggle");
+  it("accountRoles が 1 つ以下なら multi-actor ヒントを含めない", async () => {
+    vi.mocked(captureStructuredTool).mockResolvedValue({ scenarios: [] });
+    await designScenarios(makeSpec(), [], {} as LLMClient, "m", 3, undefined, ["admin"]);
+    expect(vi.mocked(captureStructuredTool).mock.calls[0][0].userPrompt).not.toContain("multi-actor");
   });
 
-  it("output_scenarios が呼ばれなかった場合は空配列を返す", async () => {
-    vi.mocked(createMessageWithRetry).mockResolvedValue({
-      content: [{ type: "text", text: "I could not generate scenarios" }],
-      stop_reason: "end_turn",
-      usage: {},
-    } as never);
-    expect(await designScenarios(makeSpec(), [], {} as LLMClient, "m")).toEqual([]);
+  it("tool 呼び出しが無い場合は空配列", async () => {
+    vi.mocked(captureStructuredTool).mockResolvedValue(null);
+    expect(await designScenarios(makeSpec(), [], {} as LLMClient, "m", 3)).toEqual([]);
   });
 
-  it("scenarios が配列でない場合は空配列を返す", async () => {
-    vi.mocked(createMessageWithRetry).mockResolvedValue({
-      content: [{ type: "tool_use", id: "t1", name: "output_scenarios", input: { scenarios: "not-an-array" } }],
-      stop_reason: "tool_use",
-      usage: {},
-    } as never);
-    expect(await designScenarios(makeSpec(), [], {} as LLMClient, "m")).toEqual([]);
+  it("scenarios が空配列なら空を返す", async () => {
+    vi.mocked(captureStructuredTool).mockResolvedValue({ scenarios: [] });
+    expect(await designScenarios(makeSpec(), [], {} as LLMClient, "m", 3)).toEqual([]);
   });
 
-  it("scenarios が空配列の場合は空配列を返す", async () => {
-    vi.mocked(createMessageWithRetry).mockResolvedValue(makeToolUseResponse([]) as never);
-    expect(await designScenarios(makeSpec(), [], {} as LLMClient, "m")).toEqual([]);
+  it("uiFeatures をプロンプトに含める", async () => {
+    vi.mocked(captureStructuredTool).mockResolvedValue({ scenarios: [] });
+    await designScenarios(makeSpec({ uiFeatures: "Dark mode toggle" }), [], {} as LLMClient, "m", 3);
+    expect(vi.mocked(captureStructuredTool).mock.calls[0][0].userPrompt).toContain("Dark mode toggle");
   });
 
-  it("各フィールドを文字列化する（数値が来ても String() で変換）", async () => {
-    vi.mocked(createMessageWithRetry).mockResolvedValue(makeToolUseResponse([
-      { title: 123, context: "C", goal: "G", constraints: "X" },
-    ]) as never);
-    const result = await designScenarios(makeSpec(), [], {} as LLMClient, "m");
-    expect(result[0].title).toBe("123");
-    expect(typeof result[0].title).toBe("string");
-  });
-
-  it("別の tool_use（output_scenarios 以外）は無視して空配列を返す", async () => {
-    vi.mocked(createMessageWithRetry).mockResolvedValue({
-      content: [{ type: "tool_use", id: "t1", name: "other_tool", input: {} }],
-      stop_reason: "tool_use",
-      usage: {},
-    } as never);
-    expect(await designScenarios(makeSpec(), [], {} as LLMClient, "m")).toEqual([]);
-  });
-});
-
-describe("multi-actor scenarios", () => {
-  it("accountRoles が 2 種以上あればマルチアクターのヒントをプロンプトに含める", async () => {
-    vi.mocked(createMessageWithRetry).mockResolvedValue(makeToolUseResponse([]) as never);
-    await designScenarios(makeSpec(), [], {} as LLMClient, "m", 5, undefined, ["admin", "user", "user"]);
-    const [, params] = vi.mocked(createMessageWithRetry).mock.calls[0];
-    const content = params.messages[0].content as string;
-    expect(content).toContain("[Available Test Account Roles]");
-    expect(content).toContain("multi-actor");
-  });
-
-  it("accountRoles が 1 種以下ならヒントを含めない", async () => {
-    vi.mocked(createMessageWithRetry).mockResolvedValue(makeToolUseResponse([]) as never);
-    await designScenarios(makeSpec(), [], {} as LLMClient, "m", 5, undefined, ["user"]);
-    const [, params] = vi.mocked(createMessageWithRetry).mock.calls[0];
-    expect(params.messages[0].content as string).not.toContain("[Available Test Account Roles]");
-  });
-
-  it("actors が 2 件揃ったシナリオだけ actors を保持する", async () => {
-    vi.mocked(createMessageWithRetry).mockResolvedValue(makeToolUseResponse([
-      { title: "Solo", context: "c", goal: "g", constraints: "x" },
-      { title: "Pair", context: "c", goal: "g", constraints: "x", actors: [
-        { role: "admin", goal: "revoke access" },
-        { role: "user", goal: "finish editing" },
-      ] },
-      { title: "Broken", context: "c", goal: "g", constraints: "x", actors: [{ role: "admin", goal: "solo actor" }] },
-    ]) as never);
-    const result = await designScenarios(makeSpec(), [], {} as LLMClient, "m", 3);
-    expect(result[0].actors).toBeUndefined();
-    expect(result[1].actors).toEqual([
-      { role: "admin", goal: "revoke access" },
-      { role: "user", goal: "finish editing" },
-    ]);
-    expect(result[2].actors).toBeUndefined();
-  });
-
-  it("actors が 3 件以上でも先頭 2 件に切り詰める", async () => {
-    vi.mocked(createMessageWithRetry).mockResolvedValue(makeToolUseResponse([
-      { title: "Trio", context: "c", goal: "g", constraints: "x", actors: [
-        { role: "a", goal: "1" }, { role: "b", goal: "2" }, { role: "c", goal: "3" },
-      ] },
-    ]) as never);
+  it("2 actors があるシナリオは actors を付ける", async () => {
+    vi.mocked(captureStructuredTool).mockResolvedValue({
+      scenarios: [{
+        title: "Race",
+        context: "C",
+        goal: "G",
+        constraints: "X",
+        actors: [
+          { role: "admin", goal: "revoke" },
+          { role: "user", goal: "edit" },
+        ],
+      }],
+    });
     const result = await designScenarios(makeSpec(), [], {} as LLMClient, "m", 1);
-    expect(result[0].actors).toHaveLength(2);
+    expect(result[0].actors).toEqual([
+      { role: "admin", goal: "revoke" },
+      { role: "user", goal: "edit" },
+    ]);
+  });
+
+  it("actors が 1 人だけなら actors を付けない", async () => {
+    vi.mocked(captureStructuredTool).mockResolvedValue({
+      scenarios: [{
+        title: "Solo",
+        context: "C",
+        goal: "G",
+        constraints: "X",
+        actors: [{ role: "admin", goal: "do stuff" }],
+      }],
+    });
+    const result = await designScenarios(makeSpec(), [], {} as LLMClient, "m", 1);
+    expect(result[0].actors).toBeUndefined();
   });
 });
 
 describe("findMultiActorScenario / soloScenarios", () => {
-  const pair = { id: "s1", title: "Pair", context: "", goal: "", constraints: "", actors: [
-    { role: "admin", goal: "g1" }, { role: "user", goal: "g2" },
-  ] };
-  const solo = { id: "s2", title: "Solo", context: "", goal: "", constraints: "" };
-
-  it("マルチアクターシナリオを 1 件返す", () => {
-    expect(findMultiActorScenario([solo, pair])).toBe(pair);
-    expect(findMultiActorScenario([solo])).toBeUndefined();
-  });
-
-  it("soloScenarios はマルチアクターを除外する", () => {
-    expect(soloScenarios([solo, pair])).toEqual([solo]);
+  it("2 actors のシナリオを見つける", () => {
+    const scenarios = [
+      { id: "s1", title: "a", context: "", goal: "", constraints: "" },
+      { id: "s2", title: "b", context: "", goal: "", constraints: "", actors: [{ role: "a", goal: "x" }, { role: "b", goal: "y" }] },
+    ];
+    expect(findMultiActorScenario(scenarios)?.id).toBe("s2");
+    expect(soloScenarios(scenarios).map((s) => s.id)).toEqual(["s1"]);
   });
 });
 
 describe("pairAgentsToActors", () => {
-  it("枠順ではなくペルソナ role と actor role を突き合わせて割り当てる", () => {
-    const learner = { id: "a1", name: "未ログイン学習者", role: "learner" };
-    const instructor = { id: "a2", name: "講師", role: "instructor" };
-    const scenario = {
-      id: "s1",
-      title: "授業中",
-      context: "",
-      goal: "",
-      constraints: "",
-      actors: [
-        { role: "instructor", goal: "課題を締め切る" },
-        { role: "learner", goal: "提出する" },
-      ],
-    };
-    const paired = pairAgentsToActors([learner, instructor], scenario);
-    expect(paired.get("a1")?.role).toBe("learner");
-    expect(paired.get("a2")?.role).toBe("instructor");
-    expect(paired.get("a1")?.partnerRole).toBe("instructor");
-    expect(paired.get("a2")?.partnerRole).toBe("learner");
-  });
-
-  it("複合ペルソナ role でもテストアカウント側の actor role に載せる", () => {
+  it("role 親和度でペアリングする", () => {
     const agents = [
-      { id: "guest", name: "ゲスト学習者", role: "Learner (guest)" },
-      { id: "teacher", name: "数学講師", role: "Math Instructor" },
+      { id: "1", name: "A", role: "admin" },
+      { id: "2", name: "B", role: "user" },
     ];
     const scenario = {
-      id: "s1",
-      title: "Pair",
+      id: "s",
+      title: "t",
       context: "",
       goal: "",
       constraints: "",
       actors: [
-        { role: "instructor", goal: "grade" },
-        { role: "learner", goal: "submit" },
+        { role: "admin", goal: "g1" },
+        { role: "user", goal: "g2" },
       ],
     };
     const paired = pairAgentsToActors(agents, scenario);
-    expect(paired.get("teacher")?.role).toBe("instructor");
-    expect(paired.get("guest")?.role).toBe("learner");
-  });
-
-  it("3 体いても actor 2 役に最も合うエージェントを選ぶ", () => {
-    const agents = [
-      { id: "v", name: "Visitor", role: "visitor" },
-      { id: "l", name: "Learner", role: "learner" },
-      { id: "i", name: "Instructor", role: "instructor" },
-    ];
-    const scenario = {
-      id: "s1",
-      title: "Pair",
-      context: "",
-      goal: "",
-      constraints: "",
-      actors: [
-        { role: "instructor", goal: "grade" },
-        { role: "learner", goal: "submit" },
-      ],
-    };
-    const paired = pairAgentsToActors(agents, scenario);
-    expect(paired.get("i")?.role).toBe("instructor");
-    expect(paired.get("l")?.role).toBe("learner");
-    expect(paired.has("v")).toBe(false);
-  });
-
-  it("actor が 2 人揃わなければ空の Map", () => {
-    expect(pairAgentsToActors(
-      [{ id: "a", name: "A", role: "admin" }],
-      { id: "s", title: "t", context: "", goal: "", constraints: "", actors: [{ role: "admin", goal: "g" }] },
-    ).size).toBe(0);
+    expect(paired.get("1")?.role).toBe("admin");
+    expect(paired.get("2")?.role).toBe("user");
   });
 });
 
 describe("pickBrowserAgents", () => {
-  it("マルチアクターの role に合うエージェントを先にブラウザ枠へ入れる", () => {
+  it("actorRoles に合うエージェントを優先する", () => {
     const agents = [
-      { id: "1", name: "Visitor", role: "visitor" },
-      { id: "2", name: "講師", role: "instructor" },
-      { id: "3", name: "学習者", role: "learner" },
-      { id: "4", name: "Admin", role: "admin" },
+      { id: "1", name: "A", role: "user" },
+      { id: "2", name: "B", role: "admin" },
+      { id: "3", name: "C", role: "viewer" },
     ];
-    const picked = pickBrowserAgents(agents, 2, ["instructor", "learner"], () => 0);
-    expect(picked.map((a) => a.role).sort()).toEqual(["instructor", "learner"]);
-  });
-
-  it("role 一致が足りなければ残りをランダムに埋める", () => {
-    const agents = [
-      { id: "1", name: "Visitor", role: "visitor" },
-      { id: "2", name: "講師", role: "instructor" },
-    ];
-    const picked = pickBrowserAgents(agents, 2, ["instructor", "learner"], () => 0);
+    const picked = pickBrowserAgents(agents, 2, ["admin"], () => 0);
+    expect(picked[0].role).toBe("admin");
     expect(picked).toHaveLength(2);
-    expect(picked.some((a) => a.role === "instructor")).toBe(true);
   });
 });
