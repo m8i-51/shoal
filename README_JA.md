@@ -418,8 +418,55 @@ Detection rate: 5/7 (71%)
 | Groq | `LLM_PROVIDER=groq`, `LLM_API_KEY`, `LLM_MODEL` |
 | Gemini | `LLM_PROVIDER=gemini`, `LLM_API_KEY`, `LLM_MODEL` |
 | Codex（ChatGPT サブスク） | `npm run auth:codex` を一度実行後、`LLM_PROVIDER=codex` |
+| Claude CLI（Claude Code サブスク） | `npm run auth:claude` を一度実行後、`LLM_PROVIDER=claude-cli` |
 | Ollama | `LLM_BASE_URL=http://localhost:11434/v1`, `LLM_MODEL` |
 | LM Studio | `LLM_BASE_URL=http://localhost:1234/v1`, `LLM_MODEL` |
+
+### Claude CLI（Claude Code サブスク）
+
+Anthropic の Free / Pro / Max サブスクを、**公式 Claude Code のログイン**経由で使う方式です（xangi / OpenClaw と同型）。shoal は OAuth トークンを読みません・保存しません。
+
+**前提**
+
+- [Claude Code](https://code.claude.com/docs/en/overview) がインストールされ、`claude` が PATH にあること
+- Claude Pro / Max（または Team / Enterprise）などのサブスク
+
+**セットアップ**
+
+```bash
+npm run auth:claude
+# または:
+#   claude auth login
+#   # .env に LLM_PROVIDER=claude-cli と LLM_MODEL=claude-sonnet-4-6 を設定
+```
+
+`auth:claude` はログイン確認後、`.env` に `LLM_PROVIDER=claude-cli` を書き込みます。
+
+**起動**
+
+いつもどおりです。
+
+```bash
+shoal
+# または
+npm start
+shoal serve
+```
+
+**API キーとの関係**
+
+- サブスク枠で使いたい場合: `.env` とシェルから `ANTHROPIC_API_KEY` を外す（キーがあると Claude Code が API 従量課金側を優先することがある）
+- API キーだけで使う場合（従来どおり）: `ANTHROPIC_API_KEY` を設定し、`LLM_PROVIDER` は未設定または `anthropic`
+
+**規約について**
+
+Anthropic は、サードパーティが Claude.ai ログインや Free/Pro/Max 認証情報を自前 API クライアントで仲介することを禁止しています。`claude-cli` はユーザー自身が公式 Claude Code にログインした状態で、Agent SDK / Claude Code を起動するだけです。shoal をホスト／再配布する用途では、API キーまたは Bedrock を推奨します。
+
+**トラブルシュート**
+
+- `claude` not found → Claude Code を入れ、新しいシェルで PATH を確認
+- `auth status` 失敗 → `claude auth login` を再実行
+- 権限プロンプトが出る → shoal は Claude Code 組み込みツールを無効化し、shoal のツールだけを許可する想定。最新の Claude Code に更新して再試行
 
 ### Amazon Bedrock
 

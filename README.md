@@ -417,8 +417,55 @@ shoal defaults to Anthropic Claude. To use a different provider, set these varia
 | Groq | `LLM_PROVIDER=groq`, `LLM_API_KEY`, `LLM_MODEL` |
 | Gemini | `LLM_PROVIDER=gemini`, `LLM_API_KEY`, `LLM_MODEL` |
 | Codex (ChatGPT subscription) | run `npm run auth:codex` once, then `LLM_PROVIDER=codex` |
+| Claude CLI (Claude Code subscription) | run `npm run auth:claude` once, then `LLM_PROVIDER=claude-cli` |
 | Ollama | `LLM_BASE_URL=http://localhost:11434/v1`, `LLM_MODEL` |
 | LM Studio | `LLM_BASE_URL=http://localhost:1234/v1`, `LLM_MODEL` |
+
+### Claude CLI (Claude Code subscription)
+
+Use your Anthropic Free / Pro / Max subscription through the **official Claude Code login** (same pattern as xangi / OpenClaw). shoal never reads or stores OAuth tokens.
+
+**Prerequisites**
+
+- [Claude Code](https://code.claude.com/docs/en/overview) installed with `claude` on your `PATH`
+- A Claude Pro / Max (or Team / Enterprise) subscription
+
+**Setup**
+
+```bash
+npm run auth:claude
+# or:
+#   claude auth login
+#   # set LLM_PROVIDER=claude-cli and LLM_MODEL=claude-sonnet-4-6 in .env
+```
+
+`auth:claude` verifies login and writes `LLM_PROVIDER=claude-cli` to `.env`.
+
+**Run**
+
+Same as usual:
+
+```bash
+shoal
+# or
+npm start
+shoal serve
+```
+
+**API key vs subscription**
+
+- Prefer subscription quota: remove `ANTHROPIC_API_KEY` from `.env` and your shell (if set, Claude Code may prefer pay-as-you-go API billing)
+- Prefer API key only (classic): set `ANTHROPIC_API_KEY` and leave `LLM_PROVIDER` unset or `anthropic`
+
+**Terms note**
+
+Anthropic does not allow third parties to intermediate Claude.ai login or Free/Pro/Max credentials in their own API clients. `claude-cli` only launches official Claude Code / the Agent SDK after you authenticate yourself. For hosting or redistributing shoal, prefer API keys or Bedrock.
+
+**Troubleshooting**
+
+- `claude` not found → install Claude Code and confirm `PATH` in a new shell
+- `auth status` fails → run `claude auth login` again
+- Permission prompts → shoal disables Claude Code built-ins and only allows shoal tools; update Claude Code and retry
 
 ### Amazon Bedrock
 
