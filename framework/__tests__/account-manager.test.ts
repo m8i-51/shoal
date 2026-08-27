@@ -605,6 +605,59 @@ describe("runAccountManager", () => {
     expect(createMessageWithRetry).toHaveBeenCalledTimes(1);
   });
 
+  it("seed の storageState はロール探索の前に保存する", async () => {
+    const page = makeSessionPage({ afterSubmit: "leave-login" });
+    const order: string[] = [];
+    const context = makeFakeContext(page, {
+      storageState: vi.fn(async () => {
+        order.push("storage");
+        return SAVED_SESSION_STATE;
+      }),
+    });
+    vi.mocked(createMessageWithRetry).mockImplementation(async () => {
+      order.push("llm");
+      return toolUseResponse("done", {}) as never;
+    });
+
+    await runAccountManager("https://example.com", credentials, makeSpec(), context, {} as LLMClient, "m", "run_1");
+    expect(order[0]).toBe("storage");
+    expect(order).toContain("llm");
+  });
+
+  it("送信直後はフォームが残っていても、その後消えれば成功する", async () => {
+    let submitted = false;
+    let postSubmitLooks = 0;
+    let currentUrl = "";
+    const isFormVisible = async () => {
+      if (!submitted) return currentUrl.length > 0;
+      postSubmitLooks += 1;
+      return postSubmitLooks < 2;
+    };
+    const emailLocator = makeFakeLocator({ isVisible: vi.fn(isFormVisible) });
+    const passLocator = makeFakeLocator({ isVisible: vi.fn(isFormVisible) });
+    const submitLocator = makeFakeLocator({
+      isVisible: vi.fn(isFormVisible),
+      click: vi.fn(async () => { submitted = true; }),
+    });
+    const page = makeFakePage({
+      goto: vi.fn(async (url: string) => { currentUrl = url; }),
+      url: vi.fn(() => currentUrl),
+      locator: vi.fn((sel: string) => {
+        if (sel.includes("password")) return passLocator;
+        if (sel.includes("submit") || sel.includes("Login") || sel.includes("Sign in") || sel.includes("ログイン") || sel.includes("サインイン")) {
+          return submitLocator;
+        }
+        return emailLocator;
+      }),
+    });
+    const context = makeFakeContext(page);
+    vi.mocked(createMessageWithRetry).mockResolvedValueOnce(toolUseResponse("done", {}) as never);
+
+    const result = await runAccountManager("https://example.com", credentials, makeSpec(), context, {} as LLMClient, "m", "run_1");
+    expect(result[0].storageStatePath).not.toBe("");
+    expect(createMessageWithRetry).toHaveBeenCalled();
+  });
+
   it("seed ログイン成功後は cookie を消して取り直さず、storageState が空ならパスを残さない", async () => {
     const page = makeSessionPage({ afterSubmit: "leave-login" });
     const context = makeFakeContext(page, {

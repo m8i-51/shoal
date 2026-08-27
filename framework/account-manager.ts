@@ -435,6 +435,14 @@ async function snapshotLooksLoggedIn(page: Page, submittedFromUrl: string): Prom
   });
 }
 
+async function waitForLoginEstablished(page: Page, submittedFromUrl: string): Promise<boolean> {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    if (await snapshotLooksLoggedIn(page, submittedFromUrl)) return true;
+    await page.waitForTimeout(250);
+  }
+  return false;
+}
+
 async function performLogin(
   page: Page,
   urls: string[],
@@ -445,7 +453,7 @@ async function performLogin(
       await page.goto(url, { waitUntil: "networkidle" });
       await page.waitForTimeout(1000);
       if (!await fillLoginForm(page, credentials)) continue;
-      if (await snapshotLooksLoggedIn(page, url)) return true;
+      if (await waitForLoginEstablished(page, url)) return true;
     } catch {
       // try the next candidate
     }
@@ -616,6 +624,9 @@ export async function runAccountManager(
     );
   }
   console.log("[account-manager] login succeeded");
+
+  const seedRole = existingAccounts.find((a) => a.email === credentials.email)?.role || "user";
+  const seedStatePath = await saveContextSession(context, seedRole);
 
   const initialScreenshot = await takeScreenshot(page, "initial");
   const savedAccounts: Omit<TestAccount, "storageStatePath">[] = [];
@@ -788,8 +799,6 @@ If user management is not accessible from this account, or the app has no role s
     messages.push({ role: "user", content: toolResults });
   }
 
-  const seedRole = existingAccounts.find((a) => a.email === credentials.email)?.role || "user";
-  const seedStatePath = await saveContextSession(context, seedRole);
   await page.close();
   console.log(`[account-manager] found ${savedAccounts.length} newly created account(s)`);
 
