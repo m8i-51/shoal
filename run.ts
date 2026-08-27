@@ -16,7 +16,8 @@ import { createLLMClient } from "./framework/llm-client";
 import type { Tool } from "./framework/llm-client";
 import { createMessageWithRetry, runAgentLoop, sleep, rateLimitRetries } from "./framework/agent-loop";
 import { collectedFindings, initRunLog, saveRunLog, saveFinding, getSwarmSignals, runLog } from "./framework/findings";
-import { loadAgents, addAgent, retireAgent, recordAgentMemories, formatAgentMemories, buildMemoryInputs, type Agent } from "./framework/agent-store";
+import { loadAgents, addAgent, retireAgent, recordAgentMemories, formatAgentMemories, buildMemoryInputs, isFixedAgent, agentOrigin, type Agent } from "./framework/agent-store";
+import { computeRosterSlots, buildRunRoster, splitRosterForDispatch, partitionActiveAgents } from "./framework/roster";
 import { updateCoverage, computeWeightedSummary, getLastRunPaths, getFindingHotspots } from "./framework/coverage";
 import { computeExperienceScore, formatExperienceLine } from "./framework/experience-score";
 import { updateAdoption } from "./framework/adoption";
@@ -41,7 +42,7 @@ import {
 } from "./framework/observation";
 import { discoverProduct, loadCachedSpec, resolveLoginPath, type ProductSpec } from "./framework/product-discovery";
 import { designOrg, UNIVERSAL_LENSES } from "./framework/org-designer";
-import { designScenarios, findMultiActorScenario, soloScenarios, pairAgentsToActors, pickBrowserAgents, type Scenario, type ScenarioActor, type ScenarioOutcome } from "./framework/scenario-designer";
+import { designScenarios, findMultiActorScenario, soloScenarios, pairAgentsToActors, type Scenario, type ScenarioActor, type ScenarioOutcome } from "./framework/scenario-designer";
 import { runTriageAgent } from "./framework/triage";
 import { generateReport } from "./framework/report";
 import type { AgentLog, Finding, RegressionCheck } from "./framework/types";
@@ -81,10 +82,10 @@ if (SHOAL_MODE !== "full") console.log(`[guardrails] mode: ${SHOAL_MODE}`);
 const APP_TOOLS = filterAppTools(targetConfig.appTools, SHOAL_MODE);
 
 // skip exploration when no API tools are configured (after guardrail filtering)
-const MAX_EXPLORERS = APP_TOOLS.length > 0
+let MAX_EXPLORERS = APP_TOOLS.length > 0
   ? parseInt(process.env.MAX_EXPLORERS ?? "4", 10)
   : 0;
-const MAX_BROWSERS = parseInt(process.env.MAX_BROWSERS ?? "2", 10);
+let MAX_BROWSERS = parseInt(process.env.MAX_BROWSERS ?? "2", 10);
 
 const { client, defaultModel, provider: llmProvider } = createLLMClient();
 
@@ -560,6 +561,7 @@ async function runPersonaDesigner(
   testAccounts: TestAccount[] = [],
   lastRunPaths: { visitedPaths: string[]; runId: string } | null = null,
   personaPack: PersonaPack | null = null,
+  autoSlots = 2,
 ): Promise<void> {
   console.log("\n[persona-designer] starting...");
   const messages: Anthropic.MessageParam[] = [
@@ -584,16 +586,23 @@ You create and manage test agents that simulate real users of the app.
 [Organization Design Guidelines]
 ${orgGuidance}${accountContext}
 
+[Fixed roster rules]
+- Agents with origin "fixed" are team-curated permanent members. NEVER call retire_agent on them.
+- Align the number of ACTIVE auto agents (origin "auto" or missing) to exactly ${autoSlots}.
+  — If fewer than ${autoSlots} active autos exist, add_agent until you reach ${autoSlots}.
+  — If more than ${autoSlots} active autos exist, retire_agent the excess autos only (oldest first).
+  — If autoSlots is 0, do not add autos; retire excess autos if any.
+
 [Steps]
 1. Call get_coverage to review which lenses and categories are underrepresented in past runs
 ${personaTemplateStep}
 ${pathCoverageStep}
 5. Call get_open_issues to understand what problems are already known — recruit agents likely to find DIFFERENT issues in unexplored areas
 6. Call get_scenarios to see the user test scenarios generated for this run — about 70% of agents will be assigned a scenario, so recruit personas whose background fits those scenarios
-7. Call get_agents to check the current agent roster
-8. Add 2–3 agents with add_agent — balance between scenario-fit personas (step 6), underrepresented lenses (step 1), unexplored paths (step 3), finding hotspots (step 4), and unexplored areas (step 5)${testAccounts.length > 0 ? "\n   — assign each agent a role that matches one of the available test accounts" : ""}
-   — give 1–2 recruits an "environment" (mobile device, dark mode, non-default locale, slow connection) that naturally fits their persona's life; leave the rest on desktop
-9. If there are agents with old createdAt dates (oldest 1–2), retire them with retire_agent`;
+7. Call get_agents to check the current agent roster (archived agents are omitted; origin is included)
+8. Adjust AUTO agents only so that active autos == ${autoSlots}${testAccounts.length > 0 ? "\n   — assign each new agent a role that matches one of the available test accounts" : ""}
+   — give 1–2 new recruits an "environment" (mobile device, dark mode, non-default locale, slow connection) that naturally fits their persona's life; leave the rest on desktop
+9. Do not retire fixed agents. Only retire autos when above the autoSlots target.`;
 
   try {
     let iterations = 0;
@@ -658,8 +667,15 @@ ${pathCoverageStep}
           }
           console.log(`  [persona-designer] scenarios fetched (${scenarios.length})`);
         } else if (toolUse.name === "get_agents") {
-          const agents = loadAgents();
-          result = agents.map((a) => ({ id: a.id, name: a.name, role: a.role, createdAt: a.createdAt }));
+          const agents = loadAgents().filter((a) => (a.status ?? "active") !== "archived");
+          result = agents.map((a) => ({
+            id: a.id,
+            name: a.name,
+            role: a.role,
+            createdAt: a.createdAt,
+            origin: agentOrigin(a),
+            status: a.status ?? "active",
+          }));
           console.log(`  [persona-designer] current agents: ${agents.length}`);
         } else if (toolUse.name === "add_agent") {
           const { name, role, persona, environment } = toolUse.input as {
@@ -675,6 +691,8 @@ ${pathCoverageStep}
               role: role ?? "",
               persona: persona ?? "",
               environment: cleanEnv,
+              origin: "auto",
+              status: "active",
             });
             result = agent;
             console.log(`  [persona-designer] created: ${agent.name} (${agent.role})${cleanEnv ? ` [env: ${Object.entries(cleanEnv).map(([k, v]) => `${k}=${v}`).join(", ")}]` : ""}`);
@@ -685,8 +703,17 @@ ${pathCoverageStep}
           }
         } else if (toolUse.name === "retire_agent") {
           const { agentId, reason } = toolUse.input as { agentId: string; reason: string };
-          result = { success: retireAgent(agentId) };
-          console.log(`  [persona-designer] retired: ${agentId} — ${reason}`);
+          const existing = loadAgents().find((a) => a.id === agentId);
+          if (existing && isFixedAgent(existing)) {
+            result = { success: false, error: "cannot retire fixed persona" };
+            console.log(`  [persona-designer] retire blocked (fixed): ${agentId} — ${reason}`);
+          } else {
+            const success = retireAgent(agentId);
+            result = success
+              ? { success: true }
+              : { success: false, error: "agent not found or not retiring" };
+            console.log(`  [persona-designer] retired: ${agentId} — ${reason} (success=${success})`);
+          }
         } else {
           result = { error: "unknown tool" };
         }
@@ -1370,10 +1397,6 @@ async function runVerifyMode(
   console.log(`[verify] result saved: ${outPath}`);
 }
 
-function pickAgents<T>(agents: T[], count: number): T[] {
-  return [...agents].sort(() => Math.random() - 0.5).slice(0, count);
-}
-
 // 7:3 ratio: indices where (idx % 10) < 7 get a scenario, rest get a lens
 function pickAssignment(idx: number, scenarios: Scenario[]): Assignment {
   if (scenarios.length > 0 && idx % 10 < 7) {
@@ -1474,26 +1497,55 @@ async function main() {
       testAccounts.map((a) => a.role),
     );
 
-    // 5. HR agent
+    // 5. HR agent — fixed members first, then align autos to autoSlots
+    const preFixed = partitionActiveAgents(loadAgents()).fixed;
+    const slots = computeRosterSlots({
+      maxBrowsers: MAX_BROWSERS,
+      maxExplorers: MAX_EXPLORERS,
+      fixedCount: preFixed.length,
+    });
+    if (slots.maxBrowsers !== MAX_BROWSERS || slots.maxExplorers !== MAX_EXPLORERS) {
+      console.log(
+        `[roster] bumping caps for fixed members: browsers ${MAX_BROWSERS}→${slots.maxBrowsers}, explorers ${MAX_EXPLORERS}→${slots.maxExplorers} (fixed=${slots.F}, N=${slots.N}, effectiveN=${slots.effectiveN})`,
+      );
+      MAX_BROWSERS = slots.maxBrowsers;
+      MAX_EXPLORERS = slots.maxExplorers;
+    } else {
+      console.log(
+        `[roster] fixed=${slots.F} autoSlots=${slots.autoSlots} (N=${slots.N}, effectiveN=${slots.effectiveN})`,
+      );
+    }
+
     const lastRunPaths = getLastRunPaths();
     const personaPack = await loadPersonaPack();
-    await runPersonaDesigner(productSpec, orgDesign.personaGuidance, openIssues, scenarios, testAccounts, lastRunPaths, personaPack);
+    await runPersonaDesigner(
+      productSpec,
+      orgDesign.personaGuidance,
+      openIssues,
+      scenarios,
+      testAccounts,
+      lastRunPaths,
+      personaPack,
+      slots.autoSlots,
+    );
 
-    // 6. load agents (closed issues は step 2 で取得済み)
-    const allAgents = loadAgents();
-    if (allAgents.length === 0) {
-      console.error("No agents found. Check agents.json.");
+    // 6. Deterministic run roster (surplus autos excluded even if HR over-recruited)
+    const { fixed, autos } = partitionActiveAgents(loadAgents());
+    const runRoster = buildRunRoster({ fixed, autos, autoSlots: slots.autoSlots });
+    if (runRoster.length === 0) {
+      console.error("No agents found. Check agents.json or create fixed personas in the dashboard.");
       process.exit(1);
     }
 
-    // 6.5. roster サイズを記録（実際に走った agent 数は run 終了時に runLog.agents.length で確定）
-    runLog.summary.totalAgents = allAgents.length;
+    const { explorers: explorerAgents, browsers: browserAgents, regression: regressionAgent } =
+      splitRosterForDispatch(runRoster, { maxBrowsers: MAX_BROWSERS, maxExplorers: MAX_EXPLORERS });
 
-    // 7. API agents (exploration + regression)
-    const allExplorers = allAgents.slice(0, -1);
-    const explorerAgents = pickAgents(allExplorers, Math.min(MAX_EXPLORERS, allExplorers.length));
-    const regressionAgent = allAgents[allAgents.length - 1];
-    console.log(`\nexplorers: ${explorerAgents.length} (max: ${MAX_EXPLORERS}) / regression: 1`);
+    // 6.5. roster サイズを記録（実際に走った agent 数は run 終了時に runLog.agents.length で確定）
+    runLog.summary.totalAgents = runRoster.length;
+    console.log(
+      `\nroster: ${runRoster.length} (fixed ${fixed.length} + auto ${Math.min(autos.length, slots.autoSlots)})`,
+    );
+    console.log(`explorers: ${explorerAgents.length} (max: ${MAX_EXPLORERS}) / regression: ${regressionAgent ? 1 : 0} / browsers: ${browserAgents.length} (max: ${MAX_BROWSERS})`);
 
     // agentId → assignment（coverage 計算・レポート生成に使う）
     const agentAssignments = new Map<string, Assignment>();
@@ -1518,8 +1570,8 @@ async function main() {
       }
     }
 
-    if (MAX_EXPLORERS === 0) {
-      console.log("\n[regression] skipped (MAX_EXPLORERS=0)");
+    if (MAX_EXPLORERS === 0 || !regressionAgent) {
+      console.log("\n[regression] skipped (no regression slot)");
     } else if (closedIssues.length > 0) {
       await sleep(3000);
       await runRegressionAgent(regressionAgent, closedIssues, productSpec);
@@ -1532,10 +1584,8 @@ async function main() {
 
     // 8. browser agents
     const multiScenario = findMultiActorScenario(scenarios);
-    const actorRoles = multiScenario?.actors?.map((a) => a.role) ?? [];
-    const browserAgents = pickBrowserAgents(allAgents, Math.min(MAX_BROWSERS, allAgents.length), actorRoles);
     console.log(`\nlaunching ${browserAgents.length} browser agents in parallel (max: ${MAX_BROWSERS})`);
-    browserAgents.forEach((a) => console.log(`  - ${a.name} (${a.role})`));
+    browserAgents.forEach((a) => console.log(`  - ${a.name} (${a.role}) [${agentOrigin(a)}]`));
 
     // マルチアクターシナリオ: ペルソナ role と actor / テストアカウント role が合う 2 体を同時操作させる
     const pairAssignments = new Map<string, Assignment>();
