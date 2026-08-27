@@ -103,7 +103,7 @@ describe("discoverProduct", () => {
       .mockResolvedValueOnce(toolUseResponse("output_spec", makeOutputSpecInput({
         thresholdCandidates: [
           { id: "ok", kind: "business", area: "/billing", signal: "seat cap", howToProbe: "add seats", priority: 1 },
-          { id: "bad", kind: "nope", area: "/x", signal: "s", howToProbe: "h", priority: 1 },
+          { id: "bad", kind: "nope", area: "/x", signal: "s", howToProbe: "h", priority: 1 } as never,
         ],
       })) as never);
     const result = await discoverProduct("https://example.com", makeFakePage(), {} as LLMClient, "m");
