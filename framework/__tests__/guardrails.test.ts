@@ -151,17 +151,25 @@ describe("isDestructiveBrowserAction", () => {
 });
 
 describe("guardSafeBrowserClick", () => {
-  function makePage(buttonText: string): Page {
-    const button = {
-      count: vi.fn(async () => 1),
-      innerText: vi.fn(async () => buttonText),
-      getAttribute: vi.fn(async () => null),
-    };
-    return {
-      getByRole: vi.fn(() => ({ first: () => button })),
-      getByText: vi.fn(() => ({ first: () => button })),
-    } as unknown as Page;
-  }
+function makePage(buttonText: string): Page {
+  const button = {
+    count: vi.fn(async () => 1),
+    innerText: vi.fn(async () => buttonText),
+    getAttribute: vi.fn(async () => null),
+    first: vi.fn(),
+  };
+  button.first.mockImplementation(() => button);
+  const loc = {
+    count: vi.fn(async () => 1),
+    first: vi.fn(() => button),
+  };
+  return {
+    getByRole: vi.fn(() => loc),
+    getByText: vi.fn(() => loc),
+    locator: vi.fn(() => ({ count: vi.fn(async () => 0), first: vi.fn() })),
+    ariaSnapshot: vi.fn().mockResolvedValue(""),
+  } as unknown as Page;
+}
 
   it("full モードでは常に許可する", async () => {
     const result = await guardSafeBrowserClick(makePage("Delete"), "Delete item", "full");

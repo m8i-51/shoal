@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { LLMClient } from "./llm-client";
 import { createMessageWithRetry } from "./agent-loop";
 import type { ProductSpec } from "./product-discovery";
+import { findBestByRole, roleAffinity } from "./role-match";
 
 export interface ScenarioActor {
   role: string; // e.g. "admin", "user" — should match an available test account role
@@ -26,6 +27,66 @@ export function findMultiActorScenario(scenarios: Scenario[]): Scenario | undefi
 /** 通常のディスパッチに使う単独シナリオ（マルチアクターを除外） */
 export function soloScenarios(scenarios: Scenario[]): Scenario[] {
   return scenarios.filter((s) => (s.actors?.length ?? 0) < 2);
+}
+
+export type RoleBearer = { id: string; name: string; role: string };
+
+/**
+ * ペルソナ role と actor role の親和度が最大になる 2 体を選ぶ。
+ * 枠順（配列の先頭から）では割り当てない。
+ */
+export function pairAgentsToActors<T extends RoleBearer>(
+  agents: T[],
+  scenario: Scenario,
+): Map<string, ScenarioActor & { partnerRole: string }> {
+  const paired = new Map<string, ScenarioActor & { partnerRole: string }>();
+  const actors = scenario.actors;
+  if (!actors || actors.length < 2 || agents.length < 2) return paired;
+
+  const [actorA, actorB] = actors;
+  let bestScore = -1;
+  let best: [T, T] | null = null;
+  for (const agentA of agents) {
+    for (const agentB of agents) {
+      if (agentA.id === agentB.id) continue;
+      const score = roleAffinity(agentA.role, actorA.role) + roleAffinity(agentB.role, actorB.role);
+      if (score > bestScore) {
+        bestScore = score;
+        best = [agentA, agentB];
+      }
+    }
+  }
+  if (!best) return paired;
+
+  paired.set(best[0].id, { ...actorA, partnerRole: actorB.role });
+  paired.set(best[1].id, { ...actorB, partnerRole: actorA.role });
+  return paired;
+}
+
+/** マルチアクターの role に合うエージェントを先にブラウザ枠へ入れ、残りをランダムに埋める */
+export function pickBrowserAgents<T extends RoleBearer>(
+  agents: T[],
+  count: number,
+  actorRoles: string[] = [],
+  random: () => number = Math.random,
+): T[] {
+  if (count <= 0 || agents.length === 0) return [];
+  const remaining = [...agents];
+  const selected: T[] = [];
+
+  for (const role of actorRoles) {
+    if (selected.length >= count) break;
+    const match = findBestByRole(remaining, role);
+    if (!match) continue;
+    const idx = remaining.findIndex((a) => a.id === match.id);
+    if (idx >= 0) selected.push(remaining.splice(idx, 1)[0]);
+  }
+
+  while (selected.length < count && remaining.length > 0) {
+    const idx = Math.floor(random() * remaining.length);
+    selected.push(remaining.splice(idx, 1)[0]);
+  }
+  return selected;
 }
 
 export interface ScenarioOutcome {

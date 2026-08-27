@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("../agent-loop", () => ({ createMessageWithRetry: vi.fn() }));
 
 import { createMessageWithRetry } from "../agent-loop";
-import { designScenarios, findMultiActorScenario, soloScenarios } from "../scenario-designer";
+import { designScenarios, findMultiActorScenario, soloScenarios, pairAgentsToActors, pickBrowserAgents } from "../scenario-designer";
 import type { ProductSpec } from "../product-discovery";
 import type { LLMClient } from "../llm-client";
 
@@ -185,5 +185,102 @@ describe("findMultiActorScenario / soloScenarios", () => {
 
   it("soloScenarios はマルチアクターを除外する", () => {
     expect(soloScenarios([solo, pair])).toEqual([solo]);
+  });
+});
+
+describe("pairAgentsToActors", () => {
+  it("枠順ではなくペルソナ role と actor role を突き合わせて割り当てる", () => {
+    const learner = { id: "a1", name: "未ログイン学習者", role: "learner" };
+    const instructor = { id: "a2", name: "講師", role: "instructor" };
+    const scenario = {
+      id: "s1",
+      title: "授業中",
+      context: "",
+      goal: "",
+      constraints: "",
+      actors: [
+        { role: "instructor", goal: "課題を締め切る" },
+        { role: "learner", goal: "提出する" },
+      ],
+    };
+    const paired = pairAgentsToActors([learner, instructor], scenario);
+    expect(paired.get("a1")?.role).toBe("learner");
+    expect(paired.get("a2")?.role).toBe("instructor");
+    expect(paired.get("a1")?.partnerRole).toBe("instructor");
+    expect(paired.get("a2")?.partnerRole).toBe("learner");
+  });
+
+  it("複合ペルソナ role でもテストアカウント側の actor role に載せる", () => {
+    const agents = [
+      { id: "guest", name: "ゲスト学習者", role: "Learner (guest)" },
+      { id: "teacher", name: "数学講師", role: "Math Instructor" },
+    ];
+    const scenario = {
+      id: "s1",
+      title: "Pair",
+      context: "",
+      goal: "",
+      constraints: "",
+      actors: [
+        { role: "instructor", goal: "grade" },
+        { role: "learner", goal: "submit" },
+      ],
+    };
+    const paired = pairAgentsToActors(agents, scenario);
+    expect(paired.get("teacher")?.role).toBe("instructor");
+    expect(paired.get("guest")?.role).toBe("learner");
+  });
+
+  it("3 体いても actor 2 役に最も合うエージェントを選ぶ", () => {
+    const agents = [
+      { id: "v", name: "Visitor", role: "visitor" },
+      { id: "l", name: "Learner", role: "learner" },
+      { id: "i", name: "Instructor", role: "instructor" },
+    ];
+    const scenario = {
+      id: "s1",
+      title: "Pair",
+      context: "",
+      goal: "",
+      constraints: "",
+      actors: [
+        { role: "instructor", goal: "grade" },
+        { role: "learner", goal: "submit" },
+      ],
+    };
+    const paired = pairAgentsToActors(agents, scenario);
+    expect(paired.get("i")?.role).toBe("instructor");
+    expect(paired.get("l")?.role).toBe("learner");
+    expect(paired.has("v")).toBe(false);
+  });
+
+  it("actor が 2 人揃わなければ空の Map", () => {
+    expect(pairAgentsToActors(
+      [{ id: "a", name: "A", role: "admin" }],
+      { id: "s", title: "t", context: "", goal: "", constraints: "", actors: [{ role: "admin", goal: "g" }] },
+    ).size).toBe(0);
+  });
+});
+
+describe("pickBrowserAgents", () => {
+  it("マルチアクターの role に合うエージェントを先にブラウザ枠へ入れる", () => {
+    const agents = [
+      { id: "1", name: "Visitor", role: "visitor" },
+      { id: "2", name: "講師", role: "instructor" },
+      { id: "3", name: "学習者", role: "learner" },
+      { id: "4", name: "Admin", role: "admin" },
+    ];
+    const picked = pickBrowserAgents(agents, 2, ["instructor", "learner"], () => 0);
+    expect(picked.map((a) => a.role).sort()).toEqual(["instructor", "learner"]);
+  });
+
+  it("role 一致が足りなければ残りをランダムに埋める", () => {
+    const agents = [
+      { id: "1", name: "Visitor", role: "visitor" },
+      { id: "2", name: "講師", role: "instructor" },
+    ];
+    const picked = pickBrowserAgents(agents, 2, ["instructor", "learner"], () => 0);
+    expect(picked).toHaveLength(2);
+    expect(picked.some((a) => a.role === "instructor")).toBe(true);
   });
 });

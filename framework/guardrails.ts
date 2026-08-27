@@ -1,5 +1,6 @@
 import type { BrowserContext, Page } from "playwright";
 import type { Tool } from "./llm-client";
+import { resolveClickLocator } from "./click-target";
 
 /**
  * Guardrails — 探索エージェントの書き込み操作を制御する安全装置。
@@ -67,26 +68,19 @@ export function isDestructiveBrowserAction(text: string): boolean {
   return DESTRUCTIVE_CLICK_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
-async function resolveClickTargetText(page: Page, description: string): Promise<string> {
-  const escapedDesc = description.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const locators = [
-    page.getByRole("button", { name: new RegExp(escapedDesc, "i") }),
-    page.getByRole("link", { name: new RegExp(escapedDesc, "i") }),
-    page.getByText(description, { exact: false }),
-  ];
-  for (const loc of locators) {
-    try {
-      const target = loc.first();
-      if (!(await target.count())) continue;
-      const parts = [
-        await target.innerText({ timeout: 500 }).catch(() => ""),
-        await target.getAttribute("aria-label").catch(() => ""),
-        await target.getAttribute("title").catch(() => ""),
-      ].filter(Boolean);
-      if (parts.length > 0) return parts.join(" ");
-    } catch { /* try next */ }
+async function resolveClickTargetText(page: Page, description: string, ref?: string): Promise<string> {
+  const target = await resolveClickLocator(page, { description, ref });
+  if (!target) return "";
+  try {
+    const parts = [
+      await target.innerText({ timeout: 500 }).catch(() => ""),
+      await target.getAttribute("aria-label").catch(() => ""),
+      await target.getAttribute("title").catch(() => ""),
+    ].filter(Boolean);
+    return parts.join(" ");
+  } catch {
+    return "";
   }
-  return "";
 }
 
 export interface SafeClickGuardResult {
@@ -99,10 +93,11 @@ export async function guardSafeBrowserClick(
   page: Page,
   description: string,
   mode: ShoalMode,
+  ref?: string,
 ): Promise<SafeClickGuardResult> {
   if (mode !== "safe") return { allowed: true, message: "" };
 
-  const targetText = await resolveClickTargetText(page, description);
+  const targetText = await resolveClickTargetText(page, description, ref);
   const combined = [description, targetText].filter(Boolean).join(" ");
   if (!isDestructiveBrowserAction(combined)) {
     return { allowed: true, message: "" };

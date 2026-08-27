@@ -16,6 +16,7 @@ import type { Credentials } from "../../targets/types";
 function makeFakeLocator(overrides: Record<string, unknown> = {}) {
   const locator = {
     first: vi.fn(() => locator),
+    count: vi.fn().mockResolvedValue(0),
     isVisible: vi.fn().mockResolvedValue(false),
     fill: vi.fn().mockResolvedValue(undefined),
     click: vi.fn().mockResolvedValue(undefined),
@@ -393,7 +394,7 @@ describe("runAccountManager", () => {
   });
 
   it("click は getByRole(button) で見つかった要素をクリックする", async () => {
-    const clickableButton = makeFakeLocator({ isVisible: vi.fn().mockResolvedValue(true) });
+    const clickableButton = makeFakeLocator({ isVisible: vi.fn().mockResolvedValue(true), count: vi.fn().mockResolvedValue(1) });
     const page = makeLoggedInPage({ getByRole: vi.fn(() => clickableButton) });
     const context = makeFakeContext(page);
     vi.mocked(createMessageWithRetry)
@@ -789,6 +790,16 @@ describe("planBrowserAuth / authPrompt", () => {
     expect(prompt).toContain("/signin");
     expect(prompt).toMatch(/do NOT invent/i);
     expect(describeAuthPlan("Ada", plan)).toContain("handing off credentials");
+  });
+
+  it("ペルソナ role はテストアカウント role と大文字小文字・部分一致で突き合わせる", () => {
+    const plan = planBrowserAuth({
+      testAccounts: [sessionAccount],
+      accountRole: "Administrator",
+      preferAccountSession: true,
+    });
+    expect(plan.handoff.kind).toBe("session");
+    expect(plan.storageStatePath).toBe("/states/admin.json");
   });
 
   it("ロール不一致でも既知の資格情報があれば推測させない", () => {

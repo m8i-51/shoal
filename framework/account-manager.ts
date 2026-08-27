@@ -16,6 +16,8 @@ import {
 import { resolveLoginPath, isLoginPath, type ProductSpec } from "./product-discovery";
 import type { Credentials } from "../targets/types";
 import Anthropic from "@anthropic-ai/sdk";
+import { findBestByRole } from "./role-match";
+import { clickDescribedElement } from "./click-target";
 
 export interface TestAccount {
   email: string;
@@ -178,8 +180,14 @@ export function planBrowserAuth(opts: {
   returningSessionPath?: string;
   preferAccountSession: boolean;
 }): BrowserAuthPlan {
-  const sessionForRole = opts.testAccounts.find((a) => a.role === opts.accountRole && a.storageStatePath);
-  const credsForRole = opts.testAccounts.find((a) => a.role === opts.accountRole && hasUsableCredentials(a));
+  const sessionForRole = findBestByRole(
+    opts.testAccounts.filter((a) => Boolean(a.storageStatePath)),
+    opts.accountRole,
+  );
+  const credsForRole = findBestByRole(
+    opts.testAccounts.filter(hasUsableCredentials),
+    opts.accountRole,
+  );
   const anyCreds = opts.testAccounts.find(hasUsableCredentials);
 
   if (opts.preferAccountSession && sessionForRole) return sessionPlan(sessionForRole);
@@ -524,10 +532,13 @@ const ACCOUNT_MANAGER_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: "click",
-    description: "Click a button, link, or element on screen.",
+    description: "Click a button, link, or element on screen. description may be the accessible name or a short phrase from it; optional ref is an accessibility-tree id (e.g. e12).",
     input_schema: {
       type: "object",
-      properties: { description: { type: "string" } },
+      properties: {
+        description: { type: "string" },
+        ref: { type: "string", description: "Optional accessibility-tree ref, e.g. e12" },
+      },
       required: ["description"],
     },
   },
@@ -550,7 +561,7 @@ const ACCOUNT_MANAGER_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: "read_accessibility_tree",
-    description: "Get the page accessibility tree.",
+    description: "Get the page accessibility tree (includes [ref=eN] ids you can pass to click).",
     input_schema: { type: "object", properties: {}, required: [] },
   },
   {
@@ -710,19 +721,10 @@ If user management is not accessible from this account, or the app has no role s
           }
 
           case "click": {
-            const { description } = toolUse.input as { description?: string };
+            const { description, ref } = toolUse.input as { description?: string; ref?: string };
             if (!description) { resultText = "click: missing description"; break; }
             await saveSnapshotBeforeAction(page, observation);
-            const escaped = description.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-            let clicked = false;
-            for (const loc of [
-              page.getByRole("button", { name: new RegExp(escaped, "i") }),
-              page.getByRole("link", { name: new RegExp(escaped, "i") }),
-              page.getByText(description, { exact: false }),
-            ]) {
-              try { await loc.first().click({ timeout: 4000 }); clicked = true; break; } catch { /* next */ }
-            }
-            if (!clicked) throw new Error(`No element matching: ${description}`);
+            await clickDescribedElement(page, { description, ref }, 4000);
             await page.waitForTimeout(500);
             screenshot = await takeScreenshot(page, `click`);
             resultText = `Clicked: ${description}`;
