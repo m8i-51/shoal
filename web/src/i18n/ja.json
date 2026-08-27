@@ -64,7 +64,8 @@
       "read-only": "全ての書き込みをネットワーク層でブロックします。本番環境の観察に。",
       "safe": "データ作成・編集は許可し、削除・支払い・送信などの不可逆操作を抑止します。",
       "full": "制限なし。使い捨て環境でのみ使用してください。"
-    }
+    },
+    "fixedRosterHint": "固定ペルソナがいる場合、全員が参加できるようエージェント数が自動で増えることがあります。"
   },
   "duration": {
     "seconds": "{{count}}s",
@@ -114,6 +115,26 @@
     "placeholder": "例: 研修なしで目的の作業を完了できる",
     "hint": "成果条件だけを書いてください（検索・フィルター・バッジなどの UI 部品名は features 側）。画面観察だけの草案は Hall で直してください。",
     "goalGapHint": "エージェントはこれらの成果が達成できないときだけ \"goal-gap\" とします（UI 部品の有無は対象外）。"
+  },
+  "personas": {
+    "title": "固定ペルソナ",
+    "hint": "短い種を入力（例:「偏屈おじさん」）。アプリのプロダクト仕様を読んで AI が広げます。固定メンバーは毎回の run に参加します。",
+    "seedPlaceholder": "例: 偏屈おじさん / バグ探そうとしてる人",
+    "create": "作成",
+    "empty": "固定ペルソナはまだありません。",
+    "edit": "編集",
+    "save": "保存",
+    "cancel": "キャンセル",
+    "archive": "退役",
+    "restore": "復職",
+    "showArchived": "退役済みを表示",
+    "hideArchived": "退役済みを隠す",
+    "name": "名前",
+    "role": "役割",
+    "lensesPlaceholder": "観点（カンマ区切り）",
+    "seedLabel": "種",
+    "createFailed": "ペルソナを作成できませんでした",
+    "saveFailed": "ペルソナを保存できませんでした"
   },
   "experience": {
     "title": "Experience Score",

@@ -10,6 +10,9 @@ export interface AgentMemory {
   achievements: string[]; // 達成したシナリオ
 }
 
+export type AgentOrigin = "fixed" | "auto";
+export type AgentStatus = "active" | "archived";
+
 export interface Agent {
   id: string;
   name: string;
@@ -18,9 +21,33 @@ export interface Agent {
   createdAt: string;
   memories?: AgentMemory[]; // 直近 MAX_MEMORIES run 分のみ保持
   environment?: EnvironmentProfile; // ブラウザエージェントとして走るときの環境
+  /** Dashboard-created members are "fixed"; HR recruits are "auto". Missing → auto. */
+  origin?: AgentOrigin;
+  /** Archived fixed personas stay on disk but skip runs. Missing → active. */
+  status?: AgentStatus;
+  /** Short seed used to generate a fixed persona. */
+  seed?: string;
+  /** Evaluation lenses (stored/edited; not wired into dispatch in v1). */
+  lenses?: string[];
 }
 
 const STORE_PATH = path.join(process.cwd(), "agents.json");
+
+export function agentOrigin(agent: Agent): AgentOrigin {
+  return agent.origin === "fixed" ? "fixed" : "auto";
+}
+
+export function agentStatus(agent: Agent): AgentStatus {
+  return agent.status === "archived" ? "archived" : "active";
+}
+
+export function isActiveAgent(agent: Agent): boolean {
+  return agentStatus(agent) === "active";
+}
+
+export function isFixedAgent(agent: Agent): boolean {
+  return agentOrigin(agent) === "fixed";
+}
 
 export function loadAgents(): Agent[] {
   if (!fs.existsSync(STORE_PATH)) return [];
@@ -42,10 +69,23 @@ function requireNonEmptyString(value: unknown, field: string): string {
   return value.trim();
 }
 
-export function addAgent(input: { name: string; role: string; persona: string; environment?: EnvironmentProfile }): Agent {
+export interface AddAgentInput {
+  name: string;
+  role: string;
+  persona: string;
+  environment?: EnvironmentProfile;
+  origin?: AgentOrigin;
+  status?: AgentStatus;
+  seed?: string;
+  lenses?: string[];
+}
+
+export function addAgent(input: AddAgentInput): Agent {
   const name = requireNonEmptyString(input.name, "name");
   const role = requireNonEmptyString(input.role, "role");
   const persona = requireNonEmptyString(input.persona, "persona");
+  const origin: AgentOrigin = input.origin === "fixed" ? "fixed" : "auto";
+  const status: AgentStatus = input.status === "archived" ? "archived" : "active";
   const agents = loadAgents();
   const agent: Agent = {
     id: `agent_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
@@ -53,19 +93,83 @@ export function addAgent(input: { name: string; role: string; persona: string; e
     role,
     persona,
     createdAt: new Date().toISOString(),
+    origin,
+    status,
     ...(input.environment ? { environment: input.environment } : {}),
+    ...(input.seed !== undefined ? { seed: requireNonEmptyString(input.seed, "seed") } : {}),
+    ...(input.lenses !== undefined
+      ? { lenses: input.lenses.map((l) => String(l).trim()).filter(Boolean) }
+      : {}),
   };
   agents.push(agent);
   saveAgents(agents);
   return agent;
 }
 
+/** Hard-delete an auto agent. Fixed personas cannot be retired this way (returns false). */
 export function retireAgent(id: string): boolean {
   const agents = loadAgents();
+  const target = agents.find((a) => a.id === id);
+  if (!target) return false;
+  if (isFixedAgent(target)) return false;
   const filtered = agents.filter((a) => a.id !== id);
-  if (filtered.length === agents.length) return false;
   saveAgents(filtered);
   return true;
+}
+
+export function listActiveAgents(): Agent[] {
+  return loadAgents().filter(isActiveAgent);
+}
+
+export function listFixedPersonas(opts: { includeArchived?: boolean } = {}): Agent[] {
+  return loadAgents().filter((a) => {
+    if (!isFixedAgent(a)) return false;
+    if (opts.includeArchived) return true;
+    return isActiveAgent(a);
+  });
+}
+
+export function archiveAgent(id: string): Agent | null {
+  const agents = loadAgents();
+  const agent = agents.find((a) => a.id === id);
+  if (!agent || !isFixedAgent(agent)) return null;
+  if (agentStatus(agent) === "archived") return agent;
+  agent.status = "archived";
+  saveAgents(agents);
+  return agent;
+}
+
+export function restoreAgent(id: string): Agent | null {
+  const agents = loadAgents();
+  const agent = agents.find((a) => a.id === id);
+  if (!agent || !isFixedAgent(agent)) return null;
+  agent.status = "active";
+  saveAgents(agents);
+  return agent;
+}
+
+export interface UpdateAgentInput {
+  name?: string;
+  role?: string;
+  persona?: string;
+  lenses?: string[];
+}
+
+/** Update fields on an active fixed persona. Returns null if not found / not editable. */
+export function updateAgent(id: string, patch: UpdateAgentInput): Agent | null {
+  const agents = loadAgents();
+  const agent = agents.find((a) => a.id === id);
+  if (!agent || !isFixedAgent(agent) || !isActiveAgent(agent)) return null;
+
+  if (patch.name !== undefined) agent.name = requireNonEmptyString(patch.name, "name");
+  if (patch.role !== undefined) agent.role = requireNonEmptyString(patch.role, "role");
+  if (patch.persona !== undefined) agent.persona = requireNonEmptyString(patch.persona, "persona");
+  if (patch.lenses !== undefined) {
+    agent.lenses = patch.lenses.map((l) => requireNonEmptyString(l, "lenses"));
+  }
+
+  saveAgents(agents);
+  return agent;
 }
 
 // ================================================================

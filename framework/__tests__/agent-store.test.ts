@@ -3,7 +3,21 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("fs");
 
 import * as fs from "fs";
-import { loadAgents, addAgent, retireAgent, recordAgentMemories, formatAgentMemories, buildMemoryInputs, type Agent, type AgentMemory } from "../agent-store";
+import {
+  loadAgents,
+  addAgent,
+  retireAgent,
+  archiveAgent,
+  restoreAgent,
+  updateAgent,
+  listFixedPersonas,
+  listActiveAgents,
+  recordAgentMemories,
+  formatAgentMemories,
+  buildMemoryInputs,
+  type Agent,
+  type AgentMemory,
+} from "../agent-store";
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
   return {
@@ -83,10 +97,13 @@ describe("addAgent", () => {
 });
 
 describe("retireAgent", () => {
-  it("存在する id を削除して true を返す", () => {
+  it("存在する auto id を削除して true を返す", () => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
     vi.mocked(fs.readFileSync).mockReturnValue(
-      JSON.stringify([makeAgent({ id: "agent_1" }), makeAgent({ id: "agent_2" })]) as unknown as ReturnType<typeof fs.readFileSync>
+      JSON.stringify([
+        makeAgent({ id: "agent_1", origin: "auto" }),
+        makeAgent({ id: "agent_2", origin: "auto" }),
+      ]) as unknown as ReturnType<typeof fs.readFileSync>
     );
     const result = retireAgent("agent_1");
     expect(result).toBe(true);
@@ -96,12 +113,90 @@ describe("retireAgent", () => {
     expect(saved[0].id).toBe("agent_2");
   });
 
+  it("fixed は削除せず false を返す", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify([makeAgent({ id: "agent_1", origin: "fixed" })]) as unknown as ReturnType<typeof fs.readFileSync>
+    );
+    expect(retireAgent("agent_1")).toBe(false);
+    expect(fs.writeFileSync).not.toHaveBeenCalled();
+  });
+
   it("存在しない id の場合は false を返し書き込みもしない", () => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
     vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify([makeAgent({ id: "agent_1" })]) as unknown as ReturnType<typeof fs.readFileSync>);
     const result = retireAgent("agent_nonexistent");
     expect(result).toBe(false);
     expect(fs.writeFileSync).not.toHaveBeenCalled();
+  });
+});
+
+describe("addAgent origin/status", () => {
+  it("defaults to origin auto and status active", () => {
+    const agent = addAgent({ name: "Bob", role: "explorer", persona: "thorough" });
+    expect(agent.origin).toBe("auto");
+    expect(agent.status).toBe("active");
+  });
+
+  it("stores fixed seed and lenses", () => {
+    const agent = addAgent({
+      name: "Ken",
+      role: "grumpy uncle",
+      persona: "skeptical",
+      origin: "fixed",
+      seed: "偏屈おじさん",
+      lenses: ["trust", "clarity"],
+    });
+    expect(agent.origin).toBe("fixed");
+    expect(agent.seed).toBe("偏屈おじさん");
+    expect(agent.lenses).toEqual(["trust", "clarity"]);
+  });
+});
+
+describe("archive/restore/update/list", () => {
+  function setup(agents: Agent[]) {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(agents) as unknown as ReturnType<typeof fs.readFileSync>);
+  }
+
+  function readSaved(): Agent[] {
+    const [, content] = vi.mocked(fs.writeFileSync).mock.calls.at(-1)!;
+    return JSON.parse(content as string) as Agent[];
+  }
+
+  it("archives and restores fixed personas", () => {
+    setup([makeAgent({ id: "f1", origin: "fixed", status: "active" })]);
+    expect(archiveAgent("f1")?.status).toBe("archived");
+    expect(readSaved()[0].status).toBe("archived");
+    vi.mocked(fs.writeFileSync).mockClear();
+    setup([makeAgent({ id: "f1", origin: "fixed", status: "archived" })]);
+    expect(restoreAgent("f1")?.status).toBe("active");
+  });
+
+  it("rejects archive on auto agents", () => {
+    setup([makeAgent({ id: "a1", origin: "auto" })]);
+    expect(archiveAgent("a1")).toBeNull();
+    expect(fs.writeFileSync).not.toHaveBeenCalled();
+  });
+
+  it("updates active fixed fields only", () => {
+    setup([makeAgent({ id: "f1", origin: "fixed", status: "active", name: "Old" })]);
+    const updated = updateAgent("f1", { name: "New", lenses: ["ux"] });
+    expect(updated?.name).toBe("New");
+    expect(updated?.lenses).toEqual(["ux"]);
+    setup([makeAgent({ id: "f1", origin: "fixed", status: "archived" })]);
+    expect(updateAgent("f1", { name: "Nope" })).toBeNull();
+  });
+
+  it("listFixedPersonas and listActiveAgents respect filters", () => {
+    setup([
+      makeAgent({ id: "f1", origin: "fixed", status: "active" }),
+      makeAgent({ id: "f2", origin: "fixed", status: "archived" }),
+      makeAgent({ id: "a1", origin: "auto", status: "active" }),
+    ]);
+    expect(listFixedPersonas().map((a) => a.id)).toEqual(["f1"]);
+    expect(listFixedPersonas({ includeArchived: true }).map((a) => a.id)).toEqual(["f1", "f2"]);
+    expect(listActiveAgents().map((a) => a.id)).toEqual(["f1", "a1"]);
   });
 });
 

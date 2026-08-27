@@ -12,11 +12,38 @@ vi.mock("../runs.js", () => ({ listRuns: vi.fn(() => []), getReportPath: vi.fn((
 vi.mock("../scheduler.js", () => ({ loadSchedule: vi.fn(() => ({ enabled: false, dayOfWeek: 1, hour: 9, minute: 0, lastRunDate: null })), saveSchedule: vi.fn(), startScheduler: vi.fn() }));
 vi.mock("../../framework/diary.js", () => ({ generateDiary: vi.fn(), getDiaryPath: vi.fn(() => null) }));
 vi.mock("../../framework/experience-score.js", () => ({ computeExperienceScore: vi.fn(() => null) }));
+vi.mock("../../framework/persona-from-seed.js", () => ({
+  generatePersonaFromSeed: vi.fn(),
+  PersonaGenerationError: class PersonaGenerationError extends Error {
+    constructor(message: string) {
+      super(message);
+      this.name = "PersonaGenerationError";
+    }
+  },
+}));
+vi.mock("../../framework/agent-store.js", () => ({
+  addAgent: vi.fn(),
+  archiveAgent: vi.fn(),
+  restoreAgent: vi.fn(),
+  updateAgent: vi.fn(),
+  listFixedPersonas: vi.fn(() => []),
+  loadAgents: vi.fn(() => []),
+  isFixedAgent: vi.fn((a: { origin?: string }) => a.origin === "fixed"),
+}));
 vi.mock("express-rate-limit", () => ({ rateLimit: () => (_req: unknown, _res: unknown, next: () => void) => next() }));
 
 import * as fs from "fs";
 import { generateDiary, getDiaryPath } from "../../framework/diary.js";
 import { computeExperienceScore } from "../../framework/experience-score.js";
+import { generatePersonaFromSeed, PersonaGenerationError } from "../../framework/persona-from-seed.js";
+import {
+  addAgent,
+  archiveAgent,
+  restoreAgent,
+  updateAgent,
+  listFixedPersonas,
+  loadAgents,
+} from "../../framework/agent-store.js";
 import { activeSessions, spawnRun, cancelSession } from "../runner.js";
 import { listRuns, getReportPath } from "../runs.js";
 import { loadSchedule } from "../scheduler.js";
@@ -616,6 +643,114 @@ describe("SSE events", () => {
     expect(res.status).toBe(200);
     expect(res.text).toContain("log line");
     expect(res.text).toContain("event: done");
+  });
+});
+
+// ================================================================
+// Fixed personas API
+// ================================================================
+describe("personas API", () => {
+  const sampleSpec = {
+    appName: "Demo",
+    appDescription: "A demo app",
+    targetUsers: "individuals",
+    features: "x",
+    designContext: "y",
+    uiFeatures: "z",
+    appGoals: ["Complete tasks"],
+    confidence: "high",
+    sources: ["ui"],
+  };
+
+  beforeEach(() => {
+    vi.mocked(listFixedPersonas).mockReturnValue([]);
+    vi.mocked(loadAgents).mockReturnValue([]);
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+  });
+
+  it("GET /api/personas returns fixed list", async () => {
+    vi.mocked(listFixedPersonas).mockReturnValue([
+      { id: "f1", name: "Ken", role: "grumpy", persona: "p", createdAt: "t", origin: "fixed" },
+    ] as never);
+    const res = await request(app).get("/api/personas");
+    expect(res.status).toBe(200);
+    expect(res.body[0].name).toBe("Ken");
+    expect(listFixedPersonas).toHaveBeenCalledWith({ includeArchived: false });
+  });
+
+  it("POST /api/personas rejects empty seed", async () => {
+    const res = await request(app).post("/api/personas").send({ seed: "  " });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/seed/i);
+  });
+
+  it("POST /api/personas rejects when product spec is missing", async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    const res = await request(app).post("/api/personas").send({ seed: "偏屈おじさん" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/spec/i);
+  });
+
+  it("POST /api/personas creates a fixed persona from seed", async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(sampleSpec) as never);
+    vi.mocked(generatePersonaFromSeed).mockResolvedValue({
+      name: "Takeshi",
+      role: "grumpy uncle",
+      persona: "Distrusts new UI.",
+      lenses: ["trust"],
+    });
+    vi.mocked(addAgent).mockReturnValue({
+      id: "agent_1",
+      name: "Takeshi",
+      role: "grumpy uncle",
+      persona: "Distrusts new UI.",
+      lenses: ["trust"],
+      origin: "fixed",
+      status: "active",
+      seed: "偏屈おじさん",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    } as never);
+
+    const res = await request(app).post("/api/personas").send({ seed: "偏屈おじさん" });
+    expect(res.status).toBe(201);
+    expect(res.body.origin).toBe("fixed");
+    expect(addAgent).toHaveBeenCalledWith(expect.objectContaining({ origin: "fixed", seed: "偏屈おじさん" }));
+  });
+
+  it("POST /api/personas returns 502 on generation failure", async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(sampleSpec) as never);
+    vi.mocked(generatePersonaFromSeed).mockRejectedValue(new PersonaGenerationError("bad json"));
+    const res = await request(app).post("/api/personas").send({ seed: "x" });
+    expect(res.status).toBe(502);
+  });
+
+  it("POST archive/restore and PATCH update fixed personas", async () => {
+    vi.mocked(loadAgents).mockReturnValue([
+      { id: "f1", name: "A", role: "r", persona: "p", createdAt: "t", origin: "fixed", status: "active" },
+    ] as never);
+    vi.mocked(updateAgent).mockReturnValue({
+      id: "f1", name: "B", role: "r", persona: "p", createdAt: "t", origin: "fixed", status: "active",
+    } as never);
+    vi.mocked(archiveAgent).mockReturnValue({
+      id: "f1", name: "B", role: "r", persona: "p", createdAt: "t", origin: "fixed", status: "archived",
+    } as never);
+    vi.mocked(restoreAgent).mockReturnValue({
+      id: "f1", name: "B", role: "r", persona: "p", createdAt: "t", origin: "fixed", status: "active",
+    } as never);
+
+    const patch = await request(app).patch("/api/personas/f1").send({ name: "B" });
+    expect(patch.status).toBe(200);
+    expect(patch.body.name).toBe("B");
+
+    const arch = await request(app).post("/api/personas/f1/archive");
+    expect(arch.status).toBe(200);
+    expect(arch.body.status).toBe("archived");
+
+    const rest = await request(app).post("/api/personas/f1/restore");
+    expect(rest.status).toBe(200);
+    expect(rest.body.status).toBe("active");
   });
 });
 

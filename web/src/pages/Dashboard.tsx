@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { StartModal } from "../components/StartModal";
 import { ExperiencePanel } from "../components/ExperiencePanel";
 import { GoalsPanel } from "../components/GoalsPanel";
+import { PersonasPanel } from "../components/PersonasPanel";
 import { SchedulePanel } from "../components/SchedulePanel";
 import { formatDuration, formatDate, formatCostUSD, CATEGORY_COLOR } from "../utils/format";
 import type { RunSummary } from "../types";
@@ -79,6 +80,7 @@ export function Dashboard() {
 
       <ExperiencePanel />
       <GoalsPanel />
+      <PersonasPanel />
       <SchedulePanel />
 
       {runs.length === 0 ? (

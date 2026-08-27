@@ -108,6 +108,8 @@ export function StartModal({ onClose, onStarted }: Props) {
             <span style={styles.modeHint}>{t(`startModal.modeHint.${mode}`)}</span>
           </label>
 
+          <p style={styles.fixedHint}>{t("startModal.fixedRosterHint")}</p>
+
           <button
             type="button"
             onClick={() => setShowAdvanced((v) => !v)}
@@ -222,6 +224,12 @@ const styles = {
     fontSize: "0.7rem",
     fontWeight: 400,
     color: "#94a3b8",
+  },
+  fixedHint: {
+    fontSize: "0.75rem",
+    color: "#94a3b8",
+    margin: 0,
+    lineHeight: 1.4,
   },
   advancedToggle: {
     background: "none",
