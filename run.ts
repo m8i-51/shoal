@@ -670,13 +670,14 @@ ${pathCoverageStep}
           };
           try {
             const cleanEnv = sanitizeEnvironment(environment);
-            result = addAgent({
+            const agent = addAgent({
               name: name ?? "",
               role: role ?? "",
               persona: persona ?? "",
               environment: cleanEnv,
             });
-            console.log(`  [persona-designer] created: ${result.name} (${result.role})${cleanEnv ? ` [env: ${Object.entries(cleanEnv).map(([k, v]) => `${k}=${v}`).join(", ")}]` : ""}`);
+            result = agent;
+            console.log(`  [persona-designer] created: ${agent.name} (${agent.role})${cleanEnv ? ` [env: ${Object.entries(cleanEnv).map(([k, v]) => `${k}=${v}`).join(", ")}]` : ""}`);
           } catch (e) {
             const message = e instanceof Error ? e.message : String(e);
             result = { error: message };
