@@ -18,6 +18,19 @@ import { createMessageWithRetry, runAgentLoop, sleep, rateLimitRetries } from ".
 import { collectedFindings, initRunLog, saveRunLog, saveFinding, getSwarmSignals, runLog } from "./framework/findings";
 import { loadAgents, addAgent, retireAgent, recordAgentMemories, formatAgentMemories, buildMemoryInputs, type Agent } from "./framework/agent-store";
 import { updateCoverage, computeWeightedSummary, getLastRunPaths, getFindingHotspots } from "./framework/coverage";
+import {
+  loadSiteMap,
+  saveSiteMap,
+  seedFromSitemap,
+  formatSiteMapForPersona,
+  formatSiteMapLogLine,
+  recordVisit,
+  ingestDiscoveredPaths,
+  collectSameOriginHrefs,
+  normalizePath,
+  MAX_DISCOVERED_PER_RUN,
+  type SiteMap,
+} from "./framework/site-map";
 import { computeExperienceScore, formatExperienceLine } from "./framework/experience-score";
 import { updateAdoption } from "./framework/adoption";
 import { getShoalMode, filterAppTools, applyBrowserGuardrails, guardrailPrompt, guardSafeBrowserClick } from "./framework/guardrails";
@@ -486,7 +499,7 @@ const PERSONA_DESIGNER_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: "get_path_coverage",
-    description: "Get the list of URL paths visited in the previous run. Use this to identify unexplored areas of the app and recruit agents likely to visit NEW paths. / 前回のrunで訪れたURLパス一覧を取得する。未探索エリアを特定し、新しいパスを訪れる可能性の高いペルソナを採用するために使う",
+    description: "Get site-map coverage vs known paths (unvisited / reached / explored rates), plus paths touched in the most recent run. Use this to recruit agents who will naturally fill coverage gaps. / 既知パスに対するサイトマップ網羅（未訪問・reached・explored・％）と直近runで触ったパスを取得する。網羅の穴を埋めるペルソナ採用に使う",
     input_schema: { type: "object", properties: {}, required: [] },
   },
   {
@@ -560,6 +573,7 @@ async function runPersonaDesigner(
   testAccounts: TestAccount[] = [],
   lastRunPaths: { visitedPaths: string[]; runId: string } | null = null,
   personaPack: PersonaPack | null = null,
+  siteMap: SiteMap | null = null,
 ): Promise<void> {
   console.log("\n[persona-designer] starting...");
   const messages: Anthropic.MessageParam[] = [
@@ -570,9 +584,7 @@ async function runPersonaDesigner(
     ? `\n[Available Test Accounts (one per role)]\n${testAccounts.map((a) => `- ${a.role}: ${a.email}`).join("\n")}\nWhen recruiting agents, match each persona's role to one of these accounts so they can operate with appropriate permissions.`
     : "";
 
-  const pathCoverageStep = lastRunPaths
-    ? "3. Call get_path_coverage to see which URL paths were visited last run — recruit agents whose role would naturally take them to DIFFERENT or unexplored paths\n4. Call get_finding_hotspots to see where problems have clustered across all past runs — recruit agents to under-investigated areas, or specialists to problem hotspots"
-    : "3. (No previous run data yet — skip get_path_coverage)\n4. Call get_finding_hotspots to see if any areas have already accumulated findings";
+  const pathCoverageStep = "3. Call get_path_coverage to review site-map coverage (unvisited / reached / explored rates and gaps) — recruit agents whose role would naturally fill UNVISITED or thinly visited paths\n4. Call get_finding_hotspots to see where problems have clustered across all past runs — recruit agents to under-investigated areas, or specialists to problem hotspots";
 
   const personaTemplateStep = personaPack
     ? "2. Call get_persona_templates to get project-specific persona archetypes — prefer these over inventing new personas from scratch"
@@ -625,12 +637,16 @@ ${pathCoverageStep}
           }
           console.log(`  [persona-designer] persona templates fetched (${personaPack?.personas.length ?? 0})`);
         } else if (toolUse.name === "get_path_coverage") {
-          if (!lastRunPaths || lastRunPaths.visitedPaths.length === 0) {
+          if (siteMap) {
+            result = formatSiteMapForPersona(siteMap, {
+              recentPaths: lastRunPaths?.visitedPaths ?? [],
+            });
+          } else if (!lastRunPaths || lastRunPaths.visitedPaths.length === 0) {
             result = "(no path coverage data yet — this is the first run or no paths were recorded)";
           } else {
             result = `Paths visited in last run (${lastRunPaths.runId}):\n${lastRunPaths.visitedPaths.map((p) => `- ${p}`).join("\n")}\n\nRecruit agents whose role naturally takes them to paths NOT in this list.`;
           }
-          console.log(`  [persona-designer] path coverage fetched (${lastRunPaths?.visitedPaths.length ?? 0} paths)`);
+          console.log(`  [persona-designer] path coverage fetched (site-map=${Boolean(siteMap)}, recent=${lastRunPaths?.visitedPaths.length ?? 0})`);
         } else if (toolUse.name === "get_finding_hotspots") {
           const hotspots = getFindingHotspots();
           if (hotspots.length === 0) {
@@ -1105,6 +1121,9 @@ async function runBrowserAgent(
   assignment: Assignment = {},
   scenarioOutcomes: ScenarioOutcome[] = [],
   authPlan: BrowserAuthPlan = { handoff: { kind: "guest" }, startPath: "/" },
+  siteMap: SiteMap | null = null,
+  runId: string = "",
+  discoverBudget: { used: number } | null = null,
 ): Promise<BrowserAgentLog> {
   const assignmentLabel = assignment.scenario
     ? `[scenario: ${assignment.scenario.title.slice(0, 35)}]`
@@ -1127,6 +1146,9 @@ async function runBrowserAgent(
   };
 
   const observation = setupObservation(page);
+  const siteMapOrigin = new URL(BASE_URL).origin;
+  let lastTrackedPath: string | null = null;
+  let consecutiveOnPath = 0;
   const host = new URL(BASE_URL).host;
   const cachedHashes = loadPageHashes(host);
   const pageHashUpdates: Record<string, string> = {};
@@ -1257,6 +1279,38 @@ ${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\
           pageHashUpdates,
           assignment.scenario,
         );
+
+        if (siteMap) {
+          try {
+            const currentPath = normalizePath(page.url(), siteMapOrigin);
+            if (currentPath) {
+              const isNewEntry = currentPath !== lastTrackedPath;
+              if (isNewEntry) {
+                lastTrackedPath = currentPath;
+                consecutiveOnPath = 1;
+              } else {
+                consecutiveOnPath += 1;
+              }
+              recordVisit(siteMap, currentPath, runId || runLog.runId, {
+                isNewEntry,
+                consecutiveIterations: consecutiveOnPath,
+              });
+            }
+            if (toolUse.name === "navigate" && discoverBudget) {
+              const hrefs = await collectSameOriginHrefs(page, siteMapOrigin);
+              const normalized = hrefs
+                .map((h) => normalizePath(h, siteMapOrigin))
+                .filter((p): p is string => Boolean(p));
+              const ingested = ingestDiscoveredPaths(siteMap, normalized, {
+                runBudget: MAX_DISCOVERED_PER_RUN,
+                usedBudget: discoverBudget.used,
+              });
+              discoverBudget.used = ingested.usedBudget;
+            }
+          } catch (e) {
+            console.warn(`  [site-map] visit/discover update failed:`, e);
+          }
+        }
 
         const content: Anthropic.ToolResultBlockParam["content"] =
           sendToClaude && screenshot
@@ -1474,10 +1528,19 @@ async function main() {
       testAccounts.map((a) => a.role),
     );
 
-    // 5. HR agent
+    // 5. Site map seed (shared across browser agents; saved once at end)
+    const siteMapOrigin = new URL(BASE_URL).origin;
+    const sharedSiteMap = loadSiteMap(siteMapOrigin);
+    const sitemapSeed = await seedFromSitemap(sharedSiteMap);
+    for (const w of sitemapSeed.warnings) console.warn(`  [site-map] ${w}`);
+    if (sitemapSeed.seeded > 0) console.log(`  [site-map] seeded ${sitemapSeed.seeded} paths from sitemap`);
+    console.log(`  ${formatSiteMapLogLine(sharedSiteMap)}`);
+    const discoverBudget = { used: 0 };
+
+    // 5.5 HR agent
     const lastRunPaths = getLastRunPaths();
     const personaPack = await loadPersonaPack();
-    await runPersonaDesigner(productSpec, orgDesign.personaGuidance, openIssues, scenarios, testAccounts, lastRunPaths, personaPack);
+    await runPersonaDesigner(productSpec, orgDesign.personaGuidance, openIssues, scenarios, testAccounts, lastRunPaths, personaPack, sharedSiteMap);
 
     // 6. load agents (closed issues は step 2 で取得済み)
     const allAgents = loadAgents();
@@ -1590,7 +1653,7 @@ async function main() {
         const page = await context.newPage();
         await applyNetworkThrottle(page, agent.environment?.networkThrottle);
         try {
-          return await runBrowserAgent(agent, page, productSpec, assignment, scenarioOutcomes, authPlan);
+          return await runBrowserAgent(agent, page, productSpec, assignment, scenarioOutcomes, authPlan, sharedSiteMap, runLog.runId, discoverBudget);
         } finally {
           // 次の run で「再訪ユーザー」になれるようセッションを保存（close 前に呼ぶ）
           await saveAgentSession(context, agent.id);
@@ -1608,6 +1671,8 @@ async function main() {
       })
     );
     const allVisitedPaths = browserLogs.flatMap((log) => log.visitedPaths);
+    saveSiteMap(sharedSiteMap);
+    console.log(`  ${formatSiteMapLogLine(sharedSiteMap)}`);
     for (let i = 0; i < browserAgents.length; i++) {
       recordBrowserAgentRun(browserAgents[i], browserLogs[i]);
     }
