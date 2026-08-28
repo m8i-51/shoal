@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useImeEnterHandler } from "../utils/ime-enter";
 
 interface Persona {
   id: string;
@@ -45,7 +46,7 @@ export function PersonasPanel() {
     void load();
   }, []);
 
-  const createFromSeed = async () => {
+  const createFromSeed = useCallback(async () => {
     const trimmed = seed.trim();
     if (!trimmed) return;
     setCreating(true);
@@ -68,7 +69,11 @@ export function PersonasPanel() {
     } finally {
       setCreating(false);
     }
-  };
+  }, [seed, t]);
+
+  const seedEnterHandlers = useImeEnterHandler(() => {
+    void createFromSeed();
+  });
 
   const startEdit = (p: Persona) => {
     setEditingId(p.id);
@@ -137,15 +142,12 @@ export function PersonasPanel() {
           value={seed}
           placeholder={t("personas.seedPlaceholder")}
           onChange={(e) => setSeed(e.target.value)}
-          onKeyDown={(e) => {
-            // Ignore Enter while confirming Japanese/Chinese IME conversion.
-            if (e.key === "Enter" && !e.nativeEvent.isComposing) {
-              e.preventDefault();
-              void createFromSeed();
-            }
-          }}
+          onCompositionStart={seedEnterHandlers.onCompositionStart}
+          onCompositionEnd={seedEnterHandlers.onCompositionEnd}
+          onKeyDown={seedEnterHandlers.onKeyDown}
         />
         <button
+          type="button"
           onClick={() => void createFromSeed()}
           style={styles.saveBtn}
           disabled={creating || !seed.trim()}
