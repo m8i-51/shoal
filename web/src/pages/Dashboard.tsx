@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { StartModal } from "../components/StartModal";
 import { ExperiencePanel } from "../components/ExperiencePanel";
+import { SiteMapPanel } from "../components/SiteMapPanel";
 import { GoalsPanel } from "../components/GoalsPanel";
 import { PersonasPanel } from "../components/PersonasPanel";
 import { SchedulePanel } from "../components/SchedulePanel";
@@ -79,6 +80,7 @@ export function Dashboard() {
       </div>
 
       <ExperiencePanel />
+      <SiteMapPanel />
       <GoalsPanel />
       <PersonasPanel />
       <SchedulePanel />

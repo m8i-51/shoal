@@ -142,5 +142,29 @@
     "achievement": "scenario success",
     "friction": "avg steps",
     "regression": "regression rate"
+  },
+  "siteMap": {
+    "title": "Site Map Coverage",
+    "exploredRate": "explored",
+    "known": "known paths",
+    "unvisited": "unvisited",
+    "reached": "reached",
+    "explored": "explored",
+    "tabUnvisited": "Unvisited",
+    "tabThin": "Thin",
+    "tabAll": "All",
+    "emptyTitle": "No site map yet",
+    "emptyHint": "The map builds after your first run from sitemap.xml and paths discovered during exploration.",
+    "updatedAt": "Updated",
+    "visits": "{{count}} visit(s)",
+    "sourceSitemap": "sitemap",
+    "sourceDiscovered": "discovered",
+    "noUnvisited": "All known paths have been visited at least once.",
+    "noThin": "No thinly visited paths (reached only).",
+    "status": {
+      "unvisited": "unvisited",
+      "reached": "reached",
+      "explored": "explored"
+    }
   }
 }

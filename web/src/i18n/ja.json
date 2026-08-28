@@ -142,5 +142,29 @@
     "achievement": "シナリオ達成率",
     "friction": "平均手数",
     "regression": "リグレッション率"
+  },
+  "siteMap": {
+    "title": "Site Map Coverage",
+    "exploredRate": "explored 率",
+    "known": "既知 path",
+    "unvisited": "未訪問",
+    "reached": "reached",
+    "explored": "explored",
+    "tabUnvisited": "未訪問",
+    "tabThin": "浅い訪問",
+    "tabAll": "すべて",
+    "emptyTitle": "サイト地図がまだありません",
+    "emptyHint": "初回 run 後、sitemap.xml と探索で発見した path から地図が構築されます。",
+    "updatedAt": "更新",
+    "visits": "{{count}} 回訪問",
+    "sourceSitemap": "sitemap",
+    "sourceDiscovered": "探索で発見",
+    "noUnvisited": "既知 path はすべて一度は訪問されています。",
+    "noThin": "浅い訪問（reached のみ）の path はありません。",
+    "status": {
+      "unvisited": "未訪問",
+      "reached": "reached",
+      "explored": "explored"
+    }
   }
 }
