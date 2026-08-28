@@ -148,6 +148,13 @@ describe("BacklogTracker", () => {
       expect(url).toContain("/issues/123/comments");
     });
 
+    it("Backlog issue key (PROJ-55) でコメントできる", async () => {
+      vi.mocked(fetch).mockResolvedValue({ ok: true } as Response);
+      expect(await makeTracker().commentOnIssue("PROJ-55", "regression note")).toBe(true);
+      const [url] = vi.mocked(fetch).mock.calls[0];
+      expect(url).toContain("/issues/PROJ-55/comments");
+    });
+
     it("失敗時は false を返す", async () => {
       vi.mocked(fetch).mockResolvedValue({ ok: false, status: 403, text: async () => "forbidden" } as Response);
       expect(await makeTracker().commentOnIssue(123, "nice")).toBe(false);
