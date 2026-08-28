@@ -39,7 +39,7 @@ export function isFinding(v: unknown): v is Finding {
 }
 
 export interface RegressionCheck {
-  issueNumber: number;
+  issueNumber: number | string;
   issueTitle: string;
   status: "fixed" | "regressed";
   note: string;

@@ -7,6 +7,7 @@ import { runToolSession } from "./tool-session";
 import type { IssueTracker } from "./trackers/index";
 import { recordIssueLink } from "./adoption";
 import { commentReturningUserReReports } from "./triage-rereport";
+import { formatIssueRef } from "./issue-id";
 
 const TRIAGE_TOOLS: Anthropic.Tool[] = [
   {
@@ -76,7 +77,7 @@ export async function runTriageAgent(
   );
   for (const report of reReports) {
     if (report.commented) {
-      console.log(`  [triage] re-report comment on #${report.issueNumber}: ${report.issueTitle}`);
+      console.log(`  [triage] re-report comment on ${formatIssueRef(report.issueNumber)}: ${report.issueTitle}`);
     }
   }
 
