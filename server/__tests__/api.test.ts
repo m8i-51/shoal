@@ -686,7 +686,7 @@ describe("personas API", () => {
 
   it("POST /api/personas rejects when product spec is missing", async () => {
     vi.mocked(fs.existsSync).mockReturnValue(false);
-    const res = await request(app).post("/api/personas").send({ seed: "偏屈おじさん" });
+    const res = await request(app).post("/api/personas").send({ seed: "初めて使う人" });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/spec/i);
   });
@@ -696,26 +696,26 @@ describe("personas API", () => {
     vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(sampleSpec) as never);
     vi.mocked(generatePersonaFromSeed).mockResolvedValue({
       name: "Takeshi",
-      role: "grumpy uncle",
-      persona: "Distrusts new UI.",
+      role: "first-time user",
+      persona: "Needs clear onboarding.",
       lenses: ["trust"],
     });
     vi.mocked(addAgent).mockReturnValue({
       id: "agent_1",
       name: "Takeshi",
-      role: "grumpy uncle",
-      persona: "Distrusts new UI.",
+      role: "first-time user",
+      persona: "Needs clear onboarding.",
       lenses: ["trust"],
       origin: "fixed",
       status: "active",
-      seed: "偏屈おじさん",
+      seed: "初めて使う人",
       createdAt: "2026-01-01T00:00:00.000Z",
     } as never);
 
-    const res = await request(app).post("/api/personas").send({ seed: "偏屈おじさん" });
+    const res = await request(app).post("/api/personas").send({ seed: "初めて使う人" });
     expect(res.status).toBe(201);
     expect(res.body.origin).toBe("fixed");
-    expect(addAgent).toHaveBeenCalledWith(expect.objectContaining({ origin: "fixed", seed: "偏屈おじさん" }));
+    expect(addAgent).toHaveBeenCalledWith(expect.objectContaining({ origin: "fixed", seed: "初めて使う人" }));
   });
 
   it("POST /api/personas returns 502 on generation failure", async () => {
