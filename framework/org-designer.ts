@@ -1,6 +1,5 @@
-import Anthropic from "@anthropic-ai/sdk";
 import type { LLMClient } from "./llm-client";
-import { createMessageWithRetry } from "./agent-loop";
+import { completeText } from "./tool-session";
 import type { ProductSpec } from "./product-discovery";
 
 export interface OrgDesign {
@@ -24,17 +23,15 @@ export const UNIVERSAL_LENSES = [
 export async function designOrg(spec: ProductSpec, client: LLMClient, model: string, coverageSummary?: string): Promise<OrgDesign> {
   console.log("\n[persona-policy] starting...");
 
-  const response = await createMessageWithRetry(client, {
+  const text = await completeText({
+    provider: process.env.LLM_PROVIDER ?? "anthropic",
+    client,
     model,
-    max_tokens: 1024,
+    maxTokens: 1024,
     system: `You are a software QA expert.
 Given an app specification, infer the organization and user base,
 then define an agent recruitment policy for testing.`,
-    tools: [],
-    messages: [
-      {
-        role: "user",
-        content: `Design a test agent recruitment policy for the following app.
+    userPrompt: `Design a test agent recruitment policy for the following app.
 
 [App Overview]
 ${spec.appDescription}
@@ -77,14 +74,7 @@ Balance job-role personas and lifestyle-based end-user personas.
 
 ## Recruitment instructions for the persona designer agent
 (Concrete guidelines based on the above — emphasize that the majority of personas should reflect real users of this specific app, with expert evaluators as a minority supplement)`,
-      },
-    ],
   });
-
-  const text = response.content
-    .filter((b): b is Anthropic.TextBlock => b.type === "text")
-    .map((b) => b.text)
-    .join("");
 
   const personaGuidance = `${text}
 

@@ -149,7 +149,7 @@ describe("runAgentLoop", () => {
       stop_reason: "end_turn",
       usage: {},
     });
-    await runAgentLoop(agentLog, "sys", [], makeClient(createMessage), "m", vi.fn());
+    await runAgentLoop(agentLog, "sys", [], makeClient(createMessage), "m", vi.fn(), "anthropic");
     expect(agentLog.status).toBe("completed");
     expect(agentLog.completedAt).not.toBeNull();
   });
@@ -165,7 +165,10 @@ describe("runAgentLoop", () => {
       })
       .mockResolvedValueOnce({ content: [], stop_reason: "end_turn", usage: {} });
 
-    await runAgentLoop(agentLog, "sys", [], makeClient(createMessage), "m", executeToolFn);
+    const tools = [
+      { name: "click", description: "click", input_schema: { type: "object" as const, properties: {} } },
+    ];
+    await runAgentLoop(agentLog, "sys", tools as never, makeClient(createMessage), "m", executeToolFn, "anthropic");
     expect(executeToolFn).toHaveBeenCalledWith("click", { x: 1 });
     expect(agentLog.status).toBe("completed");
   });
@@ -179,7 +182,10 @@ describe("runAgentLoop", () => {
       usage: {},
     });
 
-    await runAgentLoop(agentLog, "sys", [], makeClient(createMessage), "m", executeToolFn);
+    const tools = [
+      { name: "noop", description: "noop", input_schema: { type: "object" as const, properties: {} } },
+    ];
+    await runAgentLoop(agentLog, "sys", tools as never, makeClient(createMessage), "m", executeToolFn, "anthropic");
     expect(agentLog.status).toBe("iteration_limit");
     expect(agentLog.iterations).toBe(10);
     expect(vi.mocked(findingsModule).runLog!.summary.iterationLimitReached).toBe(1);
@@ -188,7 +194,7 @@ describe("runAgentLoop", () => {
   it("例外発生時は error 状態になり runLog.summary.errors が増える", async () => {
     const agentLog = makeAgentLog();
     const createMessage = vi.fn().mockRejectedValue(new Error("network down"));
-    await runAgentLoop(agentLog, "sys", [], makeClient(createMessage), "m", vi.fn());
+    await runAgentLoop(agentLog, "sys", [], makeClient(createMessage), "m", vi.fn(), "anthropic");
     expect(agentLog.status).toBe("error");
     expect(agentLog.error).toContain("network down");
     expect(vi.mocked(findingsModule).runLog!.summary.errors).toBe(1);
@@ -198,7 +204,7 @@ describe("runAgentLoop", () => {
   it("正常完了時は runLog.summary.completed が増える", async () => {
     const agentLog = makeAgentLog();
     const createMessage = vi.fn().mockResolvedValue({ content: [], stop_reason: "end_turn", usage: {} });
-    await runAgentLoop(agentLog, "sys", [], makeClient(createMessage), "m", vi.fn());
+    await runAgentLoop(agentLog, "sys", [], makeClient(createMessage), "m", vi.fn(), "anthropic");
     expect(vi.mocked(findingsModule).runLog!.summary.completed).toBe(1);
   });
 });

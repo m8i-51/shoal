@@ -61,6 +61,7 @@ function warnMissingLlmCredentials(opts: LoadShoalEnvOptions): void {
     case "ollama":
     case "lm-studio":
     case "codex":
+    case "claude-cli":
       return;
     case "anthropic":
       if (process.env.ANTHROPIC_API_KEY?.trim()) return;

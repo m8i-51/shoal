@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("fs");
-vi.mock("../agent-loop", () => ({ createMessageWithRetry: vi.fn() }));
+vi.mock("../llm-retry", () => ({ createMessageWithRetry: vi.fn() }));
 vi.mock("../findings", () => ({ saveFinding: vi.fn() }));
 
 import * as fs from "fs";
-import { createMessageWithRetry } from "../agent-loop";
+import { createMessageWithRetry } from "../llm-retry";
 import { saveFinding } from "../findings";
 import { loadTestAccounts, inspectAccountsFile, resolveAccountSetup, runAccountManager, loginCandidateUrls, resolveLoginUrl, planBrowserAuth, authPrompt, describeAuthPlan, loginLooksEstablished, storageStateHasSession, type TestAccount } from "../account-manager";
 import type { ProductSpec } from "../product-discovery";

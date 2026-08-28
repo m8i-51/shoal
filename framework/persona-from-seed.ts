@@ -1,4 +1,5 @@
 import { createLLMClient, type LLMClient } from "./llm-client.js";
+import { completeText } from "./tool-session.js";
 import type { ProductSpec } from "./product-discovery.js";
 
 export interface GeneratedPersonaFields {
@@ -72,17 +73,19 @@ export async function generatePersonaFromSeed(
     throw new PersonaGenerationError("seed is required");
   }
 
-  const { client, defaultModel } = opts.client
-    ? { client: opts.client, defaultModel: opts.model ?? "test-model" }
+  const { client, defaultModel, provider } = opts.client
+    ? { client: opts.client, defaultModel: opts.model ?? "test-model", provider: process.env.LLM_PROVIDER ?? "anthropic" }
     : createLLMClient();
   const model = opts.model ?? defaultModel;
 
   const goals = (spec.appGoals ?? []).filter((g) => typeof g === "string" && g.trim());
   const goalsBlock = goals.length > 0 ? goals.map((g) => `- ${g}`).join("\n") : "(none listed)";
 
-  const msg = await client.createMessage({
+  const text = await completeText({
+    provider,
+    client,
     model,
-    max_tokens: 1024,
+    maxTokens: 1024,
     system: `You expand a short persona seed into a concrete test-user persona for an AI exploration swarm.
 Return ONLY a JSON object (no markdown prose) with keys:
 - name: a human first name (string)
@@ -94,11 +97,7 @@ Rules:
 - Ground the persona in THIS product's users and goals — not a generic QA engineer.
 - Reflect the seed's character (tone, quirks, intent) vividly.
 - Prefer end-user roles over professional auditor titles unless the seed clearly asks for that.`,
-    tools: [],
-    messages: [
-      {
-        role: "user",
-        content: `App: ${spec.appName}
+    userPrompt: `App: ${spec.appName}
 Description: ${spec.appDescription}
 Target users: ${spec.targetUsers}
 App goals:
@@ -107,14 +106,7 @@ ${goalsBlock}
 Seed: ${trimmedSeed}
 
 Expand this seed into the JSON object described above.`,
-      },
-    ],
   });
-
-  const text = msg.content
-    .filter((b) => b.type === "text")
-    .map((b) => (b as { type: "text"; text: string }).text)
-    .join("");
 
   return parseGeneratedPersona(extractJsonObject(text));
 }

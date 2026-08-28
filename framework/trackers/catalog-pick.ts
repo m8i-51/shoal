@@ -3,7 +3,8 @@
  * 課題トラッカーの課題タイプ / 優先度を、指摘カテゴリから選ぶ。
  * 名前の対応（バグ・要望・タスクなど）を優先し、判断できないときだけモデルに選ばせる。
  */
-import { createLLMClient, type Message } from "../llm-client";
+import { createLLMClient } from "../llm-client";
+import { completeText } from "../tool-session";
 
 export interface CatalogItem {
   id: string;
@@ -106,14 +107,6 @@ export function pickByName(
   return best;
 }
 
-function textFromMessage(message: Message): string {
-  return message.content
-    .filter((b) => b.type === "text")
-    .map((b) => (b.type === "text" ? b.text : ""))
-    .join(" ")
-    .trim();
-}
-
 export async function defaultPickWithModel(
   items: CatalogItem[],
   category: FindingCategory,
@@ -121,25 +114,22 @@ export async function defaultPickWithModel(
 ): Promise<CatalogItem | null> {
   if (items.length === 0) return null;
   try {
-    const { client, defaultModel } = createLLMClient();
+    const { client, defaultModel, provider } = createLLMClient();
     const kindLabel = kind === "issueType" ? "issue type" : "priority";
-    const message = await client.createMessage({
+    const text = await completeText({
+      provider,
+      client,
       model: defaultModel,
-      max_tokens: 80,
+      maxTokens: 80,
       system: `You pick a ${kindLabel} for a software issue tracker. Reply with only the id of the best match.`,
-      tools: [],
-      messages: [{
-        role: "user",
-        content: [
-          `Finding category: ${category}`,
-          "Options:",
-          ...items.map((i) => `- id=${i.id} name=${i.name}`),
-          "",
-          "Reply with the id only.",
-        ].join("\n"),
-      }],
+      userPrompt: [
+        `Finding category: ${category}`,
+        "Options:",
+        ...items.map((i) => `- id=${i.id} name=${i.name}`),
+        "",
+        "Reply with the id only.",
+      ].join("\n"),
     });
-    const text = textFromMessage(message);
     const trimmed = text.trim();
     const exact = items.find((i) => i.id === trimmed);
     if (exact) return exact;

@@ -141,14 +141,14 @@ describe("addAgent origin/status", () => {
   it("stores fixed seed and lenses", () => {
     const agent = addAgent({
       name: "Ken",
-      role: "grumpy uncle",
+      role: "first-time user",
       persona: "skeptical",
       origin: "fixed",
-      seed: "偏屈おじさん",
+      seed: "初めて使う人",
       lenses: ["trust", "clarity"],
     });
     expect(agent.origin).toBe("fixed");
-    expect(agent.seed).toBe("偏屈おじさん");
+    expect(agent.seed).toBe("初めて使う人");
     expect(agent.lenses).toEqual(["trust", "clarity"]);
   });
 });

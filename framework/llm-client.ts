@@ -471,7 +471,12 @@ class CodexClient {
 
 // ---- Factory ----
 
-export type LLMClient = AnthropicClient | BedrockClient | OpenAICompatClient | CodexClient;
+export type LLMClient =
+  | AnthropicClient
+  | BedrockClient
+  | OpenAICompatClient
+  | CodexClient
+  | { createMessage: (params: CreateMessageParams) => Promise<Message> };
 
 // OpenAI-compat プロバイダのデフォルト設定
 // LLM_BASE_URL / LLM_MODEL で個別上書き可能
@@ -508,6 +513,23 @@ export function createLLMClient(): { client: LLMClient; defaultModel: string; pr
       client: new CodexClient(effectiveModel),
       defaultModel: effectiveModel,
       provider: "codex",
+    };
+  }
+
+  // Claude CLI / Agent SDK（Claude Code ログイン）。Messages createMessage は使わない。
+  if (provider === "claude-cli") {
+    const effectiveModel = model ?? "claude-sonnet-4-6";
+    console.log(`[LLM] provider: Claude CLI (Claude Code login), model: ${effectiveModel}`);
+    return {
+      client: {
+        createMessage: async () => {
+          throw new Error(
+            'LLM_PROVIDER=claude-cli does not support createMessage; use runToolSession / completeText from framework/tool-session.ts'
+          );
+        },
+      },
+      defaultModel: effectiveModel,
+      provider: "claude-cli",
     };
   }
 

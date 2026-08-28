@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("fs");
-vi.mock("../agent-loop", () => ({ createMessageWithRetry: vi.fn() }));
+vi.mock("../llm-retry", () => ({ createMessageWithRetry: vi.fn(), sleep: vi.fn(), rateLimitRetries: 0 }));
 vi.stubGlobal("fetch", vi.fn());
 
 import * as fs from "fs";
-import { createMessageWithRetry } from "../agent-loop";
+import { createMessageWithRetry } from "../llm-retry";
 import { discoverProduct, loadCachedSpec, isLoginPath, inferLoginPathFromText, normalizeLoginPath, resolveLoginPath, detectLoginPath, type ProductSpec } from "../product-discovery";
 import type { LLMClient } from "../llm-client";
 import type { Page } from "playwright";

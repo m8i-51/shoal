@@ -5,6 +5,7 @@ import type { ProductSpec } from "./product-discovery";
 import type { TriageResult } from "./triage";
 import type { Scenario, ScenarioOutcome } from "./scenario-designer";
 import type { ExperienceScore } from "./experience-score";
+import { formatIssueRef } from "./issue-id";
 
 function esc(s: string): string {
   return s
@@ -269,11 +270,11 @@ export function generateReport(
     <h2>Progress (${allRegressionChecks.length} issues checked)</h2>
     ${regressedChecks.length > 0 ? `<p style="color:#ef4444;font-size:.875rem;margin-bottom:.75rem">⚠ ${regressedChecks.length} regression${regressedChecks.length !== 1 ? "s" : ""} detected</p>` : `<p style="color:#22c55e;font-size:.875rem;margin-bottom:.75rem">✓ All previously fixed issues remain resolved</p>`}
     <table>
-      <thead><tr><th>#</th><th>Issue</th><th style="text-align:center">Status</th></tr></thead>
+      <thead><tr><th>ID</th><th>Issue</th><th style="text-align:center">Status</th></tr></thead>
       <tbody>
         ${allRegressionChecks.map((c) => `
         <tr>
-          <td style="color:#94a3b8">#${c.issueNumber}</td>
+          <td style="color:#94a3b8">${formatIssueRef(c.issueNumber)}</td>
           <td>${esc(c.issueTitle)}</td>
           <td style="text-align:center">${c.status === "fixed" ? '<span class="badge" style="background:#22c55e">✓ fixed</span>' : '<span class="badge" style="background:#ef4444">⚠ regressed</span>'}</td>
         </tr>`).join("")}
