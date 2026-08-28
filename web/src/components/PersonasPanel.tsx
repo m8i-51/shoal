@@ -11,6 +11,7 @@ interface Persona {
   lenses?: string[];
   status?: "active" | "archived";
   origin?: string;
+  accountRole?: string;
 }
 
 export function PersonasPanel() {
@@ -22,11 +23,12 @@ export function PersonasPanel() {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [draft, setDraft] = useState<{ name: string; role: string; persona: string; lenses: string }>({
+  const [draft, setDraft] = useState<{ name: string; role: string; persona: string; lenses: string; accountRole: string }>({
     name: "",
     role: "",
     persona: "",
     lenses: "",
+    accountRole: "",
   });
   const [saving, setSaving] = useState(false);
 
@@ -82,6 +84,7 @@ export function PersonasPanel() {
       role: p.role,
       persona: p.persona,
       lenses: (p.lenses ?? []).join(", "),
+      accountRole: p.accountRole ?? "",
     });
   };
 
@@ -102,6 +105,7 @@ export function PersonasPanel() {
           role: draft.role,
           persona: draft.persona,
           lenses,
+          accountRole: draft.accountRole.trim() === "" ? null : draft.accountRole.trim(),
         }),
       });
       if (!res.ok) {
@@ -177,6 +181,13 @@ export function PersonasPanel() {
                     onChange={(e) => setDraft((d) => ({ ...d, role: e.target.value }))}
                     placeholder={t("personas.role")}
                   />
+                  <input
+                    style={styles.input}
+                    value={draft.accountRole}
+                    onChange={(e) => setDraft((d) => ({ ...d, accountRole: e.target.value }))}
+                    placeholder={t("personas.accountRolePlaceholder")}
+                    aria-label={t("personas.accountRole")}
+                  />
                   <textarea
                     style={styles.textarea}
                     value={draft.persona}
@@ -203,6 +214,9 @@ export function PersonasPanel() {
                   <div style={styles.itemHeader}>
                     <strong style={styles.name}>{p.name}</strong>
                     <span style={styles.role}>{p.role}</span>
+                    {p.accountRole && (
+                      <span style={styles.role}>{t("personas.accountRole")}: {p.accountRole}</span>
+                    )}
                   </div>
                   {p.seed && <p style={styles.seed}>{t("personas.seedLabel")}: {p.seed}</p>}
                   <p style={styles.persona}>{p.persona}</p>

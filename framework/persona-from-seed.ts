@@ -7,6 +7,7 @@ export interface GeneratedPersonaFields {
   role: string;
   persona: string;
   lenses: string[];
+  accountRole?: string;
 }
 
 export class PersonaGenerationError extends Error {
@@ -44,7 +45,11 @@ export function parseGeneratedPersona(raw: unknown): GeneratedPersonaFields {
     throw new PersonaGenerationError("generated persona must include at least one lens");
   }
 
-  return { name, role, persona, lenses };
+  const accountRole = typeof obj.accountRole === "string" && obj.accountRole.trim() !== ""
+    ? obj.accountRole.trim()
+    : undefined;
+
+  return { name, role, persona, lenses, ...(accountRole ? { accountRole } : {}) };
 }
 
 function extractJsonObject(text: string): unknown {
@@ -89,7 +94,8 @@ export async function generatePersonaFromSeed(
     system: `You expand a short persona seed into a concrete test-user persona for an AI exploration swarm.
 Return ONLY a JSON object (no markdown prose) with keys:
 - name: a human first name (string)
-- role: short role label as a real user of this app (string)
+- role: short narrative role as a real user of this app (string) — this may be descriptive
+- accountRole: short test-account role token such as user, instructor, or admin — NOT a narrative description
 - persona: 2–4 sentences describing background, motivations, and how they use the app (string)
 - lenses: 1–4 evaluation perspectives as short strings (array)
 

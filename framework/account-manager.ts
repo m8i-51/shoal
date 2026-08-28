@@ -17,8 +17,9 @@ import {
 import { resolveLoginPath, isLoginPath, type ProductSpec } from "./product-discovery";
 import type { Credentials } from "../targets/types";
 import Anthropic from "@anthropic-ai/sdk";
-import { findBestByRole } from "./role-match";
-import { clickDescribedElement } from "./click-target";
+import { findBestByRole, roleAffinity } from "./role-match";
+import { clickDescribedElement, clickToolHasTarget } from "./click-target";
+import { formatToolCallLog, isPasswordLabel, redactFillResultText, REDACTED_SECRET } from "./redact";
 
 export interface TestAccount {
   email: string;
@@ -49,6 +50,11 @@ export type AccountSetupPlan =
       action: "run";
       seed: Credentials;
       seedSource: "config" | "accounts.json";
+      existing: TestAccount[];
+      logs: string[];
+    }
+  | {
+      action: "persist";
       existing: TestAccount[];
       logs: string[];
     }
@@ -132,6 +138,7 @@ export type BrowserAuthPlan = {
   handoff: AuthHandoff;
   storageStatePath?: string;
   startPath: string;
+  roleMismatch?: { requested: string; used: string };
 };
 
 /** Join base URL with a login path. `/` and empty path mean the app root. */
@@ -158,12 +165,27 @@ export function loginCandidateUrls(baseUrl: string, loginPath?: string): string[
   return urls;
 }
 
-function sessionPlan(account: TestAccount): BrowserAuthPlan {
+function sessionPlan(account: TestAccount, mismatch?: { requested: string; used: string }): BrowserAuthPlan {
   return {
     handoff: { kind: "session", email: account.email, role: account.role },
     storageStatePath: account.storageStatePath,
     startPath: "/",
+    ...(mismatch ? { roleMismatch: mismatch } : {}),
   };
+}
+
+function defaultSessionAccount(accounts: TestAccount[]): TestAccount | undefined {
+  const withSession = accounts.filter((a) => Boolean(a.storageStatePath));
+  if (withSession.length === 0) return undefined;
+  return findBestByRole(withSession, "user")
+    ?? findBestByRole(withSession, "member")
+    ?? withSession[0];
+}
+
+export function pickAdminAccount(accounts: TestAccount[]): TestAccount | undefined {
+  const usable = accounts.filter(hasUsableCredentials);
+  return findBestByRole(usable, "admin")
+    ?? usable.find((a) => /admin|administrator|管理者/.test(a.role));
 }
 
 /**
@@ -196,6 +218,14 @@ export function planBrowserAuth(opts: {
     return { handoff: { kind: "session" }, storageStatePath: opts.returningSessionPath, startPath: "/" };
   }
   if (sessionForRole) return sessionPlan(sessionForRole);
+
+  const fallbackSession = defaultSessionAccount(opts.testAccounts);
+  if (fallbackSession) {
+    const mismatch = roleAffinity(fallbackSession.role, opts.accountRole) === 0 && Boolean(opts.accountRole?.trim())
+      ? { requested: opts.accountRole, used: fallbackSession.role }
+      : undefined;
+    return sessionPlan(fallbackSession, mismatch);
+  }
 
   const creds = credsForRole ?? anyCreds;
   if (creds) {
@@ -249,10 +279,14 @@ If you hit a login wall, explore only what is available without an account, or r
 
 export function describeAuthPlan(agentName: string, plan: BrowserAuthPlan): string {
   switch (plan.handoff.kind) {
-    case "session":
+    case "session": {
+      const mismatch = plan.roleMismatch
+        ? ` — role mismatch: persona "${plan.roleMismatch.requested}" vs account "${plan.roleMismatch.used}"`
+        : "";
       return plan.handoff.email
-        ? `[auth] ${agentName}: session injected (${plan.handoff.email})`
+        ? `[auth] ${agentName}: session injected (${plan.handoff.email})${mismatch}`
         : `[auth] ${agentName}: restored previous session`;
+    }
     case "credentials":
       return `[auth] ${agentName}: no session — handing off credentials for ${plan.handoff.email} at ${plan.handoff.loginPath}`;
     case "guest":
@@ -296,6 +330,32 @@ export function loginLooksEstablished(input: {
   return !input.passwordFieldVisible;
 }
 
+export type LoginAttempt = {
+  ok: boolean;
+  triedUrls: string[];
+  lastUrl?: string;
+  passwordFieldVisible?: boolean;
+  formFilled?: boolean;
+};
+
+export function describeLoginFailure(attempt: LoginAttempt): string {
+  if (attempt.ok) return "ok";
+  if (!attempt.formFilled) {
+    const where = attempt.lastUrl ? ` (last URL: ${attempt.lastUrl})` : "";
+    return `login form not found or not filled${where}`;
+  }
+  const parts: string[] = [];
+  if (attempt.lastUrl) {
+    if (isLoginPath(urlPathname(attempt.lastUrl))) {
+      parts.push(`still on login URL (${attempt.lastUrl})`);
+    } else {
+      parts.push(`still at ${attempt.lastUrl}`);
+    }
+  }
+  if (attempt.passwordFieldVisible) parts.push("password field still visible");
+  return parts.join("; ") || "login did not establish a session";
+}
+
 /** Playwright storageState is only useful if it actually captured cookies or localStorage. */
 export function storageStateHasSession(state: {
   cookies?: Array<unknown>;
@@ -325,28 +385,32 @@ function skipReason(file: AccountsFileInspection): string {
 }
 
 /**
- * Decide whether Account Manager should run.
- * Seed comes from shoal.config `target.credentials` when present, otherwise
- * from the first usable entry in test-accounts/accounts.json.
+ * Decide whether Account Manager should run LLM exploration or only persist sessions.
+ * When accounts.json already has usable accounts, skip admin UI exploration.
  */
 export function resolveAccountSetup(configCredentials?: Credentials): AccountSetupPlan {
   const file = inspectAccountsFile();
   const logs = [describeAccountsFile(file)];
   const configSeed = configCredentials && hasUsableCredentials(configCredentials) ? configCredentials : undefined;
+  const usable = file.accounts.filter(hasUsableCredentials);
 
   if (configSeed) {
     logs.push(`[account-manager] config credentials: present (${configSeed.email})`);
-    logs.push(`[account-manager] starting — seed from shoal.config target.credentials (${configSeed.email})`);
-    return { action: "run", seed: configSeed, seedSource: "config", existing: file.accounts, logs };
+  } else {
+    logs.push("[account-manager] config credentials: not set");
   }
 
-  logs.push("[account-manager] config credentials: not set");
-
-  const usable = file.accounts.filter(hasUsableCredentials);
   if (usable.length > 0) {
-    const seed = { email: usable[0].email, password: usable[0].password };
-    logs.push(`[account-manager] starting — seed from ${ACCOUNTS_RELATIVE_PATH} (${seed.email})`);
-    return { action: "run", seed, seedSource: "accounts.json", existing: file.accounts, logs };
+    logs.push(`[account-manager] accounts already present — capturing sessions only, skipping admin UI exploration`);
+    return { action: "persist", existing: file.accounts, logs };
+  }
+
+  if (configSeed) {
+    const admin = pickAdminAccount(file.accounts);
+    const seed = admin ? { email: admin.email, password: admin.password } : configSeed;
+    const seedSource: "config" | "accounts.json" = admin ? "accounts.json" : "config";
+    logs.push(`[account-manager] starting — seed from ${seedSource === "config" ? "shoal.config target.credentials" : ACCOUNTS_RELATIVE_PATH} (${seed.email})`);
+    return { action: "run", seed, seedSource, existing: file.accounts, logs };
   }
 
   logs.push(`[account-manager] skipped — ${skipReason(file)}`);
@@ -431,7 +495,7 @@ async function fillLoginForm(page: Page, credentials: Credentials): Promise<bool
   return false;
 }
 
-async function passwordFieldVisible(page: Page): Promise<boolean> {
+async function isPasswordFieldVisible(page: Page): Promise<boolean> {
   return page.locator('input[type="password"]').first().isVisible({ timeout: 500 }).catch(() => false);
 }
 
@@ -440,7 +504,7 @@ async function snapshotLooksLoggedIn(page: Page, submittedFromUrl: string): Prom
   return loginLooksEstablished({
     currentUrl,
     submittedFromUrl,
-    passwordFieldVisible: await passwordFieldVisible(page),
+    passwordFieldVisible: await isPasswordFieldVisible(page),
   });
 }
 
@@ -452,22 +516,46 @@ async function waitForLoginEstablished(page: Page, submittedFromUrl: string): Pr
   return false;
 }
 
+async function currentPageUrl(page: Page, fallback: string): Promise<string> {
+  return typeof page.url === "function" ? page.url() : fallback;
+}
+
 async function performLogin(
   page: Page,
   urls: string[],
   credentials: Credentials,
-): Promise<boolean> {
+): Promise<LoginAttempt> {
+  const triedUrls: string[] = [];
+  let lastUrl: string | undefined;
+  let formFilled = false;
+  let passwordVisible = false;
+
   for (const url of urls) {
+    triedUrls.push(url);
     try {
       await page.goto(url, { waitUntil: "networkidle" });
       await page.waitForTimeout(1000);
+      lastUrl = await currentPageUrl(page, url);
       if (!await fillLoginForm(page, credentials)) continue;
-      if (await waitForLoginEstablished(page, url)) return true;
+      formFilled = true;
+      lastUrl = await currentPageUrl(page, url);
+      passwordVisible = await isPasswordFieldVisible(page);
+      if (await waitForLoginEstablished(page, url)) {
+        return {
+          ok: true,
+          triedUrls,
+          lastUrl: await currentPageUrl(page, url),
+          formFilled: true,
+          passwordFieldVisible: false,
+        };
+      }
+      lastUrl = await currentPageUrl(page, url);
+      passwordVisible = await isPasswordFieldVisible(page);
     } catch {
       // try the next candidate
     }
   }
-  return false;
+  return { ok: false, triedUrls, lastUrl, formFilled, passwordFieldVisible: passwordVisible };
 }
 
 function sessionStatePath(role: string): string {
@@ -499,8 +587,11 @@ async function captureAccountSession(
   try {
     const page = await isolated.newPage();
     try {
-      const ok = await performLogin(page, loginUrls, account);
-      if (!ok) return "";
+      const attempt = await performLogin(page, loginUrls, account);
+      if (!attempt.ok) {
+        console.warn(`    login failed for ${account.email}: ${describeLoginFailure(attempt)}`);
+        return "";
+      }
       return await saveContextSession(isolated, account.role);
     } finally {
       await page.close().catch(() => undefined);
@@ -533,14 +624,14 @@ const ACCOUNT_MANAGER_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: "click",
-    description: "Click a button, link, or element on screen. description may be the accessible name or a short phrase from it; optional ref is an accessibility-tree id (e.g. e12).",
+    description: "Click a button, link, or element on screen. Prefer the accessible name and/or ref from read_accessibility_tree (e.g. e12). description is optional when ref is set.",
     input_schema: {
       type: "object",
       properties: {
-        description: { type: "string" },
+        description: { type: "string", description: "Accessible name or a short phrase from it. Optional when ref is set." },
         ref: { type: "string", description: "Optional accessibility-tree ref, e.g. e12" },
       },
-      required: ["description"],
+      required: [],
     },
   },
   {
@@ -625,8 +716,8 @@ export async function runAccountManager(
   // まず seed アカウントでログイン（発見済みのログイン URL を優先）
   console.log(`[account-manager] logging in as ${credentials.email}...`);
   const loggedIn = await performLogin(page, loginUrls, credentials);
-  if (!loggedIn) {
-    console.warn("[account-manager] seed login failed — skipping role discovery, still trying known accounts");
+  if (!loggedIn.ok) {
+    console.warn(`[account-manager] seed login failed (${describeLoginFailure(loggedIn)}) — skipping role discovery, still trying known accounts`);
     await page.close();
     return persistKnownAccounts(
       loginUrls,
@@ -675,6 +766,7 @@ If user management is not accessible from this account, or the app has no role s
     description: t.description ?? t.name,
     input_schema: t.input_schema as Record<string, unknown>,
     execute: async (input: Record<string, unknown>): Promise<ToolResultContent> => {
+      console.log(`  → ${formatToolCallLog(t.name, input)}`);
       let resultText = "";
       let screenshot: string | null = null;
 
@@ -703,12 +795,15 @@ If user management is not accessible from this account, or the app has no role s
           case "click": {
             const description = input.description as string | undefined;
             const ref = input.ref as string | undefined;
-            if (!description) { resultText = "click: missing description"; break; }
+            if (!clickToolHasTarget({ description, ref })) {
+              resultText = "click: missing description or ref";
+              break;
+            }
             await saveSnapshotBeforeAction(page, observation);
             await clickDescribedElement(page, { description, ref }, 4000);
             await page.waitForTimeout(500);
             screenshot = await takeScreenshot(page, `click`);
-            resultText = `Clicked: ${description}`;
+            resultText = `Clicked: ${description ?? ref}`;
             break;
           }
 
@@ -720,11 +815,20 @@ If user management is not accessible from this account, or the app has no role s
             const byLabel = page.getByLabel(new RegExp(label, "i"));
             const byPlaceholder = page.getByPlaceholder(new RegExp(label, "i"));
             let filled = false;
+            let passwordField = isPasswordLabel(label);
             for (const loc of [byLabel, byPlaceholder]) {
-              try { await loc.first().fill(value, { timeout: 3000 }); filled = true; break; } catch { /* next */ }
+              try {
+                const target = loc.first();
+                await target.fill(value, { timeout: 3000 });
+                filled = true;
+                const typeAttr = await target.getAttribute("type").catch(() => null);
+                if (typeAttr === "password") passwordField = true;
+                break;
+              } catch { /* next */ }
             }
             if (!filled) throw new Error(`No input matching: ${label}`);
-            resultText = `Filled "${label}" with "${value}"`;
+            if (passwordField) input.value = REDACTED_SECRET;
+            resultText = redactFillResultText(label, value, passwordField);
             break;
           }
 
@@ -809,15 +913,19 @@ If user management is not accessible from this account, or the app has no role s
 async function persistKnownAccounts(
   loginUrls: string[],
   context: BrowserContext,
-  accounts: Array<{ email: string; password: string; role: string }>,
+  accounts: Array<{ email: string; password: string; role: string; storageStatePath?: string }>,
   alreadySaved: Record<string, string> = {},
 ): Promise<TestAccount[]> {
   const testAccounts: TestAccount[] = [];
   for (const account of accounts) {
     console.log(`  [account-manager] saving session for ${account.email} (role: ${account.role})`);
-    const statePath = Object.prototype.hasOwnProperty.call(alreadySaved, account.email)
+    let statePath = Object.prototype.hasOwnProperty.call(alreadySaved, account.email)
       ? alreadySaved[account.email]
       : await captureAccountSession(loginUrls, context, account);
+    if (!statePath && account.storageStatePath) {
+      statePath = account.storageStatePath;
+      console.warn(`    login failed for ${account.email} — keeping previously saved session`);
+    }
     if (statePath) {
       console.log(`    saved: ${statePath}`);
     } else {
@@ -836,4 +944,17 @@ async function persistKnownAccounts(
   // Keep accounts without a session so the runner can hand off credentials
   // instead of leaving browser agents to invent logins.
   return testAccounts;
+}
+
+/** Refresh storageState for accounts that already exist — no admin-UI exploration. */
+export async function persistAccountSessions(
+  baseUrl: string,
+  loginPath: string | undefined,
+  context: BrowserContext,
+  accounts: TestAccount[],
+): Promise<TestAccount[]> {
+  const loginUrls = loginCandidateUrls(baseUrl, loginPath);
+  console.log("[account-manager] capturing sessions for existing accounts (no admin UI exploration)");
+  const usable = accounts.filter(hasUsableCredentials);
+  return persistKnownAccounts(loginUrls, context, usable, {});
 }

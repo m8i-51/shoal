@@ -7,6 +7,7 @@ export interface PersonaTemplate {
   role: string;
   persona: string;
   lenses?: string[];
+  accountRole?: string;
 }
 
 export interface PersonaPack {
@@ -19,6 +20,13 @@ function isPersonaTemplate(v: unknown): v is PersonaTemplate {
   if (typeof v !== "object" || v === null) return false;
   const o = v as Record<string, unknown>;
   return typeof o.name === "string" && typeof o.role === "string" && typeof o.persona === "string";
+}
+
+function normalizeTemplate(raw: PersonaTemplate): PersonaTemplate {
+  const accountRole = typeof raw.accountRole === "string" && raw.accountRole.trim() !== ""
+    ? raw.accountRole.trim()
+    : undefined;
+  return accountRole ? { ...raw, accountRole } : raw;
 }
 
 function parseRaw(raw: unknown, source: string): PersonaPack | null {
@@ -41,7 +49,7 @@ function parseRaw(raw: unknown, source: string): PersonaPack | null {
       return false;
     }
     return true;
-  }) as PersonaTemplate[];
+  }).map((v) => normalizeTemplate(v as PersonaTemplate));
 
   if (personas.length === 0) {
     console.warn(`[persona-pack] ${source}: 0 valid personas found`);
@@ -129,6 +137,7 @@ export function formatPackForPrompt(pack: PersonaPack): string {
       [
         `${i + 1}. ${p.name} (${p.role})`,
         `   ${p.persona}`,
+        ...(p.accountRole ? [`   accountRole: ${p.accountRole}`] : []),
         ...(p.lenses?.length ? [`   Suggested lenses: ${p.lenses.join(", ")}`] : []),
       ].join("\n")
     ),

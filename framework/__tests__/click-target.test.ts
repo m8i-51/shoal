@@ -6,6 +6,7 @@ import {
   bestAriaRefFromSnapshot,
   resolveClickLocator,
   clickDescribedElement,
+  clickToolHasTarget,
 } from "../click-target";
 
 describe("clickNameCandidates", () => {
@@ -99,6 +100,20 @@ describe("resolveClickLocator", () => {
     expect(page.getByRole).toHaveBeenCalledWith("button", { name: "Close" });
   });
 
+  it("ref だけでも対象を取る", async () => {
+    const byRef = presentLocator();
+    const empty = emptyLocator();
+    const page = {
+      getByRole: vi.fn(() => empty),
+      getByText: vi.fn(() => empty),
+      locator: vi.fn((sel: string) => (sel === "aria-ref=e12" ? byRef : empty)),
+      ariaSnapshot: vi.fn(),
+    } as unknown as Page;
+
+    const loc = await resolveClickLocator(page, { ref: "e12" });
+    expect(loc).toBe(byRef);
+  });
+
   it("明示的な aria-ref でクリック対象を取る", async () => {
     const byRef = presentLocator();
     const empty = emptyLocator();
@@ -162,5 +177,14 @@ describe("clickDescribedElement", () => {
     await expect(
       clickDescribedElement(page, { description: "Nonexistent control" }),
     ).rejects.toThrow(/No element matching/);
+  });
+});
+
+describe("clickToolHasTarget", () => {
+  it("accepts ref without description", () => {
+    expect(clickToolHasTarget({ ref: "e12" })).toBe(true);
+    expect(clickToolHasTarget({ description: "Log in" })).toBe(true);
+    expect(clickToolHasTarget({ description: "  ", ref: "" })).toBe(false);
+    expect(clickToolHasTarget({})).toBe(false);
   });
 });

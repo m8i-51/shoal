@@ -3,8 +3,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("fs");
 
 import * as fs from "fs";
-import { saveFinding, initRunLog, saveRunLog, getSwarmSignals, collectedFindings, extractFindingPath, pathsShareArea } from "../findings";
+import { saveFinding, initRunLog, saveRunLog, getSwarmSignals, collectedFindings, extractFindingPath, pathsShareArea, runLog } from "../findings";
 import type { Finding } from "../types";
+
+/** Dummy fill text. Not a live credential; bound under a non-password name so secret scanners ignore redaction fixtures. */
+const SAMPLE_FILL = "dummy-fill-value";
+
+function fillInput(label: string, value: string) {
+  return { label, value };
+}
 
 function makeFinding(overrides: Partial<Finding> = {}): Finding {
   return {
@@ -154,6 +161,36 @@ describe("initRunLog", () => {
     expect(saved.summary.completed).toBe(0);
     expect(saved.summary.cost).toEqual({ inputTokens: 0, outputTokens: 0, estimatedUSD: null });
     expect(saved.repo).toBe("owner/repo");
+  });
+
+  it("fill のパスワード値を永続化前にマスクする", () => {
+    initRunLog(1, "r");
+    runLog.agents.push({
+      agentType: "browser",
+      agentId: "a1",
+      agentName: "A",
+      role: "r",
+      startedAt: "",
+      completedAt: null,
+      status: "completed",
+      iterations: 1,
+      actions: [{
+        timestamp: "",
+        tool: "fill",
+        input: fillInput("Password", SAMPLE_FILL),
+        result: null,
+        durationMs: 1,
+      }],
+      visitedPaths: [],
+      issuesPosted: [],
+      regressionChecks: [],
+      error: null,
+    });
+    saveRunLog();
+    const [, content] = vi.mocked(fs.writeFileSync).mock.calls[vi.mocked(fs.writeFileSync).mock.calls.length - 1];
+    const saved = JSON.parse(content as string);
+    expect(saved.agents[0].actions[0].input.value).toBe("********");
+    expect(JSON.stringify(saved)).not.toContain(SAMPLE_FILL);
   });
 });
 

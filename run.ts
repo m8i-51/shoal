@@ -18,7 +18,7 @@ import { runAgentLoop, sleep, rateLimitRetries } from "./framework/agent-loop";
 import { runToolSession } from "./framework/tool-session";
 import type { ToolResultContent } from "./framework/tool-types";
 import { collectedFindings, initRunLog, saveRunLog, saveFinding, getSwarmSignals, runLog } from "./framework/findings";
-import { loadAgents, addAgent, retireAgent, recordAgentMemories, formatAgentMemories, buildMemoryInputs, isFixedAgent, agentOrigin, type Agent } from "./framework/agent-store";
+import { loadAgents, addAgent, retireAgent, recordAgentMemories, formatAgentMemories, buildMemoryInputs, isFixedAgent, agentOrigin, resolveAgentAccountRole, type Agent } from "./framework/agent-store";
 import { computeRosterSlots, buildRunRoster, splitRosterForDispatch, partitionActiveAgents } from "./framework/roster";
 import { updateCoverage, computeWeightedSummary, getLastRunPaths, getFindingHotspots } from "./framework/coverage";
 import {
@@ -43,7 +43,7 @@ import { runA11yAudit, formatAuditForAgent } from "./framework/a11y-audit";
 import { loadPageHashes, updatePageHashes, hashContent } from "./framework/page-cache";
 import { saveFindingTraceChunk, traceAgentZipPath, traceFindingZipPath } from "./framework/trace-chunk";
 import { loadPersonaPack, formatPackForPrompt, type PersonaPack } from "./framework/persona-pack";
-import { buildTrackers } from "./framework/trackers/index";
+import { buildTrackers, formatIssuesCreatedLine } from "./framework/trackers/index";
 import {
   setupObservation,
   getRecentConsoleLogs,
@@ -56,15 +56,15 @@ import {
   type ObservationState,
 } from "./framework/observation";
 import { discoverProduct, loadCachedSpec, resolveLoginPath, type ProductSpec } from "./framework/product-discovery";
-import { designOrg, UNIVERSAL_LENSES } from "./framework/org-designer";
-import { designScenarios, findMultiActorScenario, soloScenarios, pairAgentsToActors, type Scenario, type ScenarioActor, type ScenarioOutcome } from "./framework/scenario-designer";
+import { designOrg } from "./framework/org-designer";
+import { designScenarios, findMultiActorScenario, pairAgentsToActors, type Scenario, type ScenarioOutcome } from "./framework/scenario-designer";
 import { runTriageAgent } from "./framework/triage";
 import { generateReport } from "./framework/report";
 import type { AgentLog, Finding, RegressionCheck } from "./framework/types";
 import { resolveIssueId, formatIssueRef } from "./framework/issue-id";
 import type { ClosedIssue } from "./framework/trackers/types";
 import { loadTarget, applyLoadedTarget } from "./targets";
-import { runAccountManager, resolveAccountSetup, planBrowserAuth, authPrompt, describeAuthPlan, resolveLoginUrl, type TestAccount, type BrowserAuthPlan } from "./framework/account-manager";
+import { runAccountManager, resolveAccountSetup, persistAccountSessions, planBrowserAuth, authPrompt, describeAuthPlan, resolveLoginUrl, type TestAccount, type BrowserAuthPlan } from "./framework/account-manager";
 import { estimateCost, formatCostUSD } from "./framework/cost";
 import {
   normalizeThresholdCandidates,
@@ -72,7 +72,11 @@ import {
   assignThresholdCandidates,
   type ThresholdCandidate,
 } from "./framework/threshold";
-import { clickDescribedElement } from "./framework/click-target";
+import { clickDescribedElement, clickToolHasTarget } from "./framework/click-target";
+import { selectDescribedOption } from "./framework/select-target";
+import { formatToolCallLog, redactToolInput, redactFillResultText, isPasswordLabel, REDACTED_SECRET } from "./framework/redact";
+import { pickAssignment, dispatchableSoloScenarios, reconcileMultiActorOutcomes, type Assignment } from "./framework/assignment";
+import { partitionClosedIssues, regressionMaxIterations } from "./framework/regression-issue";
 
 const BASE_URL = process.env.BASE_URL ?? "http://localhost:3000";
 const REFRESH_SPEC = process.env.REFRESH_SPEC === "1";
@@ -148,11 +152,7 @@ Explore these paths first and in depth. Only wander elsewhere once they are exha
 }
 
 // エージェントへの割り当て。actor はマルチアクターシナリオで同時に動く役割
-type Assignment = {
-  scenario?: Scenario;
-  lens?: string;
-  actor?: ScenarioActor & { partnerRole: string };
-};
+// (Assignment is defined in framework/assignment.ts)
 
 // ================================================================
 // Screenshots
@@ -384,7 +384,7 @@ function makeExecutor(
     agentLog.actions.push({
       timestamp: new Date().toISOString(),
       tool: toolName,
-      input,
+      input: redactToolInput(toolName, input),
       result,
       durationMs: Date.now() - startedAt,
     });
@@ -431,6 +431,9 @@ Role: ${agent.role}
 Persona: ${agent.persona}
 
 You are an employee using "${productSpec.appName}".
+You have API tools only — not a real browser. You cannot click UI controls, toggle themes, open notification panels, use a hamburger menu, or complete OAuth in a page.
+If the assigned task requires a real UI, call post_outcome with achieved=false and say it needs the browser lane.
+
 Use the tools to interact with the app.
 
 ${productSpec.appDescription}
@@ -486,7 +489,9 @@ async function runRegressionAgent(
 
   const systemPrompt = `You are "${agent.name}". Act as a QA engineer.
 
-The following Issues have been closed as fixed. Verify they are actually fixed.
+You have API tools only — not a real browser. Do not mark a UI-only bug (theme, OAuth page, hamburger, notification panel, layout) as verified or regressed from API evidence. Skip those.
+
+The following Issues have been closed as fixed. Verify they are actually fixed via API when that is enough.
 
 [Issues to Verify]
 ${issueList}
@@ -501,7 +506,16 @@ ${issueList}
 ${productSpec.features}
 ${productSpec.uiFeatures ? `\n[UI-Only Features]\nThese features exist in the UI but may not be reflected in API responses.\n${productSpec.uiFeatures}\n` : ""}${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${goalsSection(productSpec)}${guardrailPrompt(SHOAL_MODE)}`;
 
-  await runAgentLoop(agentLog, systemPrompt, REGRESSION_TOOLS, client, defaultModel, makeExecutor(agentLog, [], undefined, closedIssues), llmProvider);
+  await runAgentLoop(
+    agentLog,
+    systemPrompt,
+    REGRESSION_TOOLS,
+    client,
+    defaultModel,
+    makeExecutor(agentLog, [], undefined, closedIssues),
+    llmProvider,
+    regressionMaxIterations(closedIssues.length),
+  );
   const checked = agentLog.regressionChecks.length;
   const failed = agentLog.regressionChecks.filter((c) => c.status === "regressed").length;
   console.log(`[regression] ${agent.name} done (checked: ${checked} / regressed: ${failed})`);
@@ -554,7 +568,11 @@ const PERSONA_DESIGNER_TOOLS: Anthropic.Tool[] = [
       type: "object",
       properties: {
         name: { type: "string" },
-        role: { type: "string" },
+        role: { type: "string", description: "Narrative role (may be a description of the person)" },
+        accountRole: {
+          type: "string",
+          description: "Short test-account role token such as user, instructor, or admin — not a narrative description",
+        },
         persona: { type: "string" },
         environment: {
           type: "object",
@@ -604,7 +622,7 @@ async function runPersonaDesigner(
   console.log("\n[persona-designer] starting...");
 
   const accountContext = testAccounts.length > 0
-    ? `\n[Available Test Accounts (one per role)]\n${testAccounts.map((a) => `- ${a.role}: ${a.email}`).join("\n")}\nWhen recruiting agents, match each persona's role to one of these accounts so they can operate with appropriate permissions.`
+    ? `\n[Available Test Accounts (one per role)]\n${testAccounts.map((a) => `- ${a.role}: ${a.email}`).join("\n")}\nWhen recruiting agents, set accountRole to one of these short tokens (user, instructor, admin). Keep role as a narrative description of the person — never put that sentence in accountRole.`
     : "";
 
   const pathCoverageStep = "3. Call get_path_coverage to review site-map coverage (unvisited / reached / explored rates and gaps) — recruit agents whose role would naturally fill UNVISITED or thinly visited paths\n4. Call get_finding_hotspots to see where problems have clustered across all past runs — recruit agents to under-investigated areas, or specialists to problem hotspots";
@@ -633,7 +651,7 @@ ${pathCoverageStep}
 5. Call get_open_issues to understand what problems are already known — recruit agents likely to find DIFFERENT issues in unexplored areas
 6. Call get_scenarios to see the user test scenarios generated for this run — about 70% of agents will be assigned a scenario, so recruit personas whose background fits those scenarios
 7. Call get_agents to check the current agent roster (archived agents are omitted; origin is included)
-8. Adjust AUTO agents only so that active autos == ${autoSlots}${testAccounts.length > 0 ? "\n   — assign each new agent a role that matches one of the available test accounts" : ""}
+8. Adjust AUTO agents only so that active autos == ${autoSlots}${testAccounts.length > 0 ? "\n   — set accountRole on each new agent to a short token matching an available test account (user, instructor, admin). Keep role as a narrative description of the person" : ""}
    — give 1–2 new recruits an "environment" (mobile device, dark mode, non-default locale, slow connection) that naturally fits their persona's life; leave the rest on desktop
 9. Do not retire fixed agents. Only retire autos when above the autoSlots target.`;
 
@@ -697,17 +715,19 @@ ${pathCoverageStep}
             id: a.id,
             name: a.name,
             role: a.role,
+            accountRole: a.accountRole,
             createdAt: a.createdAt,
             origin: agentOrigin(a),
             status: a.status ?? "active",
           }));
           console.log(`  [persona-designer] current agents: ${agents.length}`);
         } else if (t.name === "add_agent") {
-          const { name, role, persona, environment } = input as {
+          const { name, role, persona, environment, accountRole } = input as {
             name?: string;
             role?: string;
             persona?: string;
             environment?: EnvironmentProfile;
+            accountRole?: string;
           };
           try {
             const cleanEnv = sanitizeEnvironment(environment);
@@ -718,9 +738,10 @@ ${pathCoverageStep}
               environment: cleanEnv,
               origin: "auto",
               status: "active",
+              ...(accountRole?.trim() ? { accountRole: accountRole.trim() } : {}),
             });
             result = agent;
-            console.log(`  [persona-designer] created: ${agent.name} (${agent.role})${cleanEnv ? ` [env: ${Object.entries(cleanEnv).map(([k, v]) => `${k}=${v}`).join(", ")}]` : ""}`);
+            console.log(`  [persona-designer] created: ${agent.name} (${agent.role})${agent.accountRole ? ` [accountRole: ${agent.accountRole}]` : ""}${cleanEnv ? ` [env: ${Object.entries(cleanEnv).map(([k, v]) => `${k}=${v}`).join(", ")}]` : ""}`);
           } catch (e) {
             const message = e instanceof Error ? e.message : String(e);
             result = { error: message };
@@ -784,6 +805,7 @@ interface BrowserAgentLog {
   actions: BrowserAction[];
   visitedPaths: string[];
   feedbacksSaved: { title: string; category: string; findingId: string }[];
+  regressionChecks: RegressionCheck[];
   error: string | null;
 }
 
@@ -814,7 +836,7 @@ function browserLogToAgentLog(
       category: f.category,
       url: null,
     })),
-    regressionChecks: [],
+    regressionChecks: log.regressionChecks ?? [],
     error: log.error,
   };
 }
@@ -834,6 +856,12 @@ function recordBrowserAgentRun(agent: Agent, browserLog: BrowserAgentLog): void 
 
 function recordThresholdAgentRun(agent: Agent, browserLog: BrowserAgentLog): void {
   const agentLog = browserLogToAgentLog(agent, browserLog, "threshold");
+  runLog.agents.push(agentLog);
+  applyAgentSummary(agentLog);
+}
+
+function recordRegressionAgentRun(agent: Agent, browserLog: BrowserAgentLog): void {
+  const agentLog = browserLogToAgentLog(agent, browserLog, "regression");
   runLog.agents.push(agentLog);
   applyAgentSummary(agentLog);
 }
@@ -864,14 +892,14 @@ const BROWSER_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: "click",
-    description: "Click a button, link, or tab on screen. description may be the accessible name, a short phrase from it (e.g. Close), or a longer description of the control. Optionally pass ref from read_accessibility_tree (e.g. e12). / 画面上の要素をクリックする。accessible name の部分一致、またはアクセシビリティツリーの ref で対象を指定する",
+    description: "Click a button, link, or tab on screen. Prefer the accessible name and/or ref from read_accessibility_tree (e.g. e12). description is optional when ref is set. / 画面上の要素をクリックする。accessible name またはアクセシビリティツリーの ref で対象を指定する",
     input_schema: {
       type: "object",
       properties: {
-        description: { type: "string", description: "Accessible name or a description of the control (partial name match is OK)" },
+        description: { type: "string", description: "Accessible name or a description of the control (partial name match is OK). Optional when ref is set." },
         ref: { type: "string", description: "Optional accessibility-tree ref from read_accessibility_tree, e.g. e12" },
       },
-      required: ["description"],
+      required: [],
     },
   },
   {
@@ -961,6 +989,7 @@ async function executeBrowserTool(
   cachedHashes: Record<string, string>,
   pageHashUpdates: Record<string, string>,
   scenario?: Scenario,
+  closedIssues: ClosedIssue[] = [],
 ): Promise<{ text: string; screenshot: { base64: string; filePath: string } | null; sendToClaude: boolean }> {
   const startedAt = Date.now();
   let resultText = "";
@@ -996,19 +1025,23 @@ async function executeBrowserTool(
         break;
       }
       case "click": {
-        const { description, ref } = input as { description: string; ref?: string };
-        const guard = await guardSafeBrowserClick(page, description, SHOAL_MODE, ref);
+        const { description, ref } = input as { description?: string; ref?: string };
+        if (!clickToolHasTarget({ description, ref })) {
+          resultText = "click: missing description or ref";
+          break;
+        }
+        const guard = await guardSafeBrowserClick(page, description ?? "", SHOAL_MODE, ref);
         if (!guard.allowed) {
-          console.log(`  [guardrails] blocked click: ${description}`);
-          screenshot = await takeScreenshot(page, `blocked_click_${description.slice(0, 20)}`);
+          console.log(`  [guardrails] blocked click: ${description ?? ref}`);
+          screenshot = await takeScreenshot(page, `blocked_click_${String(description ?? ref).slice(0, 20)}`);
           resultText = guard.message;
           break;
         }
         await saveSnapshotBeforeAction(page, observation);
         await clickDescribedElement(page, { description, ref });
         await page.waitForTimeout(500);
-        screenshot = await takeScreenshot(page, `click_${description.slice(0, 20)}`);
-        resultText = `Clicked: ${description}`;
+        screenshot = await takeScreenshot(page, `click_${String(description ?? ref).slice(0, 20)}`);
+        resultText = `Clicked: ${description ?? ref}`;
         break;
       }
       case "fill": {
@@ -1022,37 +1055,27 @@ async function executeBrowserTool(
         const byPlaceholder = page.getByPlaceholder(label, { exact: false });
         const byAriaLabel = page.getByLabel(label, { exact: false });
         let filled = false;
+        let passwordField = isPasswordLabel(label);
         for (const el of [byContainer, byPlaceholder, byAriaLabel]) {
           try {
             await el.fill(value, { timeout: 5000 });
             filled = true;
+            const typeAttr = await el.getAttribute("type").catch(() => null);
+            if (typeAttr === "password") passwordField = true;
             break;
           } catch { /* try next */ }
         }
         if (!filled) throw new Error(`No input field matching: ${label}`);
         await page.waitForTimeout(300);
         screenshot = await takeScreenshot(page, `fill_${label.slice(0, 20)}`);
-        resultText = `Filled "${label}" with "${value}"`;
+        resultText = redactFillResultText(label, value, passwordField);
+        if (passwordField) input.value = REDACTED_SECRET;
         break;
       }
       case "select": {
         const { label, value } = input as { label: string; value: string };
         await saveSnapshotBeforeAction(page, observation);
-        const byAriaLabel = page.getByLabel(label, { exact: false });
-        const byContainer = page
-          .locator("div")
-          .filter({ has: page.locator("label", { hasText: label }) })
-          .locator("select")
-          .first();
-        let selected = false;
-        for (const el of [byAriaLabel, byContainer]) {
-          try {
-            await el.selectOption({ label: value }, { timeout: 5000 });
-            selected = true;
-            break;
-          } catch { /* try next */ }
-        }
-        if (!selected) throw new Error(`Could not select "${value}" in "${label}"`);
+        await selectDescribedOption(page, { label, value });
         await page.waitForTimeout(300);
         screenshot = await takeScreenshot(page, `select_${label.slice(0, 20)}`);
         resultText = `Selected "${value}" in "${label}"`;
@@ -1144,6 +1167,53 @@ async function executeBrowserTool(
         resultText = `Feedback recorded: "${title}" (will become an Issue after triage)`;
         break;
       }
+      case "report_regression": {
+        const { original_issue_number, original_issue_title, title, body } = input as {
+          original_issue_number: string; original_issue_title: string; title: string; body: string;
+        };
+        const issueId = resolveIssueId(original_issue_number, closedIssues);
+        const url = await trackers.createIssue(
+          `[regression] ${title}`,
+          `**Regression:** ${issueId} "${original_issue_title}" has reappeared.\n\n${body}\n\n---\n*This issue was auto-generated by an AI regression agent*`,
+          ["regression", "feedback-agent"],
+        );
+        await trackers.commentOnIssue(
+          issueId,
+          `⚠️ **Regression detected** by AI agent on ${new Date().toISOString().slice(0, 10)}\n\n${body}${url ? `\n\nNew issue: ${url}` : ""}`,
+        );
+        agentLog.regressionChecks.push({
+          issueNumber: issueId,
+          issueTitle: String(original_issue_title),
+          status: "regressed",
+          note: String(body),
+          regressionUrl: url,
+        });
+        runLog.summary.regressionChecked++;
+        runLog.summary.regressionFailed++;
+        resultText = JSON.stringify({ reported: true, url });
+        break;
+      }
+      case "mark_verified": {
+        const { original_issue_number, original_issue_title, note } = input as {
+          original_issue_number: string; original_issue_title: string; note: string;
+        };
+        const issueId = resolveIssueId(original_issue_number, closedIssues);
+        await trackers.commentOnIssue(
+          issueId,
+          `✅ **Verified as fixed** by AI agent on ${new Date().toISOString().slice(0, 10)}\n\n${note}`,
+        );
+        agentLog.regressionChecks.push({
+          issueNumber: issueId,
+          issueTitle: String(original_issue_title),
+          status: "fixed",
+          note: String(note),
+          regressionUrl: null,
+        });
+        runLog.summary.regressionChecked++;
+        console.log(`  ✓ verified: ${issueId} "${original_issue_title}"`);
+        resultText = JSON.stringify({ verified: true });
+        break;
+      }
       default: {
         const apiResult = await targetConfig.execute(toolName, input, agentId);
         resultText = JSON.stringify(apiResult);
@@ -1161,7 +1231,7 @@ async function executeBrowserTool(
   agentLog.actions.push({
     timestamp: new Date().toISOString(),
     tool: toolName,
-    input,
+    input: redactToolInput(toolName, input),
     screenshotPath: screenshot?.filePath ?? null,
     durationMs: Date.now() - startedAt,
   });
@@ -1169,6 +1239,14 @@ async function executeBrowserTool(
   const sendToClaude = isError || TOOLS_THAT_SEND_SCREENSHOT.has(toolName);
   return { text: resultText, screenshot, sendToClaude };
 }
+
+type BrowserAgentExtras = {
+  extraTools?: Anthropic.Tool[];
+  extraPrompt?: string;
+  maxIterations?: number;
+  closedIssues?: ClosedIssue[];
+  logPrefix?: string;
+};
 
 async function runBrowserAgent(
   agent: Agent,
@@ -1180,13 +1258,15 @@ async function runBrowserAgent(
   siteMap: SiteMap | null = null,
   runId: string = "",
   discoverBudget: { used: number } | null = null,
+  extras: BrowserAgentExtras = {},
 ): Promise<BrowserAgentLog> {
+  const logPrefix = extras.logPrefix ?? "browser";
   const assignmentLabel = assignment.scenario
     ? `[scenario: ${assignment.scenario.title.slice(0, 35)}]`
     : assignment.lens
     ? `[lens: ${assignment.lens.slice(0, 30)}...]`
     : "[free exploration]";
-  console.log(`\n[browser] ${agent.name} start ${assignmentLabel}`);
+  console.log(`\n[${logPrefix}] ${agent.name} start ${assignmentLabel}`);
 
   const agentLog: BrowserAgentLog = {
     agentName: agent.name,
@@ -1198,6 +1278,7 @@ async function runBrowserAgent(
     actions: [],
     visitedPaths: [],
     feedbacksSaved: [],
+    regressionChecks: [],
     error: null,
   };
 
@@ -1259,7 +1340,7 @@ ${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\
     ? `\n[Your Task for This Run]\nTitle: ${assignment.scenario.title}\nYou are: ${assignment.scenario.context}\nGoal: ${assignment.scenario.goal}\nConstraints: ${assignment.scenario.constraints}\n\nFocus on completing this task naturally as this user. Report any issues you encounter along the way.\nWhen done (or if you cannot complete the goal), call post_outcome with achieved=true/false and a brief reason.`
     : assignment.lens
     ? `\n[Focus Area for This Run]\n${assignment.lens}\nKeep this perspective in mind and prioritize reporting related issues.`
-    : ""}${focusPrompt()}${describeEnvironment(agent.environment)}${sessionContinuityPrompt(hasAgentSession(agent.id))}${formatAgentMemories(agent)}${guardrailPrompt(SHOAL_MODE)}${authPrompt(authPlan.handoff)}`;
+    : ""}${focusPrompt()}${describeEnvironment(agent.environment)}${sessionContinuityPrompt(hasAgentSession(agent.id))}${formatAgentMemories(agent)}${guardrailPrompt(SHOAL_MODE)}${authPrompt(authPlan.handoff)}${extras.extraPrompt ?? ""}`;
 
   const startUrl = resolveLoginUrl(BASE_URL, authPlan.startPath);
   await page.goto(startUrl, { waitUntil: "networkidle" });
@@ -1283,14 +1364,12 @@ ${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\
     }
   })();
 
-  const MAX_ITERATIONS = 12;
-  const sessionTools = BROWSER_TOOLS.map((t) => ({
+  const MAX_ITERATIONS = extras.maxIterations ?? 12;
+  const sessionTools = [...BROWSER_TOOLS, ...(extras.extraTools ?? [])].map((t) => ({
     name: t.name,
     description: t.description ?? t.name,
     input_schema: t.input_schema as Record<string, unknown>,
     execute: async (input: Record<string, unknown>): Promise<ToolResultContent> => {
-      console.log(`  → ${t.name}(${JSON.stringify(input).slice(0, 60)})`);
-
       const { text, screenshot, sendToClaude } = await executeBrowserTool(
         t.name,
         input,
@@ -1302,7 +1381,9 @@ ${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\
         cachedHashes,
         pageHashUpdates,
         assignment.scenario,
+        extras.closedIssues ?? [],
       );
+      console.log(`  → ${formatToolCallLog(t.name, input, 60)}`);
 
       if (siteMap) {
         try {
@@ -1405,7 +1486,7 @@ ${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\
     updatePageHashes(host, pageHashUpdates);
   }
 
-  console.log(`[browser] ${agent.name} done (feedback: ${agentLog.feedbacksSaved.length})`);
+  console.log(`[${logPrefix}] ${agent.name} done (feedback: ${agentLog.feedbacksSaved.length})`);
   return agentLog;
 }
 
@@ -1420,6 +1501,20 @@ function formatThresholdCandidatesForPrompt(candidates: ThresholdCandidate[]): s
         `   howToProbe: ${c.howToProbe}`,
     )
     .join("\n");
+}
+
+function makeRegressionProber(): Agent {
+  return {
+    id: `agent_regression_${Date.now()}`,
+    name: "Regression QA",
+    role: "qa",
+    persona:
+      "A careful QA engineer who re-tests closed issues in the real UI. Verifies fixes by reproducing the original steps in the browser. Does not mark a UI bug as verified from API responses alone.",
+    createdAt: new Date().toISOString(),
+    origin: "auto",
+    status: "active",
+    accountRole: "user",
+  };
 }
 
 function makeThresholdProbers(count: number): Agent[] {
@@ -1457,6 +1552,7 @@ async function runThresholdAgent(
     actions: [],
     visitedPaths: [],
     feedbacksSaved: [],
+    regressionChecks: [],
     error: null,
   };
 
@@ -1526,8 +1622,6 @@ ${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\
     description: t.description ?? t.name,
     input_schema: t.input_schema as Record<string, unknown>,
     execute: async (input: Record<string, unknown>): Promise<ToolResultContent> => {
-      console.log(`  → ${t.name}(${JSON.stringify(input).slice(0, 60)})`);
-
       const { text, screenshot, sendToClaude } = await executeBrowserTool(
         t.name,
         input,
@@ -1540,6 +1634,7 @@ ${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\
         pageHashUpdates,
         undefined,
       );
+      console.log(`  → ${formatToolCallLog(t.name, input, 60)}`);
 
       return sendToClaude && screenshot
         ? [
@@ -1670,14 +1765,6 @@ async function runVerifyMode(
   console.log(`[verify] result saved: ${outPath}`);
 }
 
-// 7:3 ratio: indices where (idx % 10) < 7 get a scenario, rest get a lens
-function pickAssignment(idx: number, scenarios: Scenario[]): Assignment {
-  if (scenarios.length > 0 && idx % 10 < 7) {
-    return { scenario: scenarios[idx % scenarios.length] };
-  }
-  return { lens: UNIVERSAL_LENSES[idx % UNIVERSAL_LENSES.length] };
-}
-
 async function main() {
   initDirs();
   // run log を最初期化しておくことで、どの段階でエラーが起きても finally で saveRunLog() が動く
@@ -1755,6 +1842,20 @@ async function main() {
         testAccounts = accountPlan.existing;
         break;
       }
+      case "persist": {
+        const accountContext = await browser.newContext({ viewport: { width: 1024, height: 640 } });
+        try {
+          testAccounts = await persistAccountSessions(
+            BASE_URL,
+            resolveLoginPath(productSpec),
+            accountContext,
+            accountPlan.existing,
+          );
+        } finally {
+          await accountContext.close();
+        }
+        break;
+      }
       default: {
         const _exhaustive: never = accountPlan;
         throw new Error(`unhandled account setup action: ${String(_exhaustive)}`);
@@ -1821,7 +1922,7 @@ async function main() {
       process.exit(1);
     }
 
-    const { explorers: explorerAgents, browsers: browserAgents, regression: regressionAgent } =
+    const { explorers: explorerAgents, browsers: browserAgents } =
       splitRosterForDispatch(runRoster, { maxBrowsers: MAX_BROWSERS, maxExplorers: MAX_EXPLORERS });
 
     // 6.5. roster サイズを記録（実際に走った agent 数は run 終了時に runLog.agents.length で確定）
@@ -1829,13 +1930,13 @@ async function main() {
     console.log(
       `\nroster: ${runRoster.length} (fixed ${fixed.length} + auto ${Math.min(autos.length, slots.autoSlots)})`,
     );
-    console.log(`explorers: ${explorerAgents.length} (max: ${MAX_EXPLORERS}) / regression: ${regressionAgent ? 1 : 0} / browsers: ${browserAgents.length} (max: ${MAX_BROWSERS})`);
+    console.log(`explorers: ${explorerAgents.length} (max: ${MAX_EXPLORERS}) / browsers: ${browserAgents.length} (max: ${MAX_BROWSERS})`);
 
     // agentId → assignment（coverage 計算・レポート生成に使う）
     const agentAssignments = new Map<string, Assignment>();
 
     // 通常ディスパッチにはマルチアクターを除いた単独シナリオを使う
-    const dispatchScenarios = soloScenarios(scenarios);
+    const dispatchScenarios = dispatchableSoloScenarios(scenarios);
 
     // シナリオ/レンズ割り当てのグローバルカウンタ（7:3 比率）
     let dispatchIdx = 0;
@@ -1844,7 +1945,7 @@ async function main() {
     for (let i = 0; i < explorerAgents.length; i += CONCURRENCY) {
       const batch = explorerAgents.slice(i, i + CONCURRENCY);
       await Promise.all(batch.map((agent) => {
-        const assignment = pickAssignment(dispatchIdx++, dispatchScenarios);
+        const assignment = pickAssignment(dispatchIdx++, dispatchScenarios, "explorer");
         agentAssignments.set(agent.id, assignment);
         return runExplorer(agent, productSpec, assignment, scenarioOutcomes);
       }));
@@ -1854,16 +1955,24 @@ async function main() {
       }
     }
 
-    if (MAX_EXPLORERS === 0 || !regressionAgent) {
-      console.log("\n[regression] skipped (no regression slot)");
-    } else if (closedIssues.length > 0) {
-      await sleep(3000);
-      await runRegressionAgent(regressionAgent, closedIssues, productSpec);
+    if (closedIssues.length === 0) {
+      console.log("\n[regression] no closed issues — skipped");
+    } else if (MAX_BROWSERS === 0 && MAX_EXPLORERS > 0) {
+      const { api } = partitionClosedIssues(closedIssues);
+      const skippedUi = closedIssues.length - api.length;
+      if (skippedUi > 0) {
+        console.log(`\n[regression] skipping ${skippedUi} UI-only issue(s) — API lane cannot verify them`);
+      }
+      if (api.length > 0) {
+        await sleep(3000);
+        await runRegressionAgent(makeRegressionProber(), api, productSpec);
+      } else {
+        console.log("\n[regression] skipped (no API-verifiable closed issues)");
+      }
+    } else if (MAX_BROWSERS === 0) {
+      console.log("\n[regression] skipped (no browser or explorer lane)");
     } else {
-      console.log("\n[regression] no closed issues — running as explorer");
-      const assignment = pickAssignment(dispatchIdx++, dispatchScenarios);
-      agentAssignments.set(regressionAgent.id, assignment);
-      await runExplorer(regressionAgent, productSpec, assignment, scenarioOutcomes);
+      console.log(`\n[regression] will run in the browser lane (${closedIssues.length} closed issue(s))`);
     }
 
     // 8. browser agents
@@ -1908,13 +2017,14 @@ async function main() {
 
     type LaneResult =
       | { kind: "browser"; agent: Agent; log: BrowserAgentLog }
-      | { kind: "threshold"; agent: Agent; log: BrowserAgentLog };
+      | { kind: "threshold"; agent: Agent; log: BrowserAgentLog }
+      | { kind: "regression"; agent: Agent; log: BrowserAgentLog };
 
     const browserJobs = browserAgents.map(async (agent): Promise<LaneResult> => {
-        const assignment = pairAssignments.get(agent.id) ?? pickAssignment(dispatchIdx++, dispatchScenarios);
+        const assignment = pairAssignments.get(agent.id) ?? pickAssignment(dispatchIdx++, dispatchScenarios, "browser");
         agentAssignments.set(agent.id, assignment);
 
-        const accountRole = assignment.actor?.role ?? agent.role;
+        const accountRole = assignment.actor?.role ?? resolveAgentAccountRole(agent);
         const authPlan = planBrowserAuth({
           testAccounts,
           accountRole,
@@ -2010,15 +2120,109 @@ async function main() {
       }
     });
 
-    const laneResults = await Promise.all([...browserJobs, ...thresholdJobs]);
+    const regressionJobs: Promise<LaneResult>[] = [];
+    if (MAX_BROWSERS > 0 && closedIssues.length > 0) {
+      const regressionAgent = makeRegressionProber();
+      console.log(`\nlaunching regression in the browser lane (${closedIssues.length} closed issue(s), ${regressionMaxIterations(closedIssues.length)} turns)`);
+      regressionJobs.push((async (): Promise<LaneResult> => {
+        const accountRole = pickThresholdAuthRole(testAccounts, regressionAgent.accountRole ?? "user");
+        const authPlan = planBrowserAuth({
+          testAccounts,
+          accountRole,
+          loginPath: resolveLoginPath(productSpec),
+          returningSessionPath: undefined,
+          preferAccountSession: false,
+        });
+        console.log(describeAuthPlan(regressionAgent.name, authPlan));
+        const baseOptions: Parameters<typeof browser.newContext>[0] = {
+          viewport: { width: 1024, height: 640 },
+        };
+        if (authPlan.storageStatePath) {
+          baseOptions.storageState = authPlan.storageStatePath;
+        }
+        const context = await browser.newContext(baseOptions);
+        await applyBrowserGuardrails(context, SHOAL_MODE);
+        if (TRACE_ENABLED) {
+          try {
+            await context.tracing.start({ screenshots: true, snapshots: true });
+          } catch (e) {
+            console.warn(`[trace] failed to start for ${regressionAgent.name}:`, e);
+          }
+        }
+        const page = await context.newPage();
+        try {
+          const log = await runBrowserAgent(
+            regressionAgent,
+            page,
+            productSpec,
+            {},
+            scenarioOutcomes,
+            authPlan,
+            sharedSiteMap,
+            runLog.runId,
+            discoverBudget,
+            {
+              extraTools: [REPORT_REGRESSION_TOOL, MARK_VERIFIED_TOOL],
+              extraPrompt: `
+
+[Regression Task]
+You are a regression tester in the BROWSER lane. Re-open each closed issue in a real browser and confirm the UI still behaves as expected.
+
+Closed issues to check:
+${closedIssues.map((i) => `- ${i.number}: ${i.title}\n  ${(i.body ?? "").slice(0, 200).replace(/\n/g, " ")}`).join("\n")}
+
+Rules:
+- Use browser tools (snapshot, click, fill, select, navigate). Never mark a UI bug verified or regressed from API calls alone.
+- If an issue is clearly API-only (no UI surface), skip it rather than inventing a UI check.
+- Call report_regression when a previously-fixed bug is back. Call mark_verified when the UI still looks fixed.
+- Cover as many issues as you can. Prefer checking every issue over stopping early.`,
+              maxIterations: regressionMaxIterations(closedIssues.length),
+              closedIssues,
+              logPrefix: "regression",
+            },
+          );
+          return { kind: "regression", agent: regressionAgent, log };
+        } finally {
+          if (TRACE_ENABLED) {
+            const tracePath = traceAgentZipPath(runLog.runId, regressionAgent.id);
+            try {
+              fs.mkdirSync(path.dirname(tracePath), { recursive: true });
+              await context.tracing.stop({ path: tracePath });
+            } catch (e) {
+              console.warn(`[trace] failed to save for ${regressionAgent.name}:`, e);
+            }
+          }
+          await context.close();
+        }
+      })());
+    }
+
+    const laneResults = await Promise.all([...browserJobs, ...thresholdJobs, ...regressionJobs]);
     const allVisitedPaths = laneResults.flatMap((r) => r.log.visitedPaths);
     saveSiteMap(sharedSiteMap);
     console.log(`  ${formatSiteMapLogLine(sharedSiteMap)}`);
     for (const result of laneResults) {
-      if (result.kind === "browser") recordBrowserAgentRun(result.agent, result.log);
-      else recordThresholdAgentRun(result.agent, result.log);
+      switch (result.kind) {
+        case "browser":
+          recordBrowserAgentRun(result.agent, result.log);
+          break;
+        case "threshold":
+          recordThresholdAgentRun(result.agent, result.log);
+          break;
+        case "regression":
+          recordRegressionAgentRun(result.agent, result.log);
+          break;
+        default: {
+          const _exhaustive: never = result;
+          throw new Error(`unhandled lane result: ${String(_exhaustive)}`);
+        }
+      }
     }
     runLog.summary.totalAgents = runLog.agents.length;
+
+    const reconciled = reconcileMultiActorOutcomes(scenarioOutcomes, scenarios);
+    scenarioOutcomes.length = 0;
+    scenarioOutcomes.push(...reconciled);
 
     // 9. triage (API + browser + threshold findings)
     await sleep(2000);
@@ -2070,7 +2274,7 @@ async function main() {
   console.log("\nAll agents done.");
   console.log(`  findings collected: ${collectedFindings.length}`);
   console.log(`  tokens: ${runLog.summary.cost.inputTokens} in / ${runLog.summary.cost.outputTokens} out — estimated cost: ${formatCostUSD(runLog.summary.cost.estimatedUSD)}`);
-  console.log(`  GitHub issues created: ${runLog.summary.totalIssuesPosted}`);
+  console.log(`  ${formatIssuesCreatedLine(trackers.enabledNames(), runLog.summary.totalIssuesPosted)}`);
   console.log(`  regression checks: ${runLog.summary.regressionChecked} (regressed: ${runLog.summary.regressionFailed})`);
   console.log(`  screenshots: ${screenshotDir}`);
 

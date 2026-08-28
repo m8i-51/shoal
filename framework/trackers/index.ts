@@ -19,6 +19,10 @@ export class AggregatedTracker implements IssueTracker {
     return this.trackers.length === 0;
   }
 
+  enabledNames(): string[] {
+    return this.trackers.map((t) => t.name);
+  }
+
   async createIssue(title: string, body: string, labels: string[]): Promise<string | null> {
     if (this.trackers.length === 0) return null;
     const results = await Promise.allSettled(this.trackers.map((t) => t.createIssue(title, body, labels)));
@@ -136,4 +140,17 @@ export function buildTrackers(): AggregatedTracker {
   }
 
   return new AggregatedTracker(trackers);
+}
+
+export function formatIssuesCreatedLine(trackerNames: string[], count: number): string {
+  if (trackerNames.length === 0) return `issues created (local only): ${count}`;
+  if (trackerNames.length === 1 && trackerNames[0] === "github") {
+    return `GitHub issues created: ${count}`;
+  }
+  if (trackerNames.length === 1) {
+    const name = trackerNames[0];
+    const label = name.charAt(0).toUpperCase() + name.slice(1);
+    return `${label} issues created: ${count}`;
+  }
+  return `issues created (${trackerNames.join(", ")}): ${count}`;
 }
