@@ -138,7 +138,11 @@ export function PersonasPanel() {
           placeholder={t("personas.seedPlaceholder")}
           onChange={(e) => setSeed(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") void createFromSeed();
+            // Ignore Enter while confirming Japanese/Chinese IME conversion.
+            if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              void createFromSeed();
+            }
           }}
         />
         <button
