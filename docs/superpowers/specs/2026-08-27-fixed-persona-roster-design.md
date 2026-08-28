@@ -2,7 +2,7 @@
 
 ## Goal
 
-Let teams create fixed personas from a short seed (e.g. 「偏屈おじさん」) in the dashboard, without editing YAML. Fixed personas always join each run; the persona designer only fills remaining auto slots. Retire means archive (keep memory/session; restore later).
+Let teams create fixed personas from a short seed (e.g. 「初めて使う人」) in the dashboard, without editing YAML. Fixed personas always join each run; the persona designer only fills remaining auto slots. Retire means archive (keep memory/session; restore later).
 
 ## Data model (`agents.json`)
 

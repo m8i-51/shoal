@@ -118,8 +118,8 @@
   },
   "personas": {
     "title": "Fixed Personas",
-    "hint": "Type a short seed (e.g. \"grumpy uncle\"). AI expands it using the app's product spec. Fixed members always join runs.",
-    "seedPlaceholder": "e.g. grumpy uncle / someone hunting for bugs",
+    "hint": "Type a short seed (e.g. \"first-time user\"). AI expands it using the app's product spec. Fixed members always join runs.",
+    "seedPlaceholder": "e.g. first-time user / someone hunting for bugs",
     "create": "Create",
     "empty": "No fixed personas yet.",
     "edit": "Edit",
