@@ -8,6 +8,8 @@ export interface ScenarioActor {
   goal: string; // what THIS actor tries to accomplish
 }
 
+export type ScenarioChannel = "api" | "browser" | "either";
+
 export interface Scenario {
   id: string;
   title: string;
@@ -16,6 +18,35 @@ export interface Scenario {
   constraints: string; // Special conditions (first-time user, under pressure, etc.)
   /** Multi-actor scenario: two users act on the same data at the same time (concurrency / permission testing) */
   actors?: ScenarioActor[];
+  /** Which lane can complete this scenario. Omitted → inferred from wording. */
+  channel?: ScenarioChannel;
+}
+
+export function parseScenarioChannel(raw: unknown): ScenarioChannel | undefined {
+  if (raw === "api" || raw === "browser" || raw === "either") return raw;
+  return undefined;
+}
+
+const UI_REQUIRED_RE =
+  /oauth|sso|openid|theme|dark mode|light mode|hamburger|notification panel|sidebar|dropdown|drag[- ]?and[- ]?drop|a11y|wcag|keyboard nav|focus trap|modal|tooltip|hover|responsive|mobile menu|カラーテーマ|テーマ切替|ハンバーガー|通知パネル|ドラッグ/i;
+
+export function inferScenarioChannel(
+  scenario: Pick<Scenario, "title" | "context" | "goal" | "constraints" | "channel">,
+): ScenarioChannel {
+  if (scenario.channel) return scenario.channel;
+  const text = `${scenario.title} ${scenario.context} ${scenario.goal} ${scenario.constraints}`;
+  if (UI_REQUIRED_RE.test(text)) return "browser";
+  return "either";
+}
+
+const CONCURRENT_RE =
+  /同時|concurrently|at the same time|while .{3,80} (is|are) |しながら|2人|二人|二つのロール|two users|two roles|admin.{0,60}while.{0,60}user|user.{0,60}while.{0,60}admin/i;
+
+/** Title/body describe two roles acting together, but actors[] was omitted. */
+export function looksConcurrentWithoutActors(scenario: Scenario): boolean {
+  if ((scenario.actors?.length ?? 0) >= 2) return false;
+  const text = `${scenario.title} ${scenario.context} ${scenario.goal} ${scenario.constraints}`;
+  return CONCURRENT_RE.test(text);
 }
 
 /** 2 アクター揃ったマルチアクターシナリオだけを返す */
@@ -23,12 +54,16 @@ export function findMultiActorScenario(scenarios: Scenario[]): Scenario | undefi
   return scenarios.find((s) => (s.actors?.length ?? 0) >= 2);
 }
 
-/** 通常のディスパッチに使う単独シナリオ（マルチアクターを除外） */
+/** 通常のディスパッチに使う単独シナリオ（マルチアクターと、actors 無しの同時操作文言を除外） */
 export function soloScenarios(scenarios: Scenario[]): Scenario[] {
-  return scenarios.filter((s) => (s.actors?.length ?? 0) < 2);
+  return scenarios.filter((s) => (s.actors?.length ?? 0) < 2 && !looksConcurrentWithoutActors(s));
 }
 
-export type RoleBearer = { id: string; name: string; role: string };
+export type RoleBearer = { id: string; name: string; role: string; accountRole?: string };
+
+function bearerAccountRole(agent: RoleBearer): string {
+  return agent.accountRole?.trim() || agent.role;
+}
 
 /**
  * ペルソナ role と actor role の親和度が最大になる 2 体を選ぶ。
@@ -48,7 +83,8 @@ export function pairAgentsToActors<T extends RoleBearer>(
   for (const agentA of agents) {
     for (const agentB of agents) {
       if (agentA.id === agentB.id) continue;
-      const score = roleAffinity(agentA.role, actorA.role) + roleAffinity(agentB.role, actorB.role);
+      const score = roleAffinity(bearerAccountRole(agentA), actorA.role)
+        + roleAffinity(bearerAccountRole(agentB), actorB.role);
       if (score > bestScore) {
         bestScore = score;
         best = [agentA, agentB];
@@ -75,7 +111,10 @@ export function pickBrowserAgents<T extends RoleBearer>(
 
   for (const role of actorRoles) {
     if (selected.length >= count) break;
-    const match = findBestByRole(remaining, role);
+    const match = findBestByRole(
+      remaining.map((a) => ({ ...a, role: bearerAccountRole(a) })),
+      role,
+    );
     if (!match) continue;
     const idx = remaining.findIndex((a) => a.id === match.id);
     if (idx >= 0) selected.push(remaining.splice(idx, 1)[0]);
@@ -126,9 +165,14 @@ const OUTPUT_SCENARIOS_TOOL = {
               type: "string",
               description: "Special conditions: e.g. first time using this feature, in a hurry, unfamiliar with the approval flow, etc.",
             },
+            channel: {
+              type: "string",
+              enum: ["api", "browser", "either"],
+              description: "api = completable with HTTP/API tools only. browser = requires a real UI (OAuth, theme toggle, notification panel, hamburger, drag-and-drop, visual layout). either = both lanes can attempt it. Default either.",
+            },
             actors: {
               type: "array",
-              description: "ONLY for a multi-actor scenario: exactly 2 actors who use the app AT THE SAME TIME on the same data (e.g. an admin changing permissions while a user is mid-task, or two users editing the same record). Each actor's role should match an available test account role. Omit for normal single-user scenarios.",
+              description: "REQUIRED when two roles use the app AT THE SAME TIME on the same data (e.g. an admin changing permissions while a user is mid-task, or two users editing the same record). Exactly 2 actors; each role should match an available test account role. Omit for normal single-user scenarios. Concurrent wording without actors is discarded.",
               items: {
                 type: "object",
                 properties: {
@@ -172,7 +216,14 @@ export async function designScenarios(
     : "";
 
   const raw = await captureStructuredTool<{
-    scenarios: { title: string; context: string; goal: string; constraints: string; actors?: { role: string; goal: string }[] }[];
+    scenarios: {
+      title: string;
+      context: string;
+      goal: string;
+      constraints: string;
+      channel?: ScenarioChannel;
+      actors?: { role: string; goal: string }[];
+    }[];
   }>({
     provider: process.env.LLM_PROVIDER ?? "anthropic",
     client,
@@ -201,6 +252,8 @@ Guidelines:
 - If coverage history shows underrepresented areas or lenses, bias scenarios toward those gaps
 - If coverage history shows previous runs (this is NOT the first run), include exactly one RETURNING-USER scenario: a user coming back to data they created before — resuming a draft, reviewing accumulated items, checking what changed since their last visit
 - Constraints should reflect realistic user states (first time, in a hurry, confused, etc.)
+- Set channel to "browser" when the task needs a real UI (OAuth, theme, notifications, hamburger, layout). Set "api" only when HTTP tools are enough. Otherwise "either".
+- If two roles act at the same time, you MUST set actors to exactly 2. Concurrent scenarios without actors are discarded.
 
 Call output_scenarios with exactly ${count} scenarios.`,
     tool: {
@@ -219,25 +272,42 @@ Call output_scenarios with exactly ${count} scenarios.`,
     return [];
   }
 
-  const scenarios: Scenario[] = raw.scenarios.map((s, i) => {
+  const scenarios: Scenario[] = [];
+  raw.scenarios.forEach((s, i) => {
     const actors = Array.isArray(s.actors)
       ? s.actors
           .filter((a) => a && typeof a.role === "string" && typeof a.goal === "string")
           .slice(0, 2)
           .map((a) => ({ role: String(a.role), goal: String(a.goal) }))
       : [];
-    return {
+    const channel = parseScenarioChannel(s.channel);
+    const next: Scenario = {
       id: `scenario_${i + 1}`,
       title: String(s.title),
       context: String(s.context),
       goal: String(s.goal),
       constraints: String(s.constraints),
       ...(actors.length === 2 ? { actors } : {}),
+      ...(channel ? { channel } : {}),
     };
+    if (looksConcurrentWithoutActors(next)) {
+      console.warn(
+        `[scenario-designer] discarded "${next.title}" — concurrent work without actors[]`,
+      );
+      return;
+    }
+    scenarios.push(next);
   });
 
   console.log(`[scenario-designer] generated ${scenarios.length} scenarios:`);
-  scenarios.forEach((s) => console.log(`  - [${s.id}] ${s.title}${s.actors ? ` (multi-actor: ${s.actors.map((a) => a.role).join(" × ")})` : ""}`));
+  scenarios.forEach((s) => {
+    const channel = inferScenarioChannel(s);
+    const extra = [
+      s.actors ? `multi-actor: ${s.actors.map((a) => a.role).join(" × ")}` : "",
+      `channel: ${channel}`,
+    ].filter(Boolean).join(", ");
+    console.log(`  - [${s.id}] ${s.title}${extra ? ` (${extra})` : ""}`);
+  });
 
   return scenarios;
 }

@@ -95,6 +95,8 @@ describe("splitRosterForDispatch", () => {
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids).toHaveLength(4);
     expect(browsers.map((a) => a.id)).toEqual(["f1", "f2"]);
+    expect(explorers.map((a) => a.id).sort()).toEqual(["a1", "a2"]);
+    expect(regression).toBeNull();
   });
 
   it("prefers fixed for browser slots", () => {
@@ -108,10 +110,8 @@ describe("splitRosterForDispatch", () => {
       maxExplorers: 2,
     });
     expect(browsers[0].id).toBe("f1");
-    expect([...explorers, ...(regression ? [regression] : [])].map((a) => a.id).sort()).toEqual([
-      "a1",
-      "a2",
-    ]);
+    expect(explorers.map((a) => a.id).sort()).toEqual(["a1", "a2"]);
+    expect(regression).toBeNull();
   });
 });
 

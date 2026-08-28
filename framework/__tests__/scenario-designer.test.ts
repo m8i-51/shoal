@@ -7,7 +7,7 @@ vi.mock("../tool-session", () => ({
 }));
 
 import { captureStructuredTool } from "../tool-session";
-import { designScenarios, findMultiActorScenario, soloScenarios, pairAgentsToActors, pickBrowserAgents } from "../scenario-designer";
+import { designScenarios, findMultiActorScenario, soloScenarios, pairAgentsToActors, pickBrowserAgents, looksConcurrentWithoutActors, inferScenarioChannel } from "../scenario-designer";
 import type { ProductSpec } from "../product-discovery";
 import type { LLMClient } from "../llm-client";
 
@@ -108,6 +108,33 @@ describe("designScenarios", () => {
     ]);
   });
 
+  it("channel を保存する", async () => {
+    vi.mocked(captureStructuredTool).mockResolvedValue({
+      scenarios: [{
+        title: "Theme",
+        context: "C",
+        goal: "Toggle dark mode",
+        constraints: "X",
+        channel: "browser",
+      }],
+    });
+    const result = await designScenarios(makeSpec(), [], {} as LLMClient, "m", 1);
+    expect(result[0].channel).toBe("browser");
+  });
+
+  it("同時操作なのに actors が無いシナリオは破棄する", async () => {
+    vi.mocked(captureStructuredTool).mockResolvedValue({
+      scenarios: [{
+        title: "Two users edit the same record at the same time",
+        context: "C",
+        goal: "G",
+        constraints: "X",
+      }],
+    });
+    const result = await designScenarios(makeSpec(), [], {} as LLMClient, "m", 1);
+    expect(result).toEqual([]);
+  });
+
   it("actors が 1 人だけなら actors を付けない", async () => {
     vi.mocked(captureStructuredTool).mockResolvedValue({
       scenarios: [{
@@ -123,6 +150,37 @@ describe("designScenarios", () => {
   });
 });
 
+describe("inferScenarioChannel / looksConcurrentWithoutActors", () => {
+  it("channel 指定を優先する", () => {
+    expect(inferScenarioChannel({
+      title: "x", context: "", goal: "", constraints: "", channel: "api",
+    })).toBe("api");
+  });
+
+  it("OAuth やテーマ切替は browser と推定する", () => {
+    expect(inferScenarioChannel({
+      title: "Complete OAuth login", context: "", goal: "", constraints: "",
+    })).toBe("browser");
+  });
+
+  it("actors 無しの同時操作文言を検出する", () => {
+    expect(looksConcurrentWithoutActors({
+      id: "s",
+      title: "Admin revokes access while a user is mid-task",
+      context: "",
+      goal: "",
+      constraints: "",
+    })).toBe(true);
+    expect(looksConcurrentWithoutActors({
+      id: "s",
+      title: "Submit a form",
+      context: "",
+      goal: "",
+      constraints: "",
+    })).toBe(false);
+  });
+});
+
 describe("findMultiActorScenario / soloScenarios", () => {
   it("2 actors のシナリオを見つける", () => {
     const scenarios = [
@@ -130,6 +188,14 @@ describe("findMultiActorScenario / soloScenarios", () => {
       { id: "s2", title: "b", context: "", goal: "", constraints: "", actors: [{ role: "a", goal: "x" }, { role: "b", goal: "y" }] },
     ];
     expect(findMultiActorScenario(scenarios)?.id).toBe("s2");
+    expect(soloScenarios(scenarios).map((s) => s.id)).toEqual(["s1"]);
+  });
+
+  it("actors 無しの同時操作シナリオはソロ扱いしない", () => {
+    const scenarios = [
+      { id: "s1", title: "Submit a form", context: "", goal: "", constraints: "" },
+      { id: "s2", title: "Two users edit the same record at the same time", context: "", goal: "", constraints: "" },
+    ];
     expect(soloScenarios(scenarios).map((s) => s.id)).toEqual(["s1"]);
   });
 });

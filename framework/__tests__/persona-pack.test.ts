@@ -37,6 +37,14 @@ describe("formatPackForPrompt", () => {
     expect(result).toContain("2. Kenji (power user)");
     expect(result).not.toContain("Kenji (power user)\n   daily user\n   Suggested");
   });
+
+  it("accountRole があればプロンプトに含める", () => {
+    const pack: PersonaPack = {
+      name: "P",
+      personas: [{ name: "Miki", role: "シニア学習者", persona: "p", accountRole: "user" }],
+    };
+    expect(formatPackForPrompt(pack)).toContain("accountRole: user");
+  });
 });
 
 describe("loadPersonaPack", () => {

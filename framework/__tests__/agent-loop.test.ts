@@ -191,6 +191,22 @@ describe("runAgentLoop", () => {
     expect(vi.mocked(findingsModule).runLog!.summary.iterationLimitReached).toBe(1);
   });
 
+  it("maxIterations を渡すとその回数で iteration_limit になる", async () => {
+    const agentLog = makeAgentLog();
+    const executeToolFn = vi.fn().mockResolvedValue("result");
+    const createMessage = vi.fn().mockResolvedValue({
+      content: [{ type: "tool_use", id: "t1", name: "noop", input: {} }],
+      stop_reason: "tool_use",
+      usage: {},
+    });
+    const tools = [
+      { name: "noop", description: "noop", input_schema: { type: "object" as const, properties: {} } },
+    ];
+    await runAgentLoop(agentLog, "sys", tools as never, makeClient(createMessage), "m", executeToolFn, "anthropic", 2);
+    expect(agentLog.status).toBe("iteration_limit");
+    expect(agentLog.iterations).toBe(2);
+  });
+
   it("例外発生時は error 状態になり runLog.summary.errors が増える", async () => {
     const agentLog = makeAgentLog();
     const createMessage = vi.fn().mockRejectedValue(new Error("network down"));

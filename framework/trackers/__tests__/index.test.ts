@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { AggregatedTracker, buildTrackers } from "../index";
+import { AggregatedTracker, buildTrackers, formatIssuesCreatedLine } from "../index";
 import type { IssueTracker, OpenIssue, ClosedIssue } from "../types";
 
 function makeFakeTracker(overrides: Partial<IssueTracker> = {}): IssueTracker {
@@ -21,6 +21,15 @@ describe("AggregatedTracker", () => {
 
   it("trackers が1件以上あれば isEmpty = false", () => {
     expect(new AggregatedTracker([makeFakeTracker()]).isEmpty).toBe(false);
+  });
+
+  it("enabledNames は配下トラッカー名を返す", () => {
+    const tracker = new AggregatedTracker([
+      makeFakeTracker({ name: "jira" }),
+      makeFakeTracker({ name: "notion" }),
+    ]);
+    expect(tracker.enabledNames()).toEqual(["jira", "notion"]);
+    expect(new AggregatedTracker([]).enabledNames()).toEqual([]);
   });
 
   describe("createIssue", () => {
@@ -217,5 +226,20 @@ describe("buildTrackers", () => {
     process.env.GITHUB_TOKEN = "tok";
     process.env.GITHUB_REPO = "owner/repo";
     expect(buildTrackers().isEmpty).toBe(false);
+  });
+});
+
+describe("formatIssuesCreatedLine", () => {
+  it("GitHub だけのときは従来の文言を保つ", () => {
+    expect(formatIssuesCreatedLine(["github"], 3)).toBe("GitHub issues created: 3");
+  });
+
+  it("非 GitHub トラッカー名を使う", () => {
+    expect(formatIssuesCreatedLine(["jira"], 2)).toBe("Jira issues created: 2");
+    expect(formatIssuesCreatedLine(["backlog", "notion"], 1)).toBe("issues created (backlog, notion): 1");
+  });
+
+  it("トラッカー未設定は local only", () => {
+    expect(formatIssuesCreatedLine([], 0)).toBe("issues created (local only): 0");
   });
 });

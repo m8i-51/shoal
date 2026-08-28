@@ -3,6 +3,7 @@ import type { AgentLog } from "./types";
 import { runLog } from "./findings";
 import { runToolSession } from "./tool-session";
 import { createMessageWithRetry, sleep, rateLimitRetries } from "./llm-retry";
+import { formatToolCallLog } from "./redact";
 
 export { createMessageWithRetry, sleep, rateLimitRetries };
 
@@ -14,6 +15,7 @@ export async function runAgentLoop(
   model: string,
   executeToolFn: (toolName: string, input: Record<string, unknown>) => Promise<string>,
   provider = process.env.LLM_PROVIDER ?? "anthropic",
+  maxIterations = 10,
 ): Promise<void> {
   try {
     const sessionTools = tools.map((t) => ({
@@ -21,7 +23,7 @@ export async function runAgentLoop(
       description: t.description ?? t.name,
       input_schema: t.input_schema as Record<string, unknown>,
       execute: async (input: Record<string, unknown>) => {
-        console.log(`  → ${t.name}(${JSON.stringify(input).slice(0, 80)})`);
+        console.log(`  → ${formatToolCallLog(t.name, input)}`);
         return executeToolFn(t.name, input);
       },
     }));
@@ -33,12 +35,12 @@ export async function runAgentLoop(
       system: systemPrompt,
       userPrompt: "Use the app.",
       tools: sessionTools,
-      maxIterations: 10,
+      maxIterations,
       maxTokens: 1024,
     });
 
     agentLog.iterations = result.iterations;
-    if (agentLog.iterations >= 10) {
+    if (agentLog.iterations >= maxIterations) {
       agentLog.status = "iteration_limit";
       runLog.summary.iterationLimitReached++;
     } else {

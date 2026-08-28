@@ -139,6 +139,7 @@ app.post("/api/personas", personaCreateLimiter, async (req, res) => {
       origin: "fixed",
       status: "active",
       seed,
+      ...(generated.accountRole ? { accountRole: generated.accountRole } : {}),
     });
     res.status(201).json(agent);
   } catch (e) {
@@ -158,11 +159,12 @@ app.patch("/api/personas/:id", (req, res) => {
     res.status(404).json({ error: "persona not found" });
     return;
   }
-  const { name, role, persona, lenses } = req.body as {
+  const { name, role, persona, lenses, accountRole } = req.body as {
     name?: unknown;
     role?: unknown;
     persona?: unknown;
     lenses?: unknown;
+    accountRole?: unknown;
   };
   if (lenses !== undefined && (!Array.isArray(lenses) || !lenses.every((l) => typeof l === "string"))) {
     res.status(400).json({ error: "lenses must be an array of strings" });
@@ -174,6 +176,9 @@ app.patch("/api/personas/:id", (req, res) => {
       ...(typeof role === "string" ? { role } : {}),
       ...(typeof persona === "string" ? { persona } : {}),
       ...(lenses !== undefined ? { lenses: lenses as string[] } : {}),
+      ...(typeof accountRole === "string" || accountRole === null
+        ? { accountRole: accountRole as string | null }
+        : {}),
     });
     if (!updated) {
       res.status(400).json({ error: "persona must be active fixed to edit — restore first" });
