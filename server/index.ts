@@ -11,6 +11,7 @@ import { loadSchedule, saveSchedule, startScheduler, type ScheduleConfig } from 
 import { generateDiary, getDiaryPath } from "../framework/diary.js";
 import { findCrossRunDuplicates } from "../framework/cross-run-dedup.js";
 import { computeExperienceScore } from "../framework/experience-score.js";
+import { loadSiteMap, buildSiteMapDashboardView } from "../framework/site-map.js";
 import { isFinding, type Finding } from "../framework/types.js";
 import { buildSafeProxyUrl } from "./proxy-url.js";
 import {
@@ -229,6 +230,25 @@ app.get("/api/experience", (_req, res) => {
     res.json(score);
   } catch {
     res.status(500).json({ error: "failed to compute experience score" });
+  }
+});
+
+// ----------------------------------------------------------------
+// API: site map — path coverage for dashboard
+// ----------------------------------------------------------------
+app.get("/api/site-map", (_req, res) => {
+  const baseUrl = process.env.BASE_URL ?? "http://localhost:3000";
+  try {
+    const origin = new URL(baseUrl).origin;
+    const map = loadSiteMap(origin);
+    const view = buildSiteMapDashboardView(map);
+    if (view.stats.known === 0) {
+      res.status(404).json({ error: "no site map data yet" });
+      return;
+    }
+    res.json(view);
+  } catch {
+    res.status(500).json({ error: "failed to read site map" });
   }
 });
 

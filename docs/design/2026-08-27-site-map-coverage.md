@@ -11,7 +11,7 @@
 - run 横断のサイト地図メモリを持つ
 - path 単位で `unvisited` / `reached` / `explored` と入場回数を記録
 - explored率で網羅を測る
-- まずエージェント誘導（人事の `get_path_coverage`）に使い、ダッシュボード可視化は後続
+- エージェント誘導（人事の `get_path_coverage`）とダッシュボード可視化に使う
 
 ## 決定事項
 
@@ -60,9 +60,13 @@
 2. 未訪問トップ N、薄い（reached のみ）トップ N
 3. 直近 run で触った path（前回信号を残す）
 
+### ダッシュボード
+
+- `GET /api/site-map` で stats と path 一覧を返す
+- Dashboard の Site Map Coverage パネルで explored 率・未訪問 path を表示
+
 ## やらないこと（後続）
 
-- Web ダッシュボードの地図 UI
 - query 付き正規化
 - ユーザー設定の include/exclude
 - 認証付き sitemap
@@ -74,3 +78,4 @@
 - モジュール: `framework/site-map.ts`
 - 永続先: `coverage/site-map.json`（gitignore 済み `coverage/` 配下）
 - 配線: `run.ts`
+- API / UI: `server/index.ts`, `web/src/components/SiteMapPanel.tsx`

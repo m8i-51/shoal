@@ -48,6 +48,25 @@ export const MAX_SITEMAP_PATHS = 2000;
 export const MAX_SITEMAP_INDEX_CHILDREN = 20;
 export const MAX_DISCOVERED_PER_RUN = 500;
 export const DEFAULT_PERSONA_TOP_N = 12;
+export const DEFAULT_DASHBOARD_TOP_N = 50;
+
+export interface SiteMapPathRow {
+  path: string;
+  status: PathStatus;
+  visitCount: number;
+  source: PathSource;
+  lastVisitedAt: string | null;
+  lastRunId: string | null;
+}
+
+export interface SiteMapDashboardView {
+  origin: string;
+  updatedAt: string;
+  stats: SiteMapStats;
+  unvisited: string[];
+  thin: Array<{ path: string; visitCount: number }>;
+  entries: SiteMapPathRow[];
+}
 
 function siteMapFilePath(): string {
   return path.join(process.cwd(), "coverage", "site-map.json");
@@ -300,6 +319,47 @@ export function formatSiteMapForPersona(
 export function formatSiteMapLogLine(map: SiteMap): string {
   const s = computeSiteMapStats(map);
   return `[site-map] known=${s.known} explored=${s.explored} (${pct(s.exploredRate)})`;
+}
+
+export function buildSiteMapDashboardView(
+  map: SiteMap,
+  opts?: { topN?: number },
+): SiteMapDashboardView {
+  const topN = opts?.topN ?? DEFAULT_DASHBOARD_TOP_N;
+  const stats = computeSiteMapStats(map);
+  const entries = Object.values(map.entries);
+
+  const unvisited = entries
+    .filter((e) => e.status === "unvisited")
+    .map((e) => e.path)
+    .sort()
+    .slice(0, topN);
+
+  const thin = entries
+    .filter((e) => e.status === "reached")
+    .sort((a, b) => a.visitCount - b.visitCount || a.path.localeCompare(b.path))
+    .map((e) => ({ path: e.path, visitCount: e.visitCount }))
+    .slice(0, topN);
+
+  const rows: SiteMapPathRow[] = entries
+    .sort((a, b) => a.path.localeCompare(b.path))
+    .map((e) => ({
+      path: e.path,
+      status: e.status,
+      visitCount: e.visitCount,
+      source: e.source,
+      lastVisitedAt: e.lastVisitedAt,
+      lastRunId: e.lastRunId,
+    }));
+
+  return {
+    origin: map.origin,
+    updatedAt: map.updatedAt,
+    stats,
+    unvisited,
+    thin,
+    entries: rows,
+  };
 }
 
 function extractLocs(xml: string): string[] {
