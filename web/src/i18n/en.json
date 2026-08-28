@@ -131,6 +131,8 @@
     "hideArchived": "Hide retired",
     "name": "Name",
     "role": "Role",
+    "accountRole": "Account role",
+    "accountRolePlaceholder": "user / instructor / admin",
     "lensesPlaceholder": "Lenses (comma-separated)",
     "seedLabel": "Seed",
     "createFailed": "Could not create persona",

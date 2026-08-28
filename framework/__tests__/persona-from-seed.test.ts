@@ -18,6 +18,18 @@ describe("parseGeneratedPersona", () => {
     });
   });
 
+  it("keeps optional accountRole", () => {
+    expect(
+      parseGeneratedPersona({
+        name: "Miki",
+        role: "趣味で学ぶシニア学習者",
+        persona: "Learns slowly.",
+        lenses: ["clarity"],
+        accountRole: "user",
+      }).accountRole,
+    ).toBe("user");
+  });
+
   it("rejects missing name/role/persona", () => {
     expect(() =>
       parseGeneratedPersona({ name: "", role: "r", persona: "p", lenses: ["x"] }),

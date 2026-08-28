@@ -131,6 +131,8 @@
     "hideArchived": "退役済みを隠す",
     "name": "名前",
     "role": "役割",
+    "accountRole": "アカウントロール",
+    "accountRolePlaceholder": "user / instructor / admin",
     "lensesPlaceholder": "観点（カンマ区切り）",
     "seedLabel": "種",
     "createFailed": "ペルソナを作成できませんでした",

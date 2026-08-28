@@ -7,7 +7,7 @@ vi.mock("../findings", () => ({ saveFinding: vi.fn() }));
 import * as fs from "fs";
 import { createMessageWithRetry } from "../llm-retry";
 import { saveFinding } from "../findings";
-import { loadTestAccounts, inspectAccountsFile, resolveAccountSetup, runAccountManager, loginCandidateUrls, resolveLoginUrl, planBrowserAuth, authPrompt, describeAuthPlan, loginLooksEstablished, storageStateHasSession, type TestAccount } from "../account-manager";
+import { loadTestAccounts, inspectAccountsFile, resolveAccountSetup, runAccountManager, persistAccountSessions, loginCandidateUrls, resolveLoginUrl, planBrowserAuth, authPrompt, describeAuthPlan, loginLooksEstablished, storageStateHasSession, describeLoginFailure, pickAdminAccount, type TestAccount } from "../account-manager";
 import type { ProductSpec } from "../product-discovery";
 import type { LLMClient } from "../llm-client";
 import type { Page, BrowserContext } from "playwright";
@@ -215,7 +215,7 @@ describe("resolveAccountSetup", () => {
     expect(plan.logs.some((l) => l.includes("starting"))).toBe(true);
   });
 
-  it("accounts.json があればそれをシードにする（config は任意）", () => {
+  it("accounts.json に使えるアカウントがあれば探索せずセッション保存だけにする", () => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
     vi.mocked(fs.readFileSync).mockReturnValue(
       JSON.stringify([
@@ -224,13 +224,11 @@ describe("resolveAccountSetup", () => {
       ]) as unknown as ReturnType<typeof fs.readFileSync>,
     );
     const plan = resolveAccountSetup(undefined);
-    expect(plan.action).toBe("run");
-    if (plan.action !== "run") return;
-    expect(plan.seedSource).toBe("accounts.json");
-    expect(plan.seed).toEqual({ email: "test@example.com", password: "testpassword" });
+    expect(plan.action).toBe("persist");
+    if (plan.action !== "persist") return;
     expect(plan.existing).toHaveLength(2);
     expect(plan.logs.some((l) => l.includes("loaded 2 account(s)"))).toBe(true);
-    expect(plan.logs.some((l) => l.includes("seed from test-accounts/accounts.json"))).toBe(true);
+    expect(plan.logs.some((l) => l.includes("capturing sessions only"))).toBe(true);
   });
 
   it("どちらも無い場合はスキップ理由をログする", () => {
@@ -262,17 +260,16 @@ describe("resolveAccountSetup", () => {
     expect(plan.logs.some((l) => l.includes("skipped"))).toBe(true);
   });
 
-  it("config credentials が accounts.json より優先される", () => {
+  it("accounts.json にアカウントがあるときは config credentials があっても探索しない", () => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
     vi.mocked(fs.readFileSync).mockReturnValue(
       JSON.stringify([{ email: "file@example.com", password: "filepw", role: "user" }]) as unknown as ReturnType<typeof fs.readFileSync>,
     );
     const plan = resolveAccountSetup({ email: "config@example.com", password: "configpw" });
-    expect(plan.action).toBe("run");
-    if (plan.action !== "run") return;
-    expect(plan.seedSource).toBe("config");
-    expect(plan.seed.email).toBe("config@example.com");
+    expect(plan.action).toBe("persist");
+    if (plan.action !== "persist") return;
     expect(plan.existing[0].email).toBe("file@example.com");
+    expect(plan.logs.some((l) => l.includes("capturing sessions only"))).toBe(true);
   });
 });
 
@@ -826,6 +823,38 @@ describe("planBrowserAuth / authPrompt", () => {
     expect(prompt).not.toContain("Password:");
     expect(describeAuthPlan("Bea", plan)).toContain("guest");
   });
+
+  it("ペルソナ role が説明文でトークン一致しなくても保存済みセッションを注入する", () => {
+    const userSession: TestAccount = {
+      email: "user@x.com",
+      password: "secret",
+      role: "user",
+      storageStatePath: "/states/user.json",
+    };
+    const plan = planBrowserAuth({
+      testAccounts: [userSession],
+      accountRole: "趣味で学ぶシニア学習者",
+      preferAccountSession: false,
+    });
+    expect(plan.handoff.kind).toBe("session");
+    expect(plan.storageStatePath).toBe("/states/user.json");
+    expect(plan.roleMismatch).toEqual({
+      requested: "趣味で学ぶシニア学習者",
+      used: "user",
+    });
+    expect(describeAuthPlan("Ada", plan)).toContain("role mismatch");
+    expect(authPrompt(plan.handoff)).not.toContain("secret");
+  });
+
+  it("セッションが一つも無いときだけ資格情報を渡す", () => {
+    const plan = planBrowserAuth({
+      testAccounts: [credsOnly],
+      accountRole: "趣味で学ぶシニア学習者",
+      loginPath: "/login",
+      preferAccountSession: false,
+    });
+    expect(plan.handoff.kind).toBe("credentials");
+  });
 });
 
 describe("loginLooksEstablished", () => {
@@ -893,5 +922,44 @@ describe("storageStateHasSession", () => {
   it("空なら false", () => {
     expect(storageStateHasSession({ cookies: [], origins: [] })).toBe(false);
     expect(storageStateHasSession({})).toBe(false);
+  });
+});
+
+describe("describeLoginFailure", () => {
+  it("フォームが埋まっていなければその旨を返す", () => {
+    expect(describeLoginFailure({
+      ok: false,
+      triedUrls: ["https://example.com/login"],
+      lastUrl: "https://example.com/login",
+      formFilled: false,
+    })).toMatch(/login form not found/);
+  });
+
+  it("ログイン URL に残っている・パスワード欄が残っている理由を出す", () => {
+    const text = describeLoginFailure({
+      ok: false,
+      triedUrls: ["https://example.com/login"],
+      lastUrl: "https://example.com/login",
+      formFilled: true,
+      passwordFieldVisible: true,
+    });
+    expect(text).toContain("still on login URL");
+    expect(text).toContain("password field still visible");
+  });
+});
+
+describe("pickAdminAccount", () => {
+  it("admin / 管理者を優先する", () => {
+    const accounts: TestAccount[] = [
+      { email: "u@x.com", password: "p", role: "user", storageStatePath: "" },
+      { email: "a@x.com", password: "p", role: "admin", storageStatePath: "" },
+    ];
+    expect(pickAdminAccount(accounts)?.email).toBe("a@x.com");
+  });
+
+  it("admin が無ければ undefined", () => {
+    expect(pickAdminAccount([
+      { email: "u@x.com", password: "p", role: "user", storageStatePath: "" },
+    ])).toBeUndefined();
   });
 });

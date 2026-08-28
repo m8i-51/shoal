@@ -114,9 +114,13 @@ async function firstIfPresent(locator: Locator): Promise<Locator | null> {
   }
 }
 
+export function clickToolHasTarget(input: { description?: string; ref?: string }): boolean {
+  return Boolean(input.ref?.trim() || input.description?.trim());
+}
+
 export async function resolveClickLocator(
   page: Page,
-  input: { description: string; ref?: string },
+  input: { description?: string; ref?: string },
 ): Promise<Locator | null> {
   const description = input.description?.trim() ?? "";
   const ref = input.ref?.trim() || extractAriaRef(description);
@@ -151,10 +155,15 @@ export async function resolveClickLocator(
 
 export async function clickDescribedElement(
   page: Page,
-  input: { description: string; ref?: string },
+  input: { description?: string; ref?: string },
   timeout = 5000,
 ): Promise<void> {
   const loc = await resolveClickLocator(page, input);
-  if (!loc) throw new Error(`No element matching: ${input.description}`);
+  if (!loc) {
+    const hint = input.ref?.trim()
+      ? `ref=${input.ref.trim()}`
+      : (input.description?.trim() || "(no description or ref)");
+    throw new Error(`No element matching: ${hint}`);
+  }
   await loc.click({ timeout });
 }

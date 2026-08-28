@@ -15,6 +15,7 @@ import {
   recordAgentMemories,
   formatAgentMemories,
   buildMemoryInputs,
+  resolveAgentAccountRole,
   type Agent,
   type AgentMemory,
 } from "../agent-store";
@@ -151,6 +152,17 @@ describe("addAgent origin/status", () => {
     expect(agent.seed).toBe("初めて使う人");
     expect(agent.lenses).toEqual(["trust", "clarity"]);
   });
+
+  it("stores accountRole separately from narrative role", () => {
+    const agent = addAgent({
+      name: "Miki",
+      role: "趣味で学ぶシニア学習者",
+      persona: "learns at her own pace",
+      accountRole: "user",
+    });
+    expect(agent.role).toBe("趣味で学ぶシニア学習者");
+    expect(agent.accountRole).toBe("user");
+  });
 });
 
 describe("archive/restore/update/list", () => {
@@ -197,6 +209,22 @@ describe("archive/restore/update/list", () => {
     expect(listFixedPersonas().map((a) => a.id)).toEqual(["f1"]);
     expect(listFixedPersonas({ includeArchived: true }).map((a) => a.id)).toEqual(["f1", "f2"]);
     expect(listActiveAgents().map((a) => a.id)).toEqual(["f1", "a1"]);
+  });
+
+  it("updates and clears accountRole", () => {
+    setup([makeAgent({ id: "f1", origin: "fixed", status: "active", role: "趣味で学ぶシニア学習者" })]);
+    const updated = updateAgent("f1", { accountRole: "user" });
+    expect(updated?.accountRole).toBe("user");
+    setup([{ ...makeAgent({ id: "f1", origin: "fixed", status: "active" }), accountRole: "user" }]);
+    const cleared = updateAgent("f1", { accountRole: null });
+    expect(cleared?.accountRole).toBeUndefined();
+  });
+});
+
+describe("resolveAgentAccountRole", () => {
+  it("prefers accountRole over narrative role", () => {
+    expect(resolveAgentAccountRole({ role: "趣味で学ぶシニア学習者", accountRole: "user" })).toBe("user");
+    expect(resolveAgentAccountRole({ role: "趣味で学ぶシニア学習者" })).toBe("趣味で学ぶシニア学習者");
   });
 });
 

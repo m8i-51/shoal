@@ -78,10 +78,10 @@ export interface RosterDispatch<T extends Agent> {
 }
 
 /**
- * Split a single run roster into explorer / browser / regression lanes.
+ * Split a single run roster into explorer / browser lanes.
  * No agent is assigned to more than one lane.
- * Prefer putting fixed agents into browser slots first (primary UX surface),
- * then explorers; last remaining agent (if any explorer lane exists) is regression.
+ * Prefer putting fixed agents into browser slots first (primary UX surface).
+ * Regression is an extra browser job, not taken from the explorer pool.
  */
 export function splitRosterForDispatch<T extends Agent>(
   roster: T[],
@@ -113,25 +113,9 @@ export function splitRosterForDispatch<T extends Agent>(
 
   const browsers = take(maxBrowsers, true);
 
-  // Explorers + optional regression share the explorer budget.
-  // Mirror legacy behavior: last of the explorer pool is the regression agent when explorers > 0.
-  let explorers: T[] = [];
-  let regression: T | null = null;
-
-  if (maxExplorers > 0) {
-    const explorerPool = take(maxExplorers, true);
-    if (explorerPool.length === 0) {
-      explorers = [];
-      regression = null;
-    } else if (explorerPool.length === 1) {
-      // Single explorer slot → use as regression (legacy: allAgents[length-1])
-      regression = explorerPool[0];
-      explorers = [];
-    } else {
-      regression = explorerPool[explorerPool.length - 1];
-      explorers = explorerPool.slice(0, -1);
-    }
-  }
+  // Regression runs as a browser job (see run.ts), not as an API explorer.
+  const explorers = maxExplorers > 0 ? take(maxExplorers, true) : [];
+  const regression: T | null = null;
 
   return { explorers, browsers, regression };
 }

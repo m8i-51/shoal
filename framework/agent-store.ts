@@ -29,6 +29,8 @@ export interface Agent {
   seed?: string;
   /** Evaluation lenses (stored/edited; not wired into dispatch in v1). */
   lenses?: string[];
+  /** Short test-account role (user / instructor / admin). Distinct from narrative `role`. */
+  accountRole?: string;
 }
 
 const STORE_PATH = path.join(process.cwd(), "agents.json");
@@ -78,6 +80,7 @@ export interface AddAgentInput {
   status?: AgentStatus;
   seed?: string;
   lenses?: string[];
+  accountRole?: string;
 }
 
 export function addAgent(input: AddAgentInput): Agent {
@@ -99,6 +102,9 @@ export function addAgent(input: AddAgentInput): Agent {
     ...(input.seed !== undefined ? { seed: requireNonEmptyString(input.seed, "seed") } : {}),
     ...(input.lenses !== undefined
       ? { lenses: input.lenses.map((l) => String(l).trim()).filter(Boolean) }
+      : {}),
+    ...(input.accountRole !== undefined && input.accountRole.trim() !== ""
+      ? { accountRole: requireNonEmptyString(input.accountRole, "accountRole") }
       : {}),
   };
   agents.push(agent);
@@ -153,6 +159,7 @@ export interface UpdateAgentInput {
   role?: string;
   persona?: string;
   lenses?: string[];
+  accountRole?: string | null;
 }
 
 /** Update fields on an active fixed persona. Returns null if not found / not editable. */
@@ -167,9 +174,22 @@ export function updateAgent(id: string, patch: UpdateAgentInput): Agent | null {
   if (patch.lenses !== undefined) {
     agent.lenses = patch.lenses.map((l) => requireNonEmptyString(l, "lenses"));
   }
+  if (patch.accountRole !== undefined) {
+    if (patch.accountRole === null || patch.accountRole.trim() === "") {
+      delete agent.accountRole;
+    } else {
+      agent.accountRole = requireNonEmptyString(patch.accountRole, "accountRole");
+    }
+  }
 
   saveAgents(agents);
   return agent;
+}
+
+/** Test-account role used for session matching. Falls back to narrative role. */
+export function resolveAgentAccountRole(agent: { role: string; accountRole?: string }): string {
+  const tagged = agent.accountRole?.trim();
+  return tagged || agent.role;
 }
 
 // ================================================================
