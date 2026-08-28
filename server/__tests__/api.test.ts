@@ -12,6 +12,17 @@ vi.mock("../runs.js", () => ({ listRuns: vi.fn(() => []), getReportPath: vi.fn((
 vi.mock("../scheduler.js", () => ({ loadSchedule: vi.fn(() => ({ enabled: false, dayOfWeek: 1, hour: 9, minute: 0, lastRunDate: null })), saveSchedule: vi.fn(), startScheduler: vi.fn() }));
 vi.mock("../../framework/diary.js", () => ({ generateDiary: vi.fn(), getDiaryPath: vi.fn(() => null) }));
 vi.mock("../../framework/experience-score.js", () => ({ computeExperienceScore: vi.fn(() => null) }));
+vi.mock("../../framework/site-map.js", () => ({
+  loadSiteMap: vi.fn(() => ({ origin: "http://localhost:3000", updatedAt: "", entries: {} })),
+  buildSiteMapDashboardView: vi.fn(() => ({
+    origin: "http://localhost:3000",
+    updatedAt: "",
+    stats: { known: 0, unvisited: 0, reached: 0, explored: 0, exploredRate: 0, reachedRate: 0 },
+    unvisited: [],
+    thin: [],
+    entries: [],
+  })),
+}));
 vi.mock("../../framework/persona-from-seed.js", () => ({
   generatePersonaFromSeed: vi.fn(),
   PersonaGenerationError: class PersonaGenerationError extends Error {
@@ -35,6 +46,7 @@ vi.mock("express-rate-limit", () => ({ rateLimit: () => (_req: unknown, _res: un
 import * as fs from "fs";
 import { generateDiary, getDiaryPath } from "../../framework/diary.js";
 import { computeExperienceScore } from "../../framework/experience-score.js";
+import { loadSiteMap, buildSiteMapDashboardView } from "../../framework/site-map.js";
 import { generatePersonaFromSeed, PersonaGenerationError } from "../../framework/persona-from-seed.js";
 import {
   addAgent,
@@ -132,6 +144,52 @@ describe("GET /api/experience", () => {
     vi.mocked(computeExperienceScore).mockImplementation(() => { throw new Error("boom"); });
     const res = await request(app).get("/api/experience");
     expect(res.status).toBe(500);
+  });
+});
+
+// ================================================================
+// GET /api/site-map
+// ================================================================
+describe("GET /api/site-map", () => {
+  it("地図データがない → 404", async () => {
+    vi.mocked(buildSiteMapDashboardView).mockReturnValue({
+      origin: "http://localhost:3000",
+      updatedAt: "",
+      stats: { known: 0, unvisited: 0, reached: 0, explored: 0, exploredRate: 0, reachedRate: 0 },
+      unvisited: [],
+      thin: [],
+      entries: [],
+    });
+    const res = await request(app).get("/api/site-map");
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe("no site map data yet");
+  });
+
+  it("地図データがある → 200 + view", async () => {
+    const view = {
+      origin: "http://localhost:3000",
+      updatedAt: "2026-08-28T00:00:00.000Z",
+      stats: { known: 2, unvisited: 1, reached: 0, explored: 1, exploredRate: 0.5, reachedRate: 0.5 },
+      unvisited: ["/settings"],
+      thin: [],
+      entries: [
+        { path: "/", status: "explored" as const, visitCount: 2, source: "sitemap" as const, lastVisitedAt: null, lastRunId: "run_1" },
+        { path: "/settings", status: "unvisited" as const, visitCount: 0, source: "sitemap" as const, lastVisitedAt: null, lastRunId: null },
+      ],
+    };
+    vi.mocked(buildSiteMapDashboardView).mockReturnValue(view);
+    const res = await request(app).get("/api/site-map");
+    expect(res.status).toBe(200);
+    expect(res.body.stats.known).toBe(2);
+    expect(res.body.unvisited).toEqual(["/settings"]);
+    expect(loadSiteMap).toHaveBeenCalledWith("http://localhost:3000");
+  });
+
+  it("読み取りが例外を投げる → 500", async () => {
+    vi.mocked(loadSiteMap).mockImplementation(() => { throw new Error("boom"); });
+    const res = await request(app).get("/api/site-map");
+    expect(res.status).toBe(500);
+    expect(res.body.error).toBe("failed to read site map");
   });
 });
 

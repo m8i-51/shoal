@@ -12,6 +12,7 @@ import {
   ingestDiscoveredPaths,
   computeSiteMapStats,
   formatSiteMapForPersona,
+  buildSiteMapDashboardView,
   seedFromSitemap,
   loadSiteMap,
   saveSiteMap,
@@ -167,6 +168,36 @@ describe("formatSiteMapForPersona", () => {
     expect(text).toContain("/gone");
     expect(text).toContain("/seen");
     expect(text).toContain("Paths touched in the most recent run");
+  });
+});
+
+describe("buildSiteMapDashboardView", () => {
+  it("returns stats, unvisited, thin, and sorted entries", () => {
+    const map = emptySiteMap(ORIGIN);
+    ensurePath(map, "/billing", "sitemap");
+    ensurePath(map, "/settings", "sitemap");
+    ensurePath(map, "/home", "sitemap");
+    recordVisit(map, "/home", "run1", { isNewEntry: true, consecutiveIterations: 2 });
+    recordVisit(map, "/reports", "run1", { isNewEntry: true, consecutiveIterations: 1 });
+
+    const view = buildSiteMapDashboardView(map);
+    expect(view.stats.known).toBe(4);
+    expect(view.stats.unvisited).toBe(2);
+    expect(view.stats.explored).toBe(1);
+    expect(view.stats.reached).toBe(1);
+    expect(view.unvisited).toEqual(["/billing", "/settings"]);
+    expect(view.thin).toEqual([{ path: "/reports", visitCount: 1 }]);
+    expect(view.entries.map((e) => e.path)).toEqual(["/billing", "/home", "/reports", "/settings"]);
+    expect(view.entries.find((e) => e.path === "/home")?.status).toBe("explored");
+  });
+
+  it("respects topN for unvisited and thin lists", () => {
+    const map = emptySiteMap(ORIGIN);
+    for (let i = 0; i < 5; i++) {
+      ensurePath(map, `/u${i}`, "sitemap");
+    }
+    const view = buildSiteMapDashboardView(map, { topN: 2 });
+    expect(view.unvisited).toHaveLength(2);
   });
 });
 
