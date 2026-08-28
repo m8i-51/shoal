@@ -1,31 +1,71 @@
 // Per-token USD prices (as of 2026-04)
 const ANTHROPIC_PRICING: Record<string, { input: number; output: number }> = {
-  "claude-opus-4-7":            { input: 15 / 1e6,  output: 75 / 1e6  },
+  // Claude 5.x
+  "claude-fable-5":             { input: 10 / 1e6,  output: 50 / 1e6  },
+  "claude-mythos-5":            { input: 10 / 1e6,  output: 50 / 1e6  },
+  "claude-opus-5":              { input: 5 / 1e6,   output: 25 / 1e6  },
+  "claude-sonnet-5":            { input: 2 / 1e6,   output: 10 / 1e6  },
+  // Claude 4.x Opus
+  "claude-opus-4-8":            { input: 5 / 1e6,   output: 25 / 1e6  },
+  "claude-opus-4-7":            { input: 5 / 1e6,   output: 25 / 1e6  },
+  "claude-opus-4-6":            { input: 5 / 1e6,   output: 25 / 1e6  },
+  "claude-opus-4-5":            { input: 5 / 1e6,   output: 25 / 1e6  },
+  "claude-opus-4-1":            { input: 15 / 1e6,  output: 75 / 1e6  },
+  "claude-opus-4":              { input: 15 / 1e6,  output: 75 / 1e6  },
+  // Claude 4.x Sonnet
   "claude-sonnet-4-6":          { input: 3 / 1e6,   output: 15 / 1e6  },
   "claude-sonnet-4-5":          { input: 3 / 1e6,   output: 15 / 1e6  },
+  "claude-sonnet-4":            { input: 3 / 1e6,   output: 15 / 1e6  },
+  // Claude 4.x Haiku
   "claude-haiku-4-5-20251001":  { input: 0.8 / 1e6, output: 4 / 1e6   },
   "claude-haiku-4-5":           { input: 0.8 / 1e6, output: 4 / 1e6   },
+  // Claude 3.7
+  "claude-3-7-sonnet-20250219": { input: 3 / 1e6,   output: 15 / 1e6  },
+  "claude-3-7-sonnet":          { input: 3 / 1e6,   output: 15 / 1e6  },
+  // Claude 3.5
   "claude-3-5-sonnet-20241022": { input: 3 / 1e6,   output: 15 / 1e6  },
+  "claude-3-5-sonnet-20240620": { input: 3 / 1e6,   output: 15 / 1e6  },
   "claude-3-5-haiku-20241022":  { input: 0.8 / 1e6, output: 4 / 1e6   },
+  // Claude 3
   "claude-3-opus-20240229":     { input: 15 / 1e6,  output: 75 / 1e6  },
+  "claude-3-sonnet-20240229":   { input: 3 / 1e6,   output: 15 / 1e6  },
   "claude-3-haiku-20240307":    { input: 0.25 / 1e6, output: 1.25 / 1e6 },
 };
 
 // Bedrock on-demand pricing (us-east-1, as of 2026-04)
 const BEDROCK_PRICING: Record<string, { input: number; output: number }> = {
-  // Claude 4.x
+  // Claude 5.x
+  "anthropic.claude-opus-5-v1":                { input: 5 / 1e6,   output: 25 / 1e6  },
+  "anthropic.claude-sonnet-5-v1":              { input: 2 / 1e6,   output: 10 / 1e6  },
+  "anthropic.claude-fable-5-v1":               { input: 10 / 1e6,  output: 50 / 1e6  },
+  // Claude 4.x Opus
+  "anthropic.claude-opus-4-8-v1":              { input: 5 / 1e6,   output: 25 / 1e6  },
+  "anthropic.claude-opus-4-7-v1:0":            { input: 5 / 1e6,   output: 25 / 1e6  },
+  "anthropic.claude-opus-4-6-v1":              { input: 5 / 1e6,   output: 25 / 1e6  },
+  "anthropic.claude-opus-4-5-20251101-v1:0":   { input: 5 / 1e6,   output: 25 / 1e6  },
+  "anthropic.claude-opus-4-1-20250805-v1:0":   { input: 15 / 1e6,  output: 75 / 1e6  },
+  "anthropic.claude-opus-4-20250514-v1:0":     { input: 15 / 1e6,  output: 75 / 1e6  },
+  // Claude 4.x Sonnet
+  "anthropic.claude-sonnet-4-6":               { input: 3 / 1e6,   output: 15 / 1e6  },
   "anthropic.claude-sonnet-4-6-v1:0":          { input: 3 / 1e6,   output: 15 / 1e6  },
   "anthropic.claude-sonnet-4-5-20250929-v1:0": { input: 3 / 1e6,   output: 15 / 1e6  },
+  "anthropic.claude-sonnet-4-20250514-v1:0":   { input: 3 / 1e6,   output: 15 / 1e6  },
+  // Claude 4.x Haiku
   "anthropic.claude-haiku-4-5-20251001-v1:0":  { input: 0.8 / 1e6, output: 4 / 1e6   },
-  "anthropic.claude-opus-4-7-v1:0":            { input: 15 / 1e6,  output: 75 / 1e6  },
-  // Claude 3.x
+  // Claude 3.7
+  "anthropic.claude-3-7-sonnet-20250219-v1:0": { input: 3 / 1e6,   output: 15 / 1e6  },
+  // Claude 3.5
   "anthropic.claude-3-5-sonnet-20241022-v2:0": { input: 3 / 1e6,   output: 15 / 1e6  },
+  "anthropic.claude-3-5-sonnet-20241022-v1:0": { input: 3 / 1e6,   output: 15 / 1e6  },
+  "anthropic.claude-3-5-sonnet-20240620-v1:0": { input: 3 / 1e6,   output: 15 / 1e6  },
   "anthropic.claude-3-5-haiku-20241022-v1:0":  { input: 0.8 / 1e6, output: 4 / 1e6   },
+  // Claude 3
   "anthropic.claude-3-opus-20240229-v1:0":     { input: 15 / 1e6,  output: 75 / 1e6  },
+  "anthropic.claude-3-sonnet-20240229-v1:0":   { input: 3 / 1e6,   output: 15 / 1e6  },
   "anthropic.claude-3-haiku-20240307-v1:0":    { input: 0.25 / 1e6, output: 1.25 / 1e6 },
 };
 
-const BEDROCK_REGION_PREFIX = /^(?:us|eu|jp|apac)\./;
+const BEDROCK_REGION_PREFIX = /^(?:global|us|eu|jp|apac)\./;
 
 function stripBedrockRegionPrefix(model: string): string {
   return model.replace(BEDROCK_REGION_PREFIX, "");
@@ -34,7 +74,7 @@ function stripBedrockRegionPrefix(model: string): string {
 function bedrockModelToAnthropicKey(model: string): string {
   return stripBedrockRegionPrefix(model)
     .replace(/^anthropic\./, "")
-    .replace(/-v\d+:0$/, "");
+    .replace(/-v\d+(?::0)?$/, "");
 }
 
 function lookupAnthropicPricing(modelKey: string): { input: number; output: number } | undefined {
