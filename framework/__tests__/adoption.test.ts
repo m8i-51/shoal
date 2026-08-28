@@ -110,6 +110,32 @@ describe("updateAdoption", () => {
     expect(links[0].resolution).toBe("adopted");
   });
 
+  it("Backlog URL (/view/PROJ-55) で突合できる", () => {
+    const files = setupFs({
+      [LINKS]: [makeLink({ url: "https://myspace.backlog.com/view/PROJ-55" })],
+    });
+    updateAdoption([makeClosed({
+      number: "PROJ-55",
+      title: "[bug] Login broken",
+      url: "https://myspace.backlog.com/view/PROJ-55",
+    })]);
+    const links = JSON.parse(files.get(LINKS)!) as IssueLink[];
+    expect(links[0].resolution).toBe("adopted");
+  });
+
+  it("Jira URL (/browse/ABC-123) で突合できる", () => {
+    const files = setupFs({
+      [LINKS]: [makeLink({ url: "https://company.atlassian.net/browse/ABC-123" })],
+    });
+    updateAdoption([makeClosed({
+      number: "ABC-123",
+      title: "[bug] Login broken",
+      url: "https://company.atlassian.net/browse/ABC-123",
+    })]);
+    const links = JSON.parse(files.get(LINKS)!) as IssueLink[];
+    expect(links[0].resolution).toBe("adopted");
+  });
+
   it("解決済みリンクは再集計しない", () => {
     const files = setupFs({
       [LINKS]: [makeLink({ resolution: "adopted", resolvedAt: "2026-06-02T00:00:00.000Z" })],

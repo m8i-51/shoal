@@ -61,7 +61,7 @@ import { designScenarios, findMultiActorScenario, soloScenarios, pairAgentsToAct
 import { runTriageAgent } from "./framework/triage";
 import { generateReport } from "./framework/report";
 import type { AgentLog, Finding, RegressionCheck } from "./framework/types";
-import { resolveIssueId } from "./framework/issue-id";
+import { resolveIssueId, formatIssueRef } from "./framework/issue-id";
 import type { ClosedIssue } from "./framework/trackers/types";
 import { loadTarget, applyLoadedTarget } from "./targets";
 import { runAccountManager, resolveAccountSetup, planBrowserAuth, authPrompt, describeAuthPlan, resolveLoginUrl, type TestAccount, type BrowserAuthPlan } from "./framework/account-manager";
@@ -677,9 +677,9 @@ ${pathCoverageStep}
           console.log(`  [persona-designer] finding hotspots fetched (${hotspots.length} areas)`);
         } else if (t.name === "get_open_issues") {
           if (openIssues.length === 0) {
-            result = "(no open issues — either GitHub is not configured or there are no known issues yet)";
+            result = "(no open issues from configured tracker(s) yet)";
           } else {
-            result = openIssues.map((i) => `- #${i.number}: ${i.title} [${i.labels.join(", ")}]`).join("\n");
+            result = openIssues.map((i) => `- ${formatIssueRef(i.number)}: ${i.title} [${i.labels.join(", ")}]`).join("\n");
           }
           console.log(`  [persona-designer] open issues fetched (${openIssues.length})`);
         } else if (t.name === "get_scenarios") {

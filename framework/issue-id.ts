@@ -7,6 +7,14 @@ interface IssueRef {
 }
 
 /**
+ * Format an issue identifier for display.
+ * GitHub numeric IDs get a # prefix; Backlog/Jira keys are shown as-is.
+ */
+export function formatIssueRef(id: IssueIdentifier): string {
+  return typeof id === "number" || /^\d+$/.test(String(id)) ? `#${id}` : String(id);
+}
+
+/**
  * Resolve a raw issue identifier from an agent tool call to the tracker's canonical form.
  * Handles Backlog/Jira keys (e.g. "PROJ-55") and bare numeric suffixes (e.g. "55" → "PROJ-55").
  */

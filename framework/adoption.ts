@@ -70,8 +70,15 @@ export function recordIssueLink(link: IssueLink): void {
 
 function matchesClosedIssue(link: IssueLink, issue: ClosedIssue): boolean {
   if (issue.url && link.url && issue.url === link.url) return true;
-  // GitHub 形式: issue url が /issues/<number> で終わる
-  if (link.url && link.url.endsWith(`/issues/${issue.number}`)) return true;
+  const id = String(issue.number);
+  if (link.url) {
+    // GitHub: /issues/<number>
+    if (link.url.endsWith(`/issues/${id}`)) return true;
+    // Backlog: /view/<issueKey>
+    if (link.url.endsWith(`/view/${id}`)) return true;
+    // Jira: /browse/<issueKey>
+    if (link.url.endsWith(`/browse/${id}`)) return true;
+  }
   return issue.title === link.title;
 }
 
