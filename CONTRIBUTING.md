@@ -61,6 +61,9 @@ build on every pull request, so running these locally first saves a round trip.
 - This repo follows [Conventional Commits](https://www.conventionalcommits.org/)
   (`feat:`, `fix:`, `chore:`, `ci:`, `docs:`, …). Keep each commit focused on one
   logical change.
+- For non-trivial features, add or update an ADR under [`docs/design/`](docs/design/)
+  (see [`docs/README.md`](docs/README.md)). Keep implementation checklists in the PR
+  description — not in the repo.
 - Keep pull requests small and scoped. Fill out the PR template and describe how
   you tested the change.
 - PRs are automatically reviewed by [CodeRabbit](https://coderabbit.ai/) in
