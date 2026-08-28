@@ -75,6 +75,17 @@ describe("estimateCost — Anthropic", () => {
     // input: 3/1M + output: 15/1M = 18
     expect(cost).toBeCloseTo(18, 5);
   });
+
+  it("claude-opus-4-7 の料金を計算する", async () => {
+    const cost = await estimateCost("claude-opus-4-7", "anthropic", 1_000_000, 1_000_000);
+    // input: 5/1M + output: 25/1M = 30
+    expect(cost).toBeCloseTo(30, 5);
+  });
+
+  it("claude-sonnet-5 の料金を計算する", async () => {
+    const cost = await estimateCost("claude-sonnet-5", "anthropic", 1_000_000, 1_000_000);
+    expect(cost).toBeCloseTo(12, 5);
+  });
 });
 
 describe("estimateCost — Bedrock", () => {
@@ -88,6 +99,61 @@ describe("estimateCost — Bedrock", () => {
     const direct = await estimateCost("anthropic.claude-3-5-sonnet-20241022-v2:0", "bedrock", 1_000_000, 0);
     const crossRegion = await estimateCost("us.anthropic.claude-3-5-sonnet-20241022-v2:0", "bedrock", 1_000_000, 0);
     expect(crossRegion).toBeCloseTo(direct!, 8);
+  });
+
+  it("apac. プレフィックスを除去してマッチする", async () => {
+    const direct = await estimateCost("anthropic.claude-sonnet-4-5-20250929-v1:0", "bedrock", 1_000_000, 0);
+    const apac = await estimateCost("apac.anthropic.claude-sonnet-4-5-20250929-v1:0", "bedrock", 1_000_000, 0);
+    expect(apac).toBeCloseTo(direct!, 8);
+  });
+
+  it("jp. プレフィックス付き Claude 4.5 Sonnet の料金を計算する", async () => {
+    const cost = await estimateCost("jp.anthropic.claude-sonnet-4-5-20250929-v1:0", "bedrock", 1_000_000, 1_000_000);
+    // input: 3/1M + output: 15/1M = 18
+    expect(cost).toBeCloseTo(18, 5);
+  });
+
+  it("jp. プレフィックス付き Claude 4.5 Haiku の料金を計算する", async () => {
+    const cost = await estimateCost("jp.anthropic.claude-haiku-4-5-20251001-v1:0", "bedrock", 1_000_000, 500_000);
+    // input: 0.8/1M + output: 4/1M × 500k = 2.8
+    expect(cost).toBeCloseTo(2.8, 5);
+  });
+
+  it("インファレンスプロファイル ID (バージョンサフィックスなし) の料金を計算する", async () => {
+    const cost = await estimateCost("jp.anthropic.claude-sonnet-4-6", "bedrock", 1_000_000, 1_000_000);
+    expect(cost).toBeCloseTo(18, 5);
+  });
+
+  it("global. プレフィックス付き Claude Opus 4.6 (-v1 サフィックス) の料金を計算する", async () => {
+    const cost = await estimateCost("global.anthropic.claude-opus-4-6-v1", "bedrock", 1_000_000, 1_000_000);
+    // input: 5/1M + output: 25/1M = 30
+    expect(cost).toBeCloseTo(30, 5);
+  });
+
+  it("Claude Opus 4.5 の料金を計算する", async () => {
+    const cost = await estimateCost("us.anthropic.claude-opus-4-5-20251101-v1:0", "bedrock", 1_000_000, 0);
+    expect(cost).toBeCloseTo(5, 5);
+  });
+
+  it("Claude Sonnet 4 (20250514) の料金を計算する", async () => {
+    const cost = await estimateCost("anthropic.claude-sonnet-4-20250514-v1:0", "bedrock", 1_000_000, 1_000_000);
+    expect(cost).toBeCloseTo(18, 5);
+  });
+
+  it("Claude 3.7 Sonnet の料金を計算する", async () => {
+    const cost = await estimateCost("anthropic.claude-3-7-sonnet-20250219-v1:0", "bedrock", 1_000_000, 0);
+    expect(cost).toBeCloseTo(3, 5);
+  });
+
+  it("Claude Sonnet 5 の料金を計算する", async () => {
+    const cost = await estimateCost("global.anthropic.claude-sonnet-5-v1", "bedrock", 1_000_000, 1_000_000);
+    // input: 2/1M + output: 10/1M = 12
+    expect(cost).toBeCloseTo(12, 5);
+  });
+
+  it("Claude 3 Sonnet の料金を計算する", async () => {
+    const cost = await estimateCost("anthropic.claude-3-sonnet-20240229-v1:0", "bedrock", 1_000_000, 1_000_000);
+    expect(cost).toBeCloseTo(18, 5);
   });
 
   it("不明モデルは null", async () => {
