@@ -24,8 +24,11 @@ export function SchedulePanel() {
 
   const patch = async (partial: Partial<ScheduleConfig>) => {
     if (!config) return;
-    const updated = { ...config, ...partial };
-    setConfig(updated);
+    // Update optimistically so the control responds, but keep the previous
+    // value: on any failure the panel must show what the server actually has,
+    // not a schedule the operator only thinks they saved.
+    const previous = config;
+    setConfig({ ...config, ...partial });
     try {
       const res = await apiFetch("/api/schedule", {
         method: "PATCH",
@@ -37,10 +40,11 @@ export function SchedulePanel() {
         setConfig(data);
         setSaved(true);
         setTimeout(() => setSaved(false), 2000);
+      } else {
+        setConfig(previous);
       }
     } catch {
-      // Network failure — the panel keeps the last known config and the
-      // operator can retry; there is nothing useful to show here.
+      setConfig(previous);
     }
   };
 

@@ -2,8 +2,10 @@ import { describe, it, expect } from "vitest";
 import express from "express";
 import request from "supertest";
 import {
+  SESSION_COOKIE,
   hostGuard,
   isLoopbackHost,
+  issueSessionCookie,
   requireToken,
   resolveBinding,
   resolveDashboardToken,
@@ -134,6 +136,81 @@ describe("requireToken", () => {
 
   it("/api 以外は認証対象外（UI バンドルを読めるように）", async () => {
     await request(appWithToken("s3cret-token-value")).get("/health").expect(200);
+  });
+});
+
+function appWithSession(token: string | null) {
+  const app = express();
+  app.use(issueSessionCookie(token));
+  app.use("/api", requireToken(token));
+  app.get("/", (_req, res) => {
+    res.send("dashboard");
+  });
+  app.get("/api/ping", (_req, res) => {
+    res.json({ ok: true });
+  });
+  return app;
+}
+
+describe("issueSessionCookie", () => {
+  const TOKEN = "s3cret-token-value";
+
+  it("正しい ?token= を HttpOnly cookie に交換する", async () => {
+    const res = await request(appWithSession(TOKEN)).get("/?token=" + TOKEN).expect(200);
+    const setCookie = String(res.headers["set-cookie"] ?? "");
+    expect(setCookie).toContain(`${SESSION_COOKIE}=${TOKEN}`);
+    expect(setCookie).toContain("HttpOnly");
+    expect(setCookie).toContain("SameSite=Strict");
+  });
+
+  it("平文 HTTP では Secure を付けない（cookie が落ちて締め出されるため）", async () => {
+    const res = await request(appWithSession(TOKEN)).get("/?token=" + TOKEN);
+    expect(String(res.headers["set-cookie"] ?? "")).not.toContain("Secure");
+  });
+
+  it("TLS 終端の背後では Secure を付ける", async () => {
+    const res = await request(appWithSession(TOKEN))
+      .get("/?token=" + TOKEN)
+      .set("X-Forwarded-Proto", "https");
+    expect(String(res.headers["set-cookie"] ?? "")).toContain("Secure");
+  });
+
+  it("誤った ?token= では cookie を発行しない", async () => {
+    const res = await request(appWithSession(TOKEN)).get("/?token=wrong-token-value");
+    expect(res.headers["set-cookie"]).toBeUndefined();
+  });
+
+  it("トークン不要の構成では cookie を発行しない", async () => {
+    const res = await request(appWithSession(null)).get("/?token=anything");
+    expect(res.headers["set-cookie"]).toBeUndefined();
+  });
+
+  it("交換後は cookie だけで API を叩ける（URL にトークンが要らない）", async () => {
+    await request(appWithSession(TOKEN))
+      .get("/api/ping")
+      .set("Cookie", `${SESSION_COOKIE}=${TOKEN}`)
+      .expect(200);
+  });
+
+  it("誤った cookie は 401", async () => {
+    await request(appWithSession(TOKEN))
+      .get("/api/ping")
+      .set("Cookie", `${SESSION_COOKIE}=wrong-token-value`)
+      .expect(401);
+  });
+
+  it("他の cookie が混ざっていても読み取れる", async () => {
+    await request(appWithSession(TOKEN))
+      .get("/api/ping")
+      .set("Cookie", `theme=dark; ${SESSION_COOKIE}=${TOKEN}; other=1`)
+      .expect(200);
+  });
+
+  it("壊れた cookie ヘッダでも落ちない", async () => {
+    await request(appWithSession(TOKEN))
+      .get("/api/ping")
+      .set("Cookie", "novalue; =empty; %ZZ=bad")
+      .expect(401);
   });
 });
 

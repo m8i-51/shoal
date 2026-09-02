@@ -2,73 +2,37 @@
  * api.ts — every dashboard call to the shoal API goes through here.
  *
  * When the server is bound to a non-loopback host it requires a token (see
- * server/auth.ts). The operator opens the dashboard with `?token=…`; we keep it
- * for the session and attach it to each request. On the loopback default there
- * is no token and this is a thin wrapper over `fetch`.
+ * server/auth.ts). The operator opens the dashboard once with `?token=…`; the
+ * server turns that into an HttpOnly session cookie and the browser sends it
+ * automatically from then on.
  *
- * sessionStorage, not localStorage: the token should not outlive the tab.
+ * That means this module deliberately never holds the token: it is not in
+ * `sessionStorage`, not in a module variable, and not appended to URLs. An XSS
+ * on the dashboard origin therefore cannot read it out and reuse it elsewhere.
+ * All we do here is strip the bootstrap token from the address bar so it does
+ * not linger in history or get copied into a shared link.
+ *
+ * On the loopback default there is no token at all and this is a thin wrapper
+ * over `fetch`.
  */
 
-const STORAGE_KEY = "shoal.token";
-
-function readStoredToken(): string | null {
-  try {
-    return sessionStorage.getItem(STORAGE_KEY);
-  } catch {
-    // Private mode / blocked storage — fall back to the in-memory copy.
-    return null;
-  }
-}
-
-function storeToken(token: string): void {
-  try {
-    sessionStorage.setItem(STORAGE_KEY, token);
-  } catch {
-    /* in-memory only */
-  }
-}
-
-let token: string | null = null;
-
 /**
- * Pick up `?token=…` from the URL, then strip it from the address bar so the
- * token does not sit in history or get copied into a shared link.
+ * Remove `?token=…` from the address bar after the server has exchanged it for
+ * the session cookie. Call once, before anything fetches.
  */
 export function initApiToken(): void {
   const params = new URLSearchParams(window.location.search);
-  const fromUrl = params.get("token");
-  if (fromUrl) {
-    token = fromUrl;
-    storeToken(fromUrl);
-    params.delete("token");
-    const query = params.toString();
-    window.history.replaceState(
-      {},
-      "",
-      `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`,
-    );
-    return;
-  }
-  token = readStoredToken();
+  if (!params.has("token")) return;
+  params.delete("token");
+  const query = params.toString();
+  window.history.replaceState(
+    {},
+    "",
+    `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`,
+  );
 }
 
-export function getApiToken(): string | null {
-  return token ?? readStoredToken();
-}
-
-/** Append the token to a URL — for EventSource and links, which cannot set headers. */
-export function withToken(url: string): string {
-  const current = getApiToken();
-  if (!current) return url;
-  const separator = url.includes("?") ? "&" : "?";
-  return `${url}${separator}token=${encodeURIComponent(current)}`;
-}
-
-/** `fetch` with the dashboard token attached. */
+/** `fetch` with the dashboard session cookie attached. */
 export function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
-  const current = getApiToken();
-  if (!current) return fetch(input, init);
-  const headers = new Headers(init.headers);
-  headers.set("X-Shoal-Token", current);
-  return fetch(input, { ...init, headers });
+  return fetch(input, { credentials: "same-origin", ...init });
 }

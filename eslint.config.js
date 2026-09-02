@@ -7,10 +7,14 @@ import reactHooks from "eslint-plugin-react-hooks";
  * Lint rules for shoal.
  *
  * Type checking (`tsc --noEmit`) already runs in CI, so this config targets what
- * types cannot see: unused code, accidental `any`, unhandled promises in the
- * agent loops, and silently swallowed errors. `.coderabbit.yaml` asks human and
- * bot reviewers to watch for several of these by hand — the ones a linter can
- * decide are enforced here instead.
+ * types cannot see: unused code, accidental `any`, and silently swallowed
+ * errors. `.coderabbit.yaml` asks human and bot reviewers to watch for several
+ * of these by hand — the ones a linter can decide are enforced here instead.
+ *
+ * Deliberately NOT enabled: `@typescript-eslint/no-floating-promises` and the
+ * rest of the type-aware rule set. They need a typed program per lint run,
+ * which roughly triples lint time; unhandled promises in the agent loops are
+ * still reviewed by hand.
  */
 export default tseslint.config(
   {

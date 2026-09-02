@@ -63,4 +63,10 @@ describe("untrustedContentPrompt", () => {
   it("注入を見つけたら報告するよう促す", () => {
     expect(untrustedContentPrompt()).toContain("post_feedback");
   });
+
+  it("スクリーンショットも未信頼として扱わせる（画像にはフェンスを引けない）", () => {
+    const prompt = untrustedContentPrompt();
+    expect(prompt).toContain("SCREENSHOT");
+    expect(prompt).toMatch(/untrusted content too/);
+  });
 });

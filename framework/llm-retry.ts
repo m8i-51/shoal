@@ -14,10 +14,14 @@ export async function createMessageWithRetry(
   params: CreateMessageParams,
   retries = 5
 ): Promise<Anthropic.Message> {
-  // Refuse to start another call once the run has spent its SHOAL_MAX_USD cap.
-  assertWithinBudget();
-
   for (let i = 0; i < retries; i++) {
+    // Checked before *every* attempt, not once per call: a 429 backoff can last
+    // tens of seconds, and another lane may exhaust the cap while we wait.
+    // Concurrent lanes can still each pass this check before any of them
+    // records its spend, so the cap is overshot by at most the calls already in
+    // flight — bounded by lane concurrency, not unbounded.
+    assertWithinBudget();
+
     try {
       const response = await client.createMessage(params);
       const inputTokens = response.usage?.input_tokens ?? 0;

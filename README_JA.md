@@ -132,14 +132,16 @@ npm run serve      # クローンしたリポジトリから
 - **`127.0.0.1`** に bind する（このマシンからのみ到達可能）。トークンは不要。
 - コンテナや開発サーバーなどで外部公開する場合は `SHOAL_HOST=0.0.0.0` を設定する。このときトークンが**必須**になる。`SHOAL_TOKEN` を設定するか、未設定なら起動時に自動生成され `?token=…` 付き URL が表示される。
 
-```
+```text
 shoal dashboard → http://0.0.0.0:4000
 [auth] bound to 0.0.0.0, which is reachable from other machines — a token is required.
 [auth] generated token: 6f1c…
 [auth] open: http://0.0.0.0:4000/?token=6f1c…
 ```
 
-ポートを開けるより SSH トンネル（`ssh -L 4000:localhost:4000 host`）のほうが安全なことが多い。詳細は [SECURITY.md](SECURITY.md) を参照。
+`?token=…` 付き URL はブートストラップ専用である。サーバーはこれを `HttpOnly` のセッション cookie に交換し、ダッシュボードはアドレスバーから除去する。したがってトークンはページの JavaScript から読める場所には一切保持されない。
+
+リスナー自体は平文 HTTP なので、外部公開する場合は TLS 終端するリバースプロキシを前段に置くこと。そもそもポートを開けるより SSH トンネル（`ssh -L 4000:localhost:4000 host`）のほうが安全なことが多い。詳細は [SECURITY.md](SECURITY.md) を参照。
 
 ---
 

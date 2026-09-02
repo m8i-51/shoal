@@ -18,10 +18,14 @@ entries for `0.1.20` and earlier live in the commit log only.
   machine. Set `SHOAL_HOST` to expose it deliberately.
 - **A token is required whenever the dashboard is not on loopback.** Set
   `SHOAL_TOKEN`, or one is generated and printed at startup. The API accepts it
-  as `Authorization: Bearer`, `X-Shoal-Token`, or `?token=` (for `EventSource`
-  and report links).
+  as `Authorization: Bearer`, `X-Shoal-Token`, or a `?token=` bootstrap URL.
 - **Host and Origin checks on every request**, closing DNS rebinding against a
   loopback-bound dashboard and cross-site calls from another open tab.
+- **The dashboard token never reaches page JavaScript.** The `?token=…` URL is
+  exchanged for an `HttpOnly; SameSite=Strict` session cookie, so an XSS on the
+  dashboard origin cannot read the token and reuse it elsewhere, and no
+  subsequent request carries it in a URL. shoal warns at startup when an exposed
+  listener is plain HTTP.
 - **Content from the target app is now fenced before it reaches an agent.** Page
   text, accessibility trees, console output, network errors, DOM diffs, a11y
   audits, swarm signals, and API tool results are wrapped in an untrusted-content
@@ -33,7 +37,11 @@ entries for `0.1.20` and earlier live in the commit log only.
 
 - `SHOAL_MAX_USD` — a hard spend cap. The estimated cost is tracked as responses
   come back; once the cap is reached no further LLM call starts, remaining lanes
-  are skipped, and findings already collected are still saved and reported.
+  are skipped, and findings already collected are still saved and reported. The
+  cap is re-checked before every attempt, so a retry after a long 429 backoff
+  cannot slip past it. Pricing that is fetched at runtime (OpenRouter) is loaded
+  before the first call; when a model cannot be priced at all, shoal says the cap
+  is unenforceable rather than silently counting nothing.
 - ESLint (`npm run lint`), wired into CI ahead of the type check.
 - `.editorconfig` and a Dependabot config for weekly version updates (security
   updates were already on; version updates were not).

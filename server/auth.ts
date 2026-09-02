@@ -104,15 +104,73 @@ function tokenMatches(expected: string, provided: string): boolean {
   return timingSafeEqual(a, b);
 }
 
+/**
+ * Name of the session cookie. The dashboard bootstraps from a `?token=` URL and
+ * then rides this cookie: HttpOnly, so an XSS on the dashboard origin cannot
+ * read the token out of the page and reuse it elsewhere, and automatic, so
+ * EventSource and the report iframe authenticate without a token in the URL.
+ */
+export const SESSION_COOKIE = "shoal_session";
+
+function parseCookies(header: string | undefined): Record<string, string> {
+  if (!header) return {};
+  const out: Record<string, string> = {};
+  for (const part of header.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq < 0) continue;
+    const name = part.slice(0, eq).trim();
+    if (!name) continue;
+    try {
+      out[name] = decodeURIComponent(part.slice(eq + 1).trim());
+    } catch {
+      // A malformed percent-escape is not a cookie we set; skip it.
+    }
+  }
+  return out;
+}
+
 function presentedToken(req: Request): string | null {
   const header = req.get("authorization");
   if (header?.startsWith("Bearer ")) return header.slice("Bearer ".length).trim();
   const custom = req.get("x-shoal-token");
   if (custom) return custom.trim();
-  // EventSource cannot set headers, and report links open in a new tab.
+  const cookie = parseCookies(req.get("cookie"))[SESSION_COOKIE];
+  if (cookie) return cookie;
+  // The bootstrap URL the operator pastes, before the cookie is established.
   const query = req.query?.token;
   if (typeof query === "string" && query) return query;
   return null;
+}
+
+/** True when this request reached us over TLS (directly or via a terminating proxy). */
+function isSecureRequest(req: Request): boolean {
+  return req.protocol === "https" || req.get("x-forwarded-proto") === "https";
+}
+
+/**
+ * Turn a valid `?token=` into a session cookie, once, on whatever request
+ * carries it — normally the operator opening `/?token=…`.
+ *
+ * This is what keeps the token out of `sessionStorage` and out of every
+ * subsequent URL: the browser holds it in a cookie the page cannot read.
+ */
+export function issueSessionCookie(token: string | null) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    if (!token) {
+      next();
+      return;
+    }
+    const query = req.query?.token;
+    if (typeof query === "string" && query && tokenMatches(token, query)) {
+      res.cookie(SESSION_COOKIE, token, {
+        httpOnly: true,
+        sameSite: "strict",
+        secure: isSecureRequest(req),
+        path: "/",
+      });
+    }
+    next();
+  };
 }
 
 /**

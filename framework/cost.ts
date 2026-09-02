@@ -170,6 +170,23 @@ function lookupPricingSync(
 }
 
 /**
+ * Load any pricing this provider needs before the run starts.
+ *
+ * Only OpenRouter fetches its catalogue at runtime. Until that fetch lands,
+ * `lookupPricingSync` returns undefined for every OpenRouter model — which
+ * means the spend cap silently counts nothing. Warming the cache up front is
+ * what makes `SHOAL_MAX_USD` real for OpenRouter users.
+ *
+ * Returns false when pricing could not be loaded, so the caller can say the cap
+ * is unenforceable rather than pretend it is holding.
+ */
+export async function warmPricingCache(provider: string): Promise<boolean> {
+  if (provider !== "openrouter") return true;
+  const map = await fetchOpenRouterPricing();
+  return map.size > 0;
+}
+
+/**
  * Synchronous cost estimate. Returns null when the model/provider has no known
  * price — callers must treat null as "unknown", not as "free".
  */

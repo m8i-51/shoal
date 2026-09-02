@@ -2,7 +2,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState } from "react";
 import { SwarmVisualizer } from "../components/SwarmVisualizer";
-import { apiFetch, withToken } from "../api";
+import { apiFetch } from "../api";
 
 type Tab = "log" | "swarm" | "report" | "diary";
 
@@ -66,7 +66,8 @@ export function RunDetail() {
     if (!isLive) return;
 
     let closed = false;
-    const es = new EventSource(withToken(`/api/runs/${runId}/events`));
+    // Same-origin: the session cookie authenticates this, no token in the URL.
+    const es = new EventSource(`/api/runs/${runId}/events`);
 
     const onDone = () => {
       setDone(true);
@@ -222,7 +223,7 @@ export function RunDetail() {
 
       {tab === "report" && (
         <iframe
-          src={withToken(`/api/runs/${runId}/report`)}
+          src={`/api/runs/${runId}/report`}
           style={styles.frame}
           title={`Report for ${runId}`}
         />

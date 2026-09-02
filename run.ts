@@ -91,6 +91,7 @@ import {
   budgetStopLine,
   initBudget,
   isBudgetExceeded,
+  prepareBudget,
 } from "./framework/budget";
 import { pickAssignment, dispatchableSoloScenarios, reconcileMultiActorOutcomes, type Assignment } from "./framework/assignment";
 import { partitionClosedIssues, regressionMaxIterations } from "./framework/regression-issue";
@@ -1275,6 +1276,9 @@ async function main() {
   initBudget();
   const budgetLine = budgetStatusLine();
   if (budgetLine) console.log(budgetLine);
+  // 価格表を先に読み込む（OpenRouter は実行時取得なので、これが無いと上限が無言で効かない）
+  const budgetWarning = await prepareBudget(defaultModel, llmProvider);
+  if (budgetWarning) console.warn(budgetWarning);
 
   // 1. product discovery (cache or live)
   const browser = await chromium.launch({ headless: true });

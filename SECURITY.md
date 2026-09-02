@@ -57,9 +57,18 @@ the log and findings endpoints return whatever the swarm saw inside your app.
 - Set **`SHOAL_HOST`** to expose it (e.g. `0.0.0.0` in a container). Doing so
   makes a **token mandatory**: set `SHOAL_TOKEN`, or shoal generates one and
   prints it, with a ready-made `?token=…` URL, at startup.
-- Requests must carry the token as `Authorization: Bearer <token>`,
-  `X-Shoal-Token: <token>`, or `?token=<token>` — the last for `EventSource`
-  and report links, which cannot set headers.
+- The `?token=…` URL is a **bootstrap only**: the server exchanges it for an
+  `HttpOnly; SameSite=Strict` session cookie, and the dashboard strips it from
+  the address bar. The token is never held in `sessionStorage` or any other
+  JavaScript-readable place, so an XSS on the dashboard origin cannot read it
+  out and reuse it elsewhere. `EventSource` and the report iframe ride the same
+  cookie. Scripted clients may still send `Authorization: Bearer <token>` or
+  `X-Shoal-Token: <token>`.
+- **The listener is plain HTTP.** Over a non-loopback binding the token and the
+  session cookie cross the network in cleartext, so put a TLS-terminating
+  reverse proxy in front of it or, better, use an SSH tunnel. shoal warns about
+  this at startup rather than shipping its own TLS listener: certificate
+  handling belongs to the proxy, not to a test tool.
 - Every request is checked for a `Host` we serve and a same-origin `Origin`,
   which blocks DNS rebinding and drive-by calls from another site you have open.
 

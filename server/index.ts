@@ -14,7 +14,7 @@ import { computeExperienceScore } from "../framework/experience-score.js";
 import { loadSiteMap, buildSiteMapDashboardView } from "../framework/site-map.js";
 import { isFinding, type Finding } from "../framework/types.js";
 import { buildSafeProxyUrl } from "./proxy-url.js";
-import { hostGuard, requireToken, resolveBinding, resolveDashboardToken } from "./auth.js";
+import { hostGuard, issueSessionCookie, requireToken, resolveBinding, resolveDashboardToken } from "./auth.js";
 import {
   addAgent,
   archiveAgent,
@@ -60,6 +60,9 @@ app.use(rateLimit({ windowMs: 60_000, limit: 120 }));
 // Host / Origin checks apply to the whole app; the token gates the API, so the
 // static bundle can still load and then authenticate its own calls.
 app.use(hostGuard(binding));
+// A valid ?token= becomes an HttpOnly cookie, so the token leaves the URL and
+// never has to live in JavaScript-readable storage.
+app.use(issueSessionCookie(auth.token));
 app.use("/api", requireToken(auth.token));
 
 // ----------------------------------------------------------------
@@ -563,6 +566,13 @@ if (process.env.NODE_ENV !== "test") {
     const displayHost = binding.isLoopback ? "localhost" : binding.host;
     console.log(`\nshoal dashboard → http://${displayHost}:${binding.port}`);
     for (const notice of auth.notices) console.log(notice);
+    if (auth.token && !binding.isLoopback) {
+      console.warn(
+        "[auth] WARNING: this listener is plain HTTP. The token travels in cleartext unless\n" +
+        "       you put a TLS-terminating reverse proxy in front of it. Do not expose this\n" +
+        "       port directly to an untrusted network — prefer an SSH tunnel.",
+      );
+    }
     console.log("");
     startScheduler();
   });

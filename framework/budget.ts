@@ -14,7 +14,7 @@
  * the cap must never fire on a guess — but it means an unpriced model is
  * effectively uncapped, so `budgetStatusLine()` says so out loud.
  */
-import { estimateCostSync } from "./cost";
+import { estimateCostSync, warmPricingCache } from "./cost";
 
 export class BudgetExceededError extends Error {
   readonly spentUSD: number;
@@ -40,6 +40,12 @@ export interface BudgetState {
   sawUnpricedCall: boolean;
   /** Set when the cap has been hit, so lanes can stop dispatching. */
   exceeded: boolean;
+  /**
+   * False when a cap is configured but the run's model has no price we can
+   * resolve — the cap cannot fire, and the operator has to be told rather than
+   * left believing they are covered.
+   */
+  enforceable: boolean;
 }
 
 /**
@@ -63,6 +69,7 @@ let state: BudgetState = {
   spentUSD: 0,
   sawUnpricedCall: false,
   exceeded: false,
+  enforceable: true,
 };
 
 export function initBudget(env: NodeJS.ProcessEnv = process.env): BudgetState {
@@ -71,8 +78,38 @@ export function initBudget(env: NodeJS.ProcessEnv = process.env): BudgetState {
     spentUSD: 0,
     sawUnpricedCall: false,
     exceeded: false,
+    enforceable: true,
   };
   return state;
+}
+
+/**
+ * Load the pricing the cap needs, and check the run's own model can be priced.
+ *
+ * Call once, after `initBudget`, before any LLM call. OpenRouter fetches its
+ * catalogue here: without it every OpenRouter call prices as unknown, the
+ * running total stays at zero, and the cap never fires. Returns a line to log
+ * when the cap cannot be enforced, or null when all is well.
+ */
+export async function prepareBudget(model: string, provider: string): Promise<string | null> {
+  if (state.limitUSD == null) return null;
+
+  let warmed = true;
+  try {
+    warmed = await warmPricingCache(provider);
+  } catch {
+    warmed = false;
+  }
+
+  const priced = estimateCostSync(model, provider, 1, 1) != null;
+  if (warmed && priced) return null;
+
+  state.enforceable = false;
+  return (
+    `[budget] WARNING: SHOAL_MAX_USD is set to $${state.limitUSD.toFixed(2)}, but no price is ` +
+    `available for model "${model}" on provider "${provider}"${warmed ? "" : " (pricing lookup failed)"} — ` +
+    "the cap cannot be enforced and this run is effectively uncapped."
+  );
 }
 
 export function getBudgetState(): BudgetState {
@@ -114,6 +151,11 @@ export function assertWithinBudget(): void {
   if (state.limitUSD != null && state.exceeded) {
     throw new BudgetExceededError(state.spentUSD, state.limitUSD);
   }
+}
+
+/** True when a cap is configured and can actually fire. */
+export function isBudgetEnforceable(): boolean {
+  return state.limitUSD != null && state.enforceable;
 }
 
 /** Startup line describing the configured cap, or null when there is none. */

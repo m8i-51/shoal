@@ -6,7 +6,9 @@ import {
   budgetStopLine,
   getBudgetState,
   initBudget,
+  isBudgetEnforceable,
   isBudgetExceeded,
+  prepareBudget,
   recordSpend,
   resolveBudgetLimit,
 } from "../budget";
@@ -90,6 +92,63 @@ describe("budget accounting", () => {
     expect(isBudgetExceeded()).toBe(false);
     recordSpend(HAIKU, "anthropic", 100_000, 100_000); // $1.44 > $1
     expect(isBudgetExceeded()).toBe(true);
+  });
+});
+
+describe("prepareBudget", () => {
+  it("上限未設定なら何も警告しない", async () => {
+    initBudget({} as NodeJS.ProcessEnv);
+    expect(await prepareBudget(HAIKU, "anthropic")).toBeNull();
+    expect(isBudgetEnforceable()).toBe(false); // 上限自体が無い
+  });
+
+  it("価格が引けるモデルなら上限は有効", async () => {
+    initBudget({ SHOAL_MAX_USD: "1" } as NodeJS.ProcessEnv);
+    expect(await prepareBudget(HAIKU, "anthropic")).toBeNull();
+    expect(isBudgetEnforceable()).toBe(true);
+  });
+
+  it("価格が引けないモデルでは上限が効かないと明示する", async () => {
+    initBudget({ SHOAL_MAX_USD: "1" } as NodeJS.ProcessEnv);
+    const warning = await prepareBudget("mystery-model-9000", "anthropic");
+    expect(warning).toContain("cannot be enforced");
+    expect(warning).toContain("mystery-model-9000");
+    expect(isBudgetEnforceable()).toBe(false);
+  });
+
+  it("OpenRouter は先に価格表を取りに行き、取れれば上限が効く", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [{ id: "meta/llama-3", pricing: { prompt: "0.000001", completion: "0.000002" } }],
+      }),
+    } as Response);
+
+    initBudget({ SHOAL_MAX_USD: "1" } as NodeJS.ProcessEnv);
+    expect(await prepareBudget("meta/llama-3", "openrouter")).toBeNull();
+    expect(isBudgetEnforceable()).toBe(true);
+    expect(fetchMock).toHaveBeenCalled();
+
+    // 価格表が載ったので、上限が実際に発火する
+    recordSpend("meta/llama-3", "openrouter", 2_000_000, 0); // $2 > $1
+    expect(isBudgetExceeded()).toBe(true);
+    fetchMock.mockRestore();
+  });
+
+  it("OpenRouter の価格表に無いモデルは上限が効かないと明示する", async () => {
+    // 価格表が取れても（あるいは取得に失敗しても）、そのモデルの値段が分からなければ
+    // 上限は発火しない。黙って素通しせず、効かないことを伝える。
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    initBudget({ SHOAL_MAX_USD: "1" } as NodeJS.ProcessEnv);
+    const warning = await prepareBudget("nobody/knows-this-model", "openrouter");
+    expect(warning).toContain("cannot be enforced");
+    expect(warning).toContain("nobody/knows-this-model");
+    expect(isBudgetEnforceable()).toBe(false);
+
+    fetchMock.mockRestore();
+    warn.mockRestore();
   });
 });
 

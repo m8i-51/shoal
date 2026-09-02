@@ -134,15 +134,21 @@ treated as a control surface, not a viewer:
   `SHOAL_HOST=0.0.0.0`. A token then becomes **required**: set `SHOAL_TOKEN`, or
   shoal generates one and prints a ready-made `?token=…` URL at startup.
 
-```
+```text
 shoal dashboard → http://0.0.0.0:4000
 [auth] bound to 0.0.0.0, which is reachable from other machines — a token is required.
 [auth] generated token: 6f1c…
 [auth] open: http://0.0.0.0:4000/?token=6f1c…
 ```
 
-An SSH tunnel (`ssh -L 4000:localhost:4000 host`) is usually a better answer than
-opening the port. See [SECURITY.md](SECURITY.md) for the full picture.
+The `?token=…` URL is a bootstrap: the server exchanges it for an `HttpOnly`
+session cookie and the dashboard drops it from the address bar, so the token is
+never kept anywhere page JavaScript can read.
+
+The listener itself is plain HTTP, so an exposed dashboard needs a
+TLS-terminating reverse proxy in front of it. An SSH tunnel
+(`ssh -L 4000:localhost:4000 host`) is usually a better answer than opening the
+port at all. See [SECURITY.md](SECURITY.md) for the full picture.
 
 ---
 
