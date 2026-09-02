@@ -54,9 +54,12 @@ against a caller-supplied URL, with a caller-supplied LLM endpoint and key, and
 the log and findings endpoints return whatever the swarm saw inside your app.
 
 - It binds to **`127.0.0.1` by default**. Only the machine it runs on can reach it.
-- Set **`SHOAL_HOST`** to expose it (e.g. `0.0.0.0` in a container). Doing so
-  makes a **token mandatory**: set `SHOAL_TOKEN`, or shoal generates one and
-  prints it, with a ready-made `?token=…` URL, at startup.
+- Set **`SHOAL_HOST`** to expose it (e.g. `0.0.0.0` in a container). shoal
+  **refuses to start** on a non-loopback address unless `SHOAL_ALLOW_INSECURE=1`
+  is also set: the listener is plain HTTP, and a warning printed after the fact
+  does not undo an accidental exposure. Exposure also makes a **token
+  mandatory**: set `SHOAL_TOKEN`, or shoal generates one and prints it, with a
+  ready-made `?token=…` URL, at startup.
 - The `?token=…` URL is a **bootstrap only**: the server exchanges it for an
   `HttpOnly; SameSite=Strict` session cookie, and the dashboard strips it from
   the address bar. The token is never held in `sessionStorage` or any other

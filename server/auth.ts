@@ -45,6 +45,36 @@ export function resolveBinding(env: NodeJS.ProcessEnv = process.env): Binding {
   return { host, port, isLoopback: isLoopbackHost(host) };
 }
 
+/**
+ * Refuse to serve on a network interface unless the operator has said so.
+ *
+ * The listener is plain HTTP. On a non-loopback binding the bootstrap URL and
+ * the session cookie therefore cross the network in cleartext, and a warning
+ * printed after the fact does not stop an accidental `SHOAL_HOST=0.0.0.0` in a
+ * container or a copied command line. Making external exposure an explicit
+ * decision costs one environment variable and removes the accident.
+ *
+ * shoal still does not terminate TLS itself — certificates belong to a reverse
+ * proxy. `SHOAL_ALLOW_INSECURE=1` means "there is TLS in front of this, or I
+ * accept cleartext on this network".
+ */
+export function assertBindingAllowed(
+  binding: Binding,
+  env: NodeJS.ProcessEnv = process.env,
+): void {
+  if (binding.isLoopback) return;
+  if ((env.SHOAL_ALLOW_INSECURE ?? "").trim() === "1") return;
+
+  throw new Error(
+    `[auth] refusing to bind to ${binding.host}: the dashboard listener is plain HTTP, so the ` +
+      "token and session cookie would cross the network in cleartext.\n" +
+      "       Put a TLS-terminating reverse proxy in front of it, or use an SSH tunnel\n" +
+      "       (ssh -L 4000:localhost:4000 host) and leave SHOAL_HOST unset.\n" +
+      "       If TLS is already terminated in front of this, or you accept cleartext on this\n" +
+      "       network, set SHOAL_ALLOW_INSECURE=1 to proceed.",
+  );
+}
+
 export interface TokenDecision {
   /** The token requests must present, or null when none is required. */
   token: string | null;

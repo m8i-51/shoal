@@ -14,7 +14,7 @@ import { computeExperienceScore } from "../framework/experience-score.js";
 import { loadSiteMap, buildSiteMapDashboardView } from "../framework/site-map.js";
 import { isFinding, type Finding } from "../framework/types.js";
 import { buildSafeProxyUrl } from "./proxy-url.js";
-import { hostGuard, issueSessionCookie, requireToken, resolveBinding, resolveDashboardToken } from "./auth.js";
+import { assertBindingAllowed, hostGuard, issueSessionCookie, requireToken, resolveBinding, resolveDashboardToken } from "./auth.js";
 import {
   addAgent,
   archiveAgent,
@@ -562,6 +562,14 @@ process.on("unhandledRejection", (reason) => {
 export { app };
 
 if (process.env.NODE_ENV !== "test") {
+  // Exposing the dashboard to a network has to be a deliberate act, not a typo.
+  try {
+    assertBindingAllowed(binding);
+  } catch (e) {
+    console.error(e instanceof Error ? e.message : String(e));
+    process.exit(1);
+  }
+
   app.listen(binding.port, binding.host, () => {
     const displayHost = binding.isLoopback ? "localhost" : binding.host;
     console.log(`\nshoal dashboard → http://${displayHost}:${binding.port}`);

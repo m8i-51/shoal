@@ -21,6 +21,10 @@ entries for `0.1.20` and earlier live in the commit log only.
   as `Authorization: Bearer`, `X-Shoal-Token`, or a `?token=` bootstrap URL.
 - **Host and Origin checks on every request**, closing DNS rebinding against a
   loopback-bound dashboard and cross-site calls from another open tab.
+- **A non-loopback bind is refused unless `SHOAL_ALLOW_INSECURE=1` is set.** The
+  listener is plain HTTP, so `SHOAL_HOST=0.0.0.0` in a container spec used to
+  serve the token in cleartext with only a log line to say so. Exposure is now
+  an explicit decision; shoal still leaves TLS to a reverse proxy.
 - **The dashboard token never reaches page JavaScript.** The `?token=…` URL is
   exchanged for an `HttpOnly; SameSite=Strict` session cookie, so an XSS on the
   dashboard origin cannot read the token and reuse it elsewhere, and no

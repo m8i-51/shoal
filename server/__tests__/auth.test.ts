@@ -3,6 +3,7 @@ import express from "express";
 import request from "supertest";
 import {
   SESSION_COOKIE,
+  assertBindingAllowed,
   hostGuard,
   isLoopbackHost,
   issueSessionCookie,
@@ -44,6 +45,41 @@ describe("resolveBinding", () => {
   it("不正な PORT は 4000 に倒す", () => {
     expect(resolveBinding(env({ PORT: "not-a-port" })).port).toBe(4000);
     expect(resolveBinding(env({ PORT: "70000" })).port).toBe(4000);
+  });
+});
+
+describe("assertBindingAllowed", () => {
+  const loopback: Binding = { host: "127.0.0.1", port: 4000, isLoopback: true };
+  const exposed: Binding = { host: "0.0.0.0", port: 4000, isLoopback: false };
+
+  it("ループバック既定は常に許可（オプトイン不要）", () => {
+    expect(() => assertBindingAllowed(loopback, env({}))).not.toThrow();
+  });
+
+  it("非ループバックはオプトインが無ければ拒否する（平文 HTTP のため）", () => {
+    expect(() => assertBindingAllowed(exposed, env({}))).toThrow(/refusing to bind/);
+  });
+
+  it("拒否メッセージは次にすべきことを示す", () => {
+    let message = "";
+    try {
+      assertBindingAllowed(exposed, env({}));
+    } catch (e) {
+      message = e instanceof Error ? e.message : String(e);
+    }
+    expect(message).toContain("reverse proxy");
+    expect(message).toContain("ssh -L");
+    expect(message).toContain("SHOAL_ALLOW_INSECURE=1");
+  });
+
+  it("SHOAL_ALLOW_INSECURE=1 で明示的に許可できる", () => {
+    expect(() => assertBindingAllowed(exposed, env({ SHOAL_ALLOW_INSECURE: "1" }))).not.toThrow();
+  });
+
+  it("1 以外の値では許可しない（曖昧な真偽値を受け付けない）", () => {
+    for (const value of ["true", "yes", "0", ""]) {
+      expect(() => assertBindingAllowed(exposed, env({ SHOAL_ALLOW_INSECURE: value }))).toThrow();
+    }
   });
 });
 

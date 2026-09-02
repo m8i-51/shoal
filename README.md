@@ -131,8 +131,11 @@ treated as a control surface, not a viewer:
 
 - It binds to **`127.0.0.1`** — only this machine can reach it. No token needed.
 - To expose it (a container, a dev box you reach from elsewhere), set
-  `SHOAL_HOST=0.0.0.0`. A token then becomes **required**: set `SHOAL_TOKEN`, or
-  shoal generates one and prints a ready-made `?token=…` URL at startup.
+  `SHOAL_HOST=0.0.0.0`. shoal **refuses to start** on a non-loopback address
+  unless you also set `SHOAL_ALLOW_INSECURE=1`, because the listener is plain
+  HTTP — exposure has to be a decision, not a typo in a container spec. A token
+  then becomes **required**: set `SHOAL_TOKEN`, or shoal generates one and prints
+  a ready-made `?token=…` URL at startup.
 
 ```text
 shoal dashboard → http://0.0.0.0:4000
