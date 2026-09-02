@@ -2,6 +2,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState } from "react";
 import { SwarmVisualizer } from "../components/SwarmVisualizer";
+import { apiFetch } from "../api";
 
 type Tab = "log" | "swarm" | "report" | "diary";
 
@@ -26,7 +27,7 @@ export function RunDetail() {
     setDiaryLoading(true);
     setDiaryError(false);
     try {
-      const res = await fetch(`/api/runs/${runId}/diary`, { method: "POST" });
+      const res = await apiFetch(`/api/runs/${runId}/diary`, { method: "POST" });
       const data = await res.json();
       if (data.content) setDiaryContent(data.content);
       else setDiaryError(true);
@@ -40,12 +41,12 @@ export function RunDetail() {
   const handleCancelConfirm = async () => {
     setCancelling(true);
     setConfirmingCancel(false);
-    await fetch(`/api/runs/${runId}/cancel`, { method: "POST" }).catch(() => {});
+    await apiFetch(`/api/runs/${runId}/cancel`, { method: "POST" }).catch(() => {});
   };
 
   // 初回: バッファ済みログを取得
   useEffect(() => {
-    fetch(`/api/runs/${runId}/log`)
+    apiFetch(`/api/runs/${runId}/log`)
       .then((r) => r.json())
       .then((data: { lines?: string[]; done?: boolean }) => {
         setLogLines(Array.isArray(data.lines) ? data.lines : []);
@@ -55,7 +56,7 @@ export function RunDetail() {
       .catch(() => {});
 
     // レポートの存在確認
-    fetch(`/api/runs/${runId}/report`, { method: "HEAD" })
+    apiFetch(`/api/runs/${runId}/report`, { method: "HEAD" })
       .then((r) => setHasReport(r.ok))
       .catch(() => {});
   }, [runId]);
@@ -65,13 +66,14 @@ export function RunDetail() {
     if (!isLive) return;
 
     let closed = false;
+    // Same-origin: the session cookie authenticates this, no token in the URL.
     const es = new EventSource(`/api/runs/${runId}/events`);
 
     const onDone = () => {
       setDone(true);
       setIsLive(false);
       es.close();
-      fetch(`/api/runs/${runId}/report`, { method: "HEAD" })
+      apiFetch(`/api/runs/${runId}/report`, { method: "HEAD" })
         .then((r) => setHasReport(r.ok))
         .catch(() => {});
     };
@@ -101,7 +103,7 @@ export function RunDetail() {
       const id = setInterval(async () => {
         if (closed) { clearInterval(id); return; }
         try {
-          const res = await fetch(`/api/runs/${runId}/log`);
+          const res = await apiFetch(`/api/runs/${runId}/log`);
           if (!res.ok) return;
           const data: { lines: string[]; done: boolean } = await res.json();
           if (data.lines.length > lastCount) {
@@ -112,7 +114,7 @@ export function RunDetail() {
             clearInterval(id);
             setDone(true);
             setIsLive(false);
-            fetch(`/api/runs/${runId}/report`, { method: "HEAD" })
+            apiFetch(`/api/runs/${runId}/report`, { method: "HEAD" })
               .then((r) => setHasReport(r.ok))
               .catch(() => {});
           }
@@ -136,7 +138,7 @@ export function RunDetail() {
   // 日誌タブに切り替えた時、既存の日誌ファイルを取得
   useEffect(() => {
     if (tab !== "diary" || diaryContent) return;
-    fetch(`/api/runs/${runId}/diary`)
+    apiFetch(`/api/runs/${runId}/diary`)
       .then((r) => r.ok ? r.json() : null)
       .then((data) => { if (data?.content) setDiaryContent(data.content); })
       .catch(() => {});

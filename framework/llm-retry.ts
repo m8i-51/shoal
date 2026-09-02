@@ -1,6 +1,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { CreateMessageParams } from "./llm-client";
 import { runLog } from "./findings";
+import { assertWithinBudget, recordSpend } from "./budget";
 
 export let rateLimitRetries = 0;
 
@@ -14,12 +15,27 @@ export async function createMessageWithRetry(
   retries = 5
 ): Promise<Anthropic.Message> {
   for (let i = 0; i < retries; i++) {
+    // Checked before *every* attempt, not once per call: a 429 backoff can last
+    // tens of seconds, and another lane may exhaust the cap while we wait.
+    // Concurrent lanes can still each pass this check before any of them
+    // records its spend, so the cap is overshot by at most the calls already in
+    // flight — bounded by lane concurrency, not unbounded.
+    assertWithinBudget();
+
     try {
       const response = await client.createMessage(params);
+      const inputTokens = response.usage?.input_tokens ?? 0;
+      const outputTokens = response.usage?.output_tokens ?? 0;
       if (runLog?.summary?.cost) {
-        runLog.summary.cost.inputTokens += response.usage?.input_tokens ?? 0;
-        runLog.summary.cost.outputTokens += response.usage?.output_tokens ?? 0;
+        runLog.summary.cost.inputTokens += inputTokens;
+        runLog.summary.cost.outputTokens += outputTokens;
       }
+      recordSpend(
+        params.model,
+        process.env.LLM_PROVIDER ?? "anthropic",
+        inputTokens,
+        outputTokens,
+      );
       return response;
     } catch (e: unknown) {
       const err = e as { status?: number; headers?: { get?: (key: string) => string | null } };

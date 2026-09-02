@@ -7,7 +7,7 @@ vi.mock("../findings", () => ({ saveFinding: vi.fn() }));
 import * as fs from "fs";
 import { createMessageWithRetry } from "../llm-retry";
 import { saveFinding } from "../findings";
-import { loadTestAccounts, inspectAccountsFile, resolveAccountSetup, runAccountManager, persistAccountSessions, loginCandidateUrls, resolveLoginUrl, planBrowserAuth, authPrompt, describeAuthPlan, loginLooksEstablished, storageStateHasSession, describeLoginFailure, pickAdminAccount, type TestAccount } from "../account-manager";
+import { loadTestAccounts, inspectAccountsFile, resolveAccountSetup, runAccountManager, loginCandidateUrls, resolveLoginUrl, planBrowserAuth, authPrompt, describeAuthPlan, loginLooksEstablished, storageStateHasSession, describeLoginFailure, pickAdminAccount, type TestAccount } from "../account-manager";
 import type { ProductSpec } from "../product-discovery";
 import type { LLMClient } from "../llm-client";
 import type { Page, BrowserContext } from "playwright";

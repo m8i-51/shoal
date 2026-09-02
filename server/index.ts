@@ -14,6 +14,7 @@ import { computeExperienceScore } from "../framework/experience-score.js";
 import { loadSiteMap, buildSiteMapDashboardView } from "../framework/site-map.js";
 import { isFinding, type Finding } from "../framework/types.js";
 import { buildSafeProxyUrl } from "./proxy-url.js";
+import { assertBindingAllowed, hostGuard, issueSessionCookie, requireToken, resolveBinding, resolveDashboardToken } from "./auth.js";
 import {
   addAgent,
   archiveAgent,
@@ -51,10 +52,18 @@ function safeLogPath(filename: string): string | null {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
-const PORT = parseInt(process.env.PORT ?? "4000", 10);
+const binding = resolveBinding();
+const auth = resolveDashboardToken(binding);
 
 app.use(express.json());
 app.use(rateLimit({ windowMs: 60_000, limit: 120 }));
+// Host / Origin checks apply to the whole app; the token gates the API, so the
+// static bundle can still load and then authenticate its own calls.
+app.use(hostGuard(binding));
+// A valid ?token= becomes an HttpOnly cookie, so the token leaves the URL and
+// never has to live in JavaScript-readable storage.
+app.use(issueSessionCookie(auth.token));
+app.use("/api", requireToken(auth.token));
 
 // ----------------------------------------------------------------
 // API: product spec (goals)
@@ -553,8 +562,26 @@ process.on("unhandledRejection", (reason) => {
 export { app };
 
 if (process.env.NODE_ENV !== "test") {
-  app.listen(PORT, () => {
-    console.log(`\nshoal dashboard → http://localhost:${PORT}\n`);
+  // Exposing the dashboard to a network has to be a deliberate act, not a typo.
+  try {
+    assertBindingAllowed(binding);
+  } catch (e) {
+    console.error(e instanceof Error ? e.message : String(e));
+    process.exit(1);
+  }
+
+  app.listen(binding.port, binding.host, () => {
+    const displayHost = binding.isLoopback ? "localhost" : binding.host;
+    console.log(`\nshoal dashboard → http://${displayHost}:${binding.port}`);
+    for (const notice of auth.notices) console.log(notice);
+    if (auth.token && !binding.isLoopback) {
+      console.warn(
+        "[auth] WARNING: this listener is plain HTTP. The token travels in cleartext unless\n" +
+        "       you put a TLS-terminating reverse proxy in front of it. Do not expose this\n" +
+        "       port directly to an untrusted network — prefer an SSH tunnel.",
+      );
+    }
+    console.log("");
     startScheduler();
   });
 }

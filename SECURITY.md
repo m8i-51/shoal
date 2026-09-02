@@ -40,6 +40,73 @@ point it at. Two settings materially affect its blast radius:
 - **Credentials** (LLM keys, `GITHUB_TOKEN`, tracker tokens, `test-accounts/`)
   are read from your environment / local files. Keep them out of commits — `.env`
   and `test-accounts/` are gitignored. Never paste secrets into issues or logs.
+- **`SHOAL_MAX_USD`** caps estimated LLM spend for a run. Without it, the only
+  limits are the per-agent turn budgets. Set it when a run is triggered by
+  anything other than you typing the command.
 
 When in doubt, run against a staging or disposable environment rather than
 production.
+
+## The dashboard is an authenticated control surface
+
+`shoal serve` is not a read-only viewer. `POST /api/runs/start` launches a run
+against a caller-supplied URL, with a caller-supplied LLM endpoint and key, and
+the log and findings endpoints return whatever the swarm saw inside your app.
+
+- It binds to **`127.0.0.1` by default**. Only the machine it runs on can reach it.
+- Set **`SHOAL_HOST`** to expose it (e.g. `0.0.0.0` in a container). shoal
+  **refuses to start** on a non-loopback address unless `SHOAL_ALLOW_INSECURE=1`
+  is also set: the listener is plain HTTP, and a warning printed after the fact
+  does not undo an accidental exposure. Exposure also makes a **token
+  mandatory**: set `SHOAL_TOKEN`, or shoal generates one and prints it, with a
+  ready-made `?token=…` URL, at startup.
+- The `?token=…` URL is a **bootstrap only**: the server exchanges it for an
+  `HttpOnly; SameSite=Strict` session cookie, and the dashboard strips it from
+  the address bar. The token is never held in `sessionStorage` or any other
+  JavaScript-readable place, so an XSS on the dashboard origin cannot read it
+  out and reuse it elsewhere. `EventSource` and the report iframe ride the same
+  cookie. Scripted clients may still send `Authorization: Bearer <token>` or
+  `X-Shoal-Token: <token>`.
+- **The listener is plain HTTP.** Over a non-loopback binding the token and the
+  session cookie cross the network in cleartext, so put a TLS-terminating
+  reverse proxy in front of it or, better, use an SSH tunnel. shoal warns about
+  this at startup rather than shipping its own TLS listener: certificate
+  handling belongs to the proxy, not to a test tool.
+- Every request is checked for a `Host` we serve and a same-origin `Origin`,
+  which blocks DNS rebinding and drive-by calls from another site you have open.
+
+Exposing the dashboard to a shared network — even with a token — means anyone
+with that token can point a swarm at any URL your machine can reach. Prefer an
+SSH tunnel to opening a port.
+
+## Prompt injection from the target app
+
+Agents read your app and act on what they read. Page text, accessibility trees,
+console messages, network errors, DOM diffs, and API responses all flow into an
+LLM that can click, fill forms, and file issues with your tracker token. So any
+text your app can display — a product description, a user's comment, an error
+message, a filename — reaches the model, and text that reaches a model can try
+to instruct it.
+
+What shoal does about it:
+
+- Everything derived from the target app is wrapped in an explicit
+  untrusted-content block before it reaches the agent, and every agent prompt
+  states that content inside that block is data, never instructions.
+- Attempts by page content to close or forge the block are neutralised, so
+  injected text cannot escape into the instruction context.
+- Agents are told to report an injection attempt as a finding rather than act
+  on it.
+
+What that does **not** do: none of this is a guarantee. Fencing raises the bar;
+it does not make an LLM immune to persuasion. Treat these as the operating rules:
+
+- **Do not point an authenticated swarm at an app whose content you do not
+  trust.** An app where third parties can post content (public UGC, a shared
+  inbox, a customer-facing form other people submit to) is exactly the case
+  where injected instructions arrive from someone who is not you.
+- **Give the run the least authority that still works.** `SHOAL_MODE=read-only`
+  for anything production-adjacent; a tracker token scoped to one repo or
+  project; test accounts with no access to real customer data.
+- **Read what gets filed.** Issues are written by an LLM from content it read in
+  your app. Review them as untrusted output, not as verified reports.

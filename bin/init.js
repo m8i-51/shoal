@@ -102,6 +102,19 @@ export async function runInit(cwd) {
     defaultValue: "http://localhost:3000",
   }));
 
+  // ── Spend cap (optional) ──────────────────────────────────────────
+  // Turn budgets bound how long each agent explores; this bounds the run.
+  const maxUsd = guard(await text({
+    message: "Spend cap per run in USD (leave blank for no cap)",
+    placeholder: "e.g. 5",
+    validate: (v) => {
+      if (!v?.trim()) return undefined;
+      const parsed = Number(v.trim());
+      return Number.isFinite(parsed) && parsed > 0 ? undefined : "Enter a positive number, or leave blank";
+    },
+  }));
+  if (maxUsd.trim()) env.SHOAL_MAX_USD = maxUsd.trim();
+
   // ── Issue trackers (optional) ─────────────────────────────────────
   const trackerEnv = await promptTrackers();
   Object.assign(env, trackerEnv);

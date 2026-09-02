@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { apiFetch } from "../api";
 
 type PathStatus = "unvisited" | "reached" | "explored";
 type PathSource = "sitemap" | "discovered";
@@ -71,7 +72,7 @@ export function SiteMapPanel() {
   const [tab, setTab] = useState<Tab>("unvisited");
 
   const fetchSiteMap = useCallback(() => {
-    fetch("/api/site-map")
+    apiFetch("/api/site-map")
       .then((r) => {
         if (r.status === 404) {
           setEmpty(true);

@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
+import { apiFetch } from "../api";
 
 interface ScheduleConfig {
   enabled: boolean;
@@ -15,7 +16,7 @@ export function SchedulePanel() {
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    fetch("/api/schedule")
+    apiFetch("/api/schedule")
       .then((r) => r.json())
       .then((data: ScheduleConfig) => setConfig(data))
       .catch(() => {});
@@ -23,10 +24,13 @@ export function SchedulePanel() {
 
   const patch = async (partial: Partial<ScheduleConfig>) => {
     if (!config) return;
-    const updated = { ...config, ...partial };
-    setConfig(updated);
+    // Update optimistically so the control responds, but keep the previous
+    // value: on any failure the panel must show what the server actually has,
+    // not a schedule the operator only thinks they saved.
+    const previous = config;
+    setConfig({ ...config, ...partial });
     try {
-      const res = await fetch("/api/schedule", {
+      const res = await apiFetch("/api/schedule", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(partial),
@@ -36,8 +40,12 @@ export function SchedulePanel() {
         setConfig(data);
         setSaved(true);
         setTimeout(() => setSaved(false), 2000);
+      } else {
+        setConfig(previous);
       }
-    } catch {}
+    } catch {
+      setConfig(previous);
+    }
   };
 
   if (!config) return null;

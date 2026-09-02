@@ -36,25 +36,14 @@ import {
 } from "./framework/site-map";
 import { computeExperienceScore, formatExperienceLine } from "./framework/experience-score";
 import { updateAdoption } from "./framework/adoption";
-import { getShoalMode, filterAppTools, applyBrowserGuardrails, guardrailPrompt, guardSafeBrowserClick } from "./framework/guardrails";
-import { buildContextOptions, sanitizeEnvironment, describeEnvironment, applyNetworkThrottle, SUGGESTED_DEVICES, type EnvironmentProfile } from "./framework/environment";
+import { getShoalMode, filterAppTools, applyBrowserGuardrails, guardrailPrompt } from "./framework/guardrails";
+import { buildContextOptions, sanitizeEnvironment, describeEnvironment, applyNetworkThrottle, type EnvironmentProfile } from "./framework/environment";
 import { agentSessionPath, hasAgentSession, saveAgentSession, sessionContinuityPrompt } from "./framework/session-store";
-import { runA11yAudit, formatAuditForAgent } from "./framework/a11y-audit";
-import { loadPageHashes, updatePageHashes, hashContent } from "./framework/page-cache";
-import { saveFindingTraceChunk, traceAgentZipPath, traceFindingZipPath } from "./framework/trace-chunk";
+import { loadPageHashes, updatePageHashes } from "./framework/page-cache";
+import { traceAgentZipPath } from "./framework/trace-chunk";
 import { loadPersonaPack, formatPackForPrompt, type PersonaPack } from "./framework/persona-pack";
 import { buildTrackers, formatIssuesCreatedLine } from "./framework/trackers/index";
-import {
-  setupObservation,
-  getRecentConsoleLogs,
-  getRecentNetworkErrors,
-  buildObservationWarning,
-  readPageText,
-  readAccessibilityTree,
-  saveSnapshotBeforeAction,
-  getDiffFromSnapshot,
-  type ObservationState,
-} from "./framework/observation";
+import { setupObservation, buildObservationWarning } from "./framework/observation";
 import { discoverProduct, loadCachedSpec, resolveLoginPath, type ProductSpec } from "./framework/product-discovery";
 import { designOrg } from "./framework/org-designer";
 import { designScenarios, findMultiActorScenario, pairAgentsToActors, type Scenario, type ScenarioOutcome } from "./framework/scenario-designer";
@@ -72,9 +61,38 @@ import {
   assignThresholdCandidates,
   type ThresholdCandidate,
 } from "./framework/threshold";
-import { clickDescribedElement, clickToolHasTarget } from "./framework/click-target";
-import { selectDescribedOption } from "./framework/select-target";
-import { formatToolCallLog, redactToolInput, redactFillResultText, isPasswordLabel, REDACTED_SECRET } from "./framework/redact";
+import { formatToolCallLog, redactToolInput } from "./framework/redact";
+import {
+  executeBrowserTool,
+  VALID_CATEGORIES,
+  type BrowserAgentLog,
+  type BrowserToolContext,
+} from "./framework/browser-tools";
+import { untrustedContentPrompt, wrapUntrusted } from "./framework/untrusted";
+import {
+  MARK_VERIFIED_TOOL,
+  PERSONA_DESIGNER_TOOLS,
+  REPORT_REGRESSION_TOOL,
+  browserTools,
+  explorerTools,
+  regressionTools,
+} from "./framework/agent-tools";
+import {
+  RUN_TIMINGS,
+  browserIterations,
+  explorerConcurrency,
+  resolveViewport,
+  thresholdIterations,
+  DEFAULT_PERSONA_DESIGNER_ITERATIONS,
+} from "./framework/run-config";
+import {
+  BudgetExceededError,
+  budgetStatusLine,
+  budgetStopLine,
+  initBudget,
+  isBudgetExceeded,
+  prepareBudget,
+} from "./framework/budget";
 import { pickAssignment, dispatchableSoloScenarios, reconcileMultiActorOutcomes, type Assignment } from "./framework/assignment";
 import { partitionClosedIssues, regressionMaxIterations } from "./framework/regression-issue";
 
@@ -105,6 +123,7 @@ for (const name of ["shoal.config.ts", "shoal.config.js", "shoal.config.mjs"]) {
 }
 
 const SHOAL_MODE = getShoalMode();
+const VIEWPORT = resolveViewport();
 if (SHOAL_MODE !== "full") console.log(`[guardrails] mode: ${SHOAL_MODE}`);
 const APP_TOOLS = filterAppTools(targetConfig.appTools, SHOAL_MODE);
 
@@ -175,100 +194,42 @@ async function takeScreenshot(page: Page, label: string): Promise<{ base64: stri
   return { base64: buffer.toString("base64"), filePath };
 }
 
+/**
+ * Run-wide collaborators every browser tool call needs. The per-agent fields
+ * (page, agentLog, observation, …) are spread in at the call site.
+ */
+function browserToolBaseContext(): Pick<
+  BrowserToolContext,
+  "baseUrl" | "mode" | "traceEnabled" | "runId" | "timings" | "takeScreenshot" | "executeAppTool" | "trackers"
+> {
+  return {
+    baseUrl: BASE_URL,
+    mode: SHOAL_MODE,
+    traceEnabled: TRACE_ENABLED,
+    runId: runLog.runId,
+    timings: RUN_TIMINGS,
+    takeScreenshot,
+    executeAppTool: (toolName, input, agentId) => targetConfig.execute(toolName, input, agentId),
+    trackers,
+  };
+}
+
 // ================================================================
 // API agent tools
 // ================================================================
 
-const VALID_CATEGORIES = ["ux", "feature-request", "bug", "goal-gap"];
 
-const POST_FEEDBACK_TOOL: Tool = {
-  name: "post_feedback",
-  description: "Record a finding about the app — usability issues, feature requests, or bug-like behavior. / アプリへのフィードバックを記録する",
-  input_schema: {
-    type: "object",
-    properties: {
-      title: { type: "string" },
-      body: {
-        type: "string",
-        description: `Describe the finding. Tone varies by category:
-- bug: technical — state what happened, what was expected, and steps to reproduce.
-- ux: experiential — write from the user's perspective ("I tried to...", "It was hard to find...", "I got confused when...").
-- feature-request: aspirational — describe what you wished you could do ("It would have been helpful if...", "I wanted to...").
-- goal-gap: goal-oriented — explain which goal was blocked and why ("I was trying to achieve X, but couldn't because...").`,
-      },
-      category: { type: "string", enum: ["ux", "feature-request", "bug", "goal-gap"] },
-    },
-    required: ["title", "body", "category"],
-  },
-};
 
-const REPORT_REGRESSION_TOOL: Tool = {
-  name: "report_regression",
-  description: "Report a regression when a previously fixed bug has reappeared as an issue ticket. / 修正済みバグの再発を issue チケットとして報告する",
-  input_schema: {
-    type: "object",
-    properties: {
-      original_issue_number: {
-        type: "string",
-        description: "The issue identifier exactly as shown in the issue list (e.g. 'PROJ-55' for Backlog, '42' for GitHub)",
-      },
-      original_issue_title: { type: "string" },
-      title: { type: "string" },
-      body: { type: "string" },
-    },
-    required: ["original_issue_number", "original_issue_title", "title", "body"],
-  },
-};
-
-const MARK_VERIFIED_TOOL: Tool = {
-  name: "mark_verified",
-  description: "Record that a closed Issue has been verified as still fixed. / 修正済みIssueが問題なく修正されていることを確認した場合に呼ぶ",
-  input_schema: {
-    type: "object",
-    properties: {
-      original_issue_number: {
-        type: "string",
-        description: "The issue identifier exactly as shown in the issue list (e.g. 'PROJ-55' for Backlog, '42' for GitHub)",
-      },
-      original_issue_title: { type: "string" },
-      note: { type: "string" },
-    },
-    required: ["original_issue_number", "original_issue_title", "note"],
-  },
-};
-
-const SWARM_SIGNALS_TOOL: Tool = {
-  name: "check_swarm_signals",
-  description: "See what OTHER agents exploring this app right now have reported. If a signal is relevant to your persona or the area you are in, try to reproduce it from your own perspective — a finding confirmed by multiple different personas becomes a much stronger issue. If you reproduce one, report it with post_feedback in your own words (your experience, not theirs). / 同じ run の他のエージェントが報告した発見を確認する。自分のペルソナで再現できた発見は post_feedback で自分の言葉で報告する",
-  input_schema: { type: "object", properties: {}, required: [] },
-};
-
-const POST_OUTCOME_TOOL: Tool = {
-  name: "post_outcome",
-  description: "Record whether you achieved your scenario goal. Call this at the end of your run if you were given a [Your Task for This Run] section. / [Your Task for This Run] セクションがある場合のみ、run の最後にゴール達成可否を記録する",
-  input_schema: {
-    type: "object",
-    properties: {
-      achieved: {
-        type: "boolean",
-        description: "true if you successfully completed the goal, false if you could not",
-      },
-      reason: {
-        type: "string",
-        description: "Brief explanation (1-2 sentences) of why the goal was or was not achieved",
-      },
-    },
-    required: ["achieved", "reason"],
-  },
-};
-
-const EXPLORER_TOOLS: Tool[] = [...APP_TOOLS, POST_FEEDBACK_TOOL, POST_OUTCOME_TOOL, SWARM_SIGNALS_TOOL];
+const EXPLORER_TOOLS: Tool[] = explorerTools(APP_TOOLS);
 
 function goalsSection(spec: ProductSpec): string {
   if (!spec.appGoals?.length) return "";
   return `\n[App Goals]\nThese are user/business success conditions (outcomes), not a UI widget checklist. Use category "goal-gap" only when an outcome is blocked. Do not treat missing or mismatched controls (search, filters, sort, badges, etc.) as goal-gap — file those as bug / ux / feature-request instead.\n${spec.appGoals.map((g) => `- ${g}`).join("\n")}\n`;
 }
-const REGRESSION_TOOLS: Tool[] = [...APP_TOOLS, REPORT_REGRESSION_TOOL, MARK_VERIFIED_TOOL];
+const REGRESSION_TOOLS: Tool[] = regressionTools(APP_TOOLS);
+
+// ブラウザレーンのツール。API レーンが有効なときだけ [API check] ツールを含める
+const BROWSER_TOOLS = browserTools(APP_TOOLS, MAX_EXPLORERS > 0);
 
 function makeExecutor(
   agentLog: AgentLog,
@@ -279,14 +240,21 @@ function makeExecutor(
   return async (toolName: string, input: Record<string, unknown>): Promise<string> => {
     const startedAt = Date.now();
     let result: unknown;
+    // Set when the result quotes the target app, so it goes back fenced.
+    // The trailing hint stays outside the fence — it is our instruction, not data.
+    let untrusted: { source: string; hint?: string } | null = null;
     try {
       switch (toolName) {
         case "check_swarm_signals": {
           const currentPath = agentLog.visitedPaths.at(-1);
           const signals = getSwarmSignals(agentLog.agentId, 8, currentPath);
-          result = signals.length > 0
-            ? { signals, currentPath: currentPath ?? null, hint: "These reports are from your current area when possible — try to reproduce them from your own perspective." }
-            : { signals: [], currentPath: currentPath ?? null, hint: "No reports from other agents in your area yet — keep exploring." };
+          result = { signals, currentPath: currentPath ?? null };
+          untrusted = {
+            source: "swarm signals",
+            hint: signals.length > 0
+              ? "These reports are from your current area when possible — try to reproduce them from your own perspective."
+              : "No reports from other agents in your area yet — keep exploring.",
+          };
           break;
         }
         case "post_outcome": {
@@ -377,6 +345,7 @@ function makeExecutor(
         }
         default:
           result = await targetConfig.execute(toolName, input, agentLog.agentId);
+          untrusted = { source: `api:${toolName}` };
       }
     } catch (e) {
       result = { error: String(e) };
@@ -389,7 +358,10 @@ function makeExecutor(
       durationMs: Date.now() - startedAt,
     });
     runLog.summary.totalActions++;
-    return JSON.stringify(result);
+    const serialized = JSON.stringify(result);
+    if (!untrusted) return serialized;
+    const fenced = wrapUntrusted(untrusted.source, serialized);
+    return untrusted.hint ? `${fenced}\n${untrusted.hint}` : fenced;
   };
 }
 
@@ -454,7 +426,9 @@ ${productSpec.uiFeatures ? `\n[UI-Only Features]\nThese features exist in the UI
     : assignment.lens
     ? `\n[Focus Area for This Run]\n${assignment.lens}\nKeep this perspective in mind and prioritize reporting related issues.\n`
     : ""}${focusPrompt()}${formatAgentMemories(agent)}${guardrailPrompt(SHOAL_MODE)}
-Take 3–5 actions, then finish.`;
+Take 3–5 actions, then finish.
+
+${untrustedContentPrompt()}`;
 
   await runAgentLoop(agentLog, systemPrompt, EXPLORER_TOOLS, client, defaultModel, makeExecutor(agentLog, scenarioOutcomes, assignment.scenario), llmProvider);
   console.log(`[explorer] ${agent.name} done`);
@@ -504,7 +478,9 @@ ${issueList}
 
 [Reference: Implemented Features]
 ${productSpec.features}
-${productSpec.uiFeatures ? `\n[UI-Only Features]\nThese features exist in the UI but may not be reflected in API responses.\n${productSpec.uiFeatures}\n` : ""}${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${goalsSection(productSpec)}${guardrailPrompt(SHOAL_MODE)}`;
+${productSpec.uiFeatures ? `\n[UI-Only Features]\nThese features exist in the UI but may not be reflected in API responses.\n${productSpec.uiFeatures}\n` : ""}${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${goalsSection(productSpec)}${guardrailPrompt(SHOAL_MODE)}
+
+${untrustedContentPrompt()}`;
 
   await runAgentLoop(
     agentLog,
@@ -525,88 +501,6 @@ ${productSpec.uiFeatures ? `\n[UI-Only Features]\nThese features exist in the UI
 // Persona designer agent
 // ================================================================
 
-const PERSONA_DESIGNER_TOOLS: Anthropic.Tool[] = [
-  {
-    name: "get_agents",
-    description: "Get the current list of registered agents. / 現在登録されているエージェント一覧を取得する",
-    input_schema: { type: "object", properties: {}, required: [] },
-  },
-  {
-    name: "get_coverage",
-    description: "Get a weighted summary of what has been explored across past runs. Use this to identify underrepresented lenses and perspectives before deciding whom to hire. / 過去のrunで何がどれだけ探索されたかの重み付きサマリーを取得する。採用方針の決定前に確認すること",
-    input_schema: { type: "object", properties: {}, required: [] },
-  },
-  {
-    name: "get_path_coverage",
-    description: "Get site-map coverage vs known paths (unvisited / reached / explored rates), plus paths touched in the most recent run. Use this to recruit agents who will naturally fill coverage gaps. / 既知パスに対するサイトマップ網羅（未訪問・reached・explored・％）と直近runで触ったパスを取得する。網羅の穴を埋めるペルソナ採用に使う",
-    input_schema: { type: "object", properties: {}, required: [] },
-  },
-  {
-    name: "get_finding_hotspots",
-    description: "Get URL areas where findings have clustered across all past runs. Use this to understand which parts of the app have been thoroughly investigated vs. overlooked — recruit agents to explore under-investigated areas, or specialists to deep-dive problem hotspots. / 過去のrun全体でfindingsが集中しているURLエリアを取得する。十分に調査済みのエリアと見落とされているエリアを把握し、未探索エリアへの新エージェント採用や問題多発エリアへのスペシャリスト派遣に活かす",
-    input_schema: { type: "object", properties: {}, required: [] },
-  },
-  {
-    name: "get_persona_templates",
-    description: "Get the persona template pack defined for this project. Prefer these archetypes when adding agents — adapt names/details to fit the app context but keep the role intact. / このプロジェクト用に定義されたペルソナテンプレート一覧を取得する。エージェントを追加する際はまずこのテンプレートから選ぶこと",
-    input_schema: { type: "object", properties: {}, required: [] },
-  },
-  {
-    name: "get_open_issues",
-    description: "Get the titles and labels of currently open issue tickets (known problems). Use this to understand what is already known and recruit agents who are likely to explore DIFFERENT areas. / 現在オープンな issue チケットのタイトルとラベルを取得する。既知の問題を把握し、未探索領域を掘れるペルソナを採用するために使う",
-    input_schema: { type: "object", properties: {}, required: [] },
-  },
-  {
-    name: "get_scenarios",
-    description: "Get the user test scenarios generated for this run. About 70% of agents will be assigned one of these scenarios — recruit personas whose background and role naturally fit the scenario contexts. / 今回のrunで生成されたユーザーシナリオ一覧を取得する。エージェントの約70%にシナリオが割り当てられるため、シナリオの文脈に自然にフィットするペルソナを採用すること",
-    input_schema: { type: "object", properties: {}, required: [] },
-  },
-  {
-    name: "add_agent",
-    description: "Register a new agent (user persona). / 新しいエージェントを登録する",
-    input_schema: {
-      type: "object",
-      properties: {
-        name: { type: "string" },
-        role: { type: "string", description: "Narrative role (may be a description of the person)" },
-        accountRole: {
-          type: "string",
-          description: "Short test-account role token such as user, instructor, or admin — not a narrative description",
-        },
-        persona: { type: "string" },
-        environment: {
-          type: "object",
-          description: `Optional browsing environment — make it match the persona's life (e.g. a commuting sales rep browses on a phone over a slow connection). Give 1-2 recruits a non-desktop environment. Omit entirely for a standard desktop user.
-- device: Playwright device name, e.g. ${SUGGESTED_DEVICES.map((d) => `"${d}"`).join(", ")} (omit for desktop)
-- locale: BCP 47 locale like "ja-JP"
-- colorScheme: "dark" or "light"
-- reducedMotion: true for users who prefer reduced motion
-- networkThrottle: "slow-3g" or "fast-3g" for slow connections`,
-          properties: {
-            device: { type: "string" },
-            locale: { type: "string" },
-            colorScheme: { type: "string", enum: ["light", "dark"] },
-            reducedMotion: { type: "boolean" },
-            networkThrottle: { type: "string", enum: ["slow-3g", "fast-3g"] },
-          },
-        },
-      },
-      required: ["name", "role", "persona"],
-    },
-  },
-  {
-    name: "retire_agent",
-    description: "Retire an agent (e.g. due to long tenure). / エージェントを退職させる",
-    input_schema: {
-      type: "object",
-      properties: {
-        agentId: { type: "string" },
-        reason: { type: "string" },
-      },
-      required: ["agentId", "reason"],
-    },
-  },
-];
 
 async function runPersonaDesigner(
   productSpec: ProductSpec,
@@ -774,7 +668,7 @@ ${pathCoverageStep}
       system: systemPrompt,
       userPrompt: "Design and manage user personas for this run.",
       tools: sessionTools,
-      maxIterations: 8,
+      maxIterations: DEFAULT_PERSONA_DESIGNER_ITERATIONS,
       maxTokens: 1024,
     });
     console.log("[persona-designer] done");
@@ -786,28 +680,6 @@ ${pathCoverageStep}
 // ================================================================
 // Browser agent tools
 // ================================================================
-
-interface BrowserAction {
-  timestamp: string;
-  tool: string;
-  input: Record<string, unknown>;
-  screenshotPath: string | null;
-  durationMs: number;
-}
-
-interface BrowserAgentLog {
-  agentName: string;
-  persona: string;
-  startedAt: string;
-  completedAt: string | null;
-  status: "completed" | "error" | "iteration_limit";
-  iterations: number;
-  actions: BrowserAction[];
-  visitedPaths: string[];
-  feedbacksSaved: { title: string; category: string; findingId: string }[];
-  regressionChecks: RegressionCheck[];
-  error: string | null;
-}
 
 function browserLogToAgentLog(
   agent: Agent,
@@ -866,379 +738,7 @@ function recordRegressionAgentRun(agent: Agent, browserLog: BrowserAgentLog): vo
   applyAgentSummary(agentLog);
 }
 
-const TOOLS_THAT_SEND_SCREENSHOT = new Set(["navigate", "post_feedback", "view_screen"]);
 
-const BROWSER_TOOLS: Anthropic.Tool[] = [
-  ...(MAX_EXPLORERS > 0 ? APP_TOOLS.map((t) => ({ ...t, description: `[API check] ${t.description}` })) : []),
-  SWARM_SIGNALS_TOOL,
-  {
-    name: "run_a11y_audit",
-    description: "Run an automated WCAG accessibility audit (axe-core) on the CURRENT page. Returns measured violations (contrast, missing alt, labels, ARIA…) with impact levels and affected elements. Use it when your persona or lens involves accessibility, or when a page feels hard to read or navigate — then cite the specific rules and elements as evidence in post_feedback. / 現在のページで axe-core による WCAG 監査を実行し、実測の違反一覧を得る",
-    input_schema: { type: "object", properties: {}, required: [] },
-  },
-  {
-    name: "view_screen",
-    description: "Capture the current screen. / 現在の画面を確認する",
-    input_schema: { type: "object", properties: {}, required: [] },
-  },
-  {
-    name: "navigate",
-    description: "Navigate to a path. / 指定したパスに移動する",
-    input_schema: {
-      type: "object",
-      properties: { path: { type: "string" } },
-      required: ["path"],
-    },
-  },
-  {
-    name: "click",
-    description: "Click a button, link, or tab on screen. Prefer the accessible name and/or ref from read_accessibility_tree (e.g. e12). description is optional when ref is set. / 画面上の要素をクリックする。accessible name またはアクセシビリティツリーの ref で対象を指定する",
-    input_schema: {
-      type: "object",
-      properties: {
-        description: { type: "string", description: "Accessible name or a description of the control (partial name match is OK). Optional when ref is set." },
-        ref: { type: "string", description: "Optional accessibility-tree ref from read_accessibility_tree, e.g. e12" },
-      },
-      required: [],
-    },
-  },
-  {
-    name: "fill",
-    description: "Type text into an input field. / 入力フィールドにテキストを入力する",
-    input_schema: {
-      type: "object",
-      properties: {
-        label: { type: "string" },
-        value: { type: "string" },
-      },
-      required: ["label", "value"],
-    },
-  },
-  {
-    name: "select",
-    description: "Select an option from a dropdown. / ドロップダウンで選択する",
-    input_schema: {
-      type: "object",
-      properties: {
-        label: { type: "string" },
-        value: { type: "string" },
-      },
-      required: ["label", "value"],
-    },
-  },
-  {
-    name: "diff_since_last_action",
-    description: "Check what changed on the page since the last action. / 直前のアクションでページに何が変わったかを確認する",
-    input_schema: { type: "object", properties: {}, required: [] },
-  },
-  {
-    name: "read_page_text",
-    description: "Get all visible text on the page. / ページ上の表示テキストをすべて取得する",
-    input_schema: { type: "object", properties: {}, required: [] },
-  },
-  {
-    name: "read_accessibility_tree",
-    description: "Get the page's accessibility tree (includes [ref=eN] ids you can pass to click). / ページのアクセシビリティツリーを取得する。要素の ref を click に渡せる",
-    input_schema: { type: "object", properties: {}, required: [] },
-  },
-  {
-    name: "read_console_logs",
-    description: "Check browser console logs (errors and warnings). / ブラウザのコンソールログを確認する",
-    input_schema: { type: "object", properties: {}, required: [] },
-  },
-  {
-    name: "read_network_errors",
-    description: "Check failed API requests. / 失敗したAPIリクエストの一覧を確認する",
-    input_schema: { type: "object", properties: {}, required: [] },
-  },
-  {
-    name: "post_feedback",
-    description: "Record an issue or improvement as feedback. Becomes an issue ticket after triage. / 問題・改善点をフィードバックとして記録する（triage 後に issue チケット化される）",
-    input_schema: {
-      type: "object",
-      properties: {
-        title: { type: "string" },
-        body: { type: "string" },
-        category: { type: "string", enum: ["ux", "feature-request", "bug", "goal-gap"] },
-      },
-      required: ["title", "body", "category"],
-    },
-  },
-  {
-    name: "post_outcome",
-    description: "Record whether you achieved your scenario goal. Call this at the end of your run if you were given a [Your Task for This Run] section. / [Your Task for This Run] セクションがある場合のみ、run の最後にゴール達成可否を記録する",
-    input_schema: {
-      type: "object",
-      properties: {
-        achieved: { type: "boolean", description: "true if you successfully completed the goal, false if you could not" },
-        reason: { type: "string", description: "Brief explanation (1-2 sentences)" },
-      },
-      required: ["achieved", "reason"],
-    },
-  },
-];
-
-async function executeBrowserTool(
-  toolName: string,
-  input: Record<string, unknown>,
-  page: Page,
-  agentLog: BrowserAgentLog,
-  observation: ObservationState,
-  agentId: string,
-  scenarioOutcomes: ScenarioOutcome[],
-  cachedHashes: Record<string, string>,
-  pageHashUpdates: Record<string, string>,
-  scenario?: Scenario,
-  closedIssues: ClosedIssue[] = [],
-): Promise<{ text: string; screenshot: { base64: string; filePath: string } | null; sendToClaude: boolean }> {
-  const startedAt = Date.now();
-  let resultText = "";
-  let screenshot: { base64: string; filePath: string } | null = null;
-  let isError = false;
-
-  try {
-    switch (toolName) {
-      case "view_screen": {
-        screenshot = await takeScreenshot(page, "view_screen");
-        resultText = "Current screen.";
-        break;
-      }
-      case "navigate": {
-        const { path: navPath } = input as { path: string };
-        await saveSnapshotBeforeAction(page, observation);
-        await page.goto(`${BASE_URL}${navPath}`, { waitUntil: "networkidle" });
-        await page.waitForTimeout(3000);
-        screenshot = await takeScreenshot(page, `navigate_${navPath.replace(/\//g, "_")}`);
-        agentLog.visitedPaths.push(navPath);
-        // ページコンテンツハッシュで差分検出
-        try {
-          const content = await page.innerText("body", { timeout: 2000 });
-          const h = hashContent(content);
-          const unchanged = cachedHashes[navPath] && cachedHashes[navPath] === h;
-          pageHashUpdates[navPath] = h;
-          resultText = unchanged
-            ? `Navigated to ${navPath} (page content unchanged since last run — consider exploring a different area)`
-            : `Navigated to ${navPath}`;
-        } catch {
-          resultText = `Navigated to ${navPath}`;
-        }
-        break;
-      }
-      case "click": {
-        const { description, ref } = input as { description?: string; ref?: string };
-        if (!clickToolHasTarget({ description, ref })) {
-          resultText = "click: missing description or ref";
-          break;
-        }
-        const guard = await guardSafeBrowserClick(page, description ?? "", SHOAL_MODE, ref);
-        if (!guard.allowed) {
-          console.log(`  [guardrails] blocked click: ${description ?? ref}`);
-          screenshot = await takeScreenshot(page, `blocked_click_${String(description ?? ref).slice(0, 20)}`);
-          resultText = guard.message;
-          break;
-        }
-        await saveSnapshotBeforeAction(page, observation);
-        await clickDescribedElement(page, { description, ref });
-        await page.waitForTimeout(500);
-        screenshot = await takeScreenshot(page, `click_${String(description ?? ref).slice(0, 20)}`);
-        resultText = `Clicked: ${description ?? ref}`;
-        break;
-      }
-      case "fill": {
-        const { label, value } = input as { label: string; value: string };
-        await saveSnapshotBeforeAction(page, observation);
-        const byContainer = page
-          .locator("div")
-          .filter({ has: page.locator("label", { hasText: label }) })
-          .locator("input, textarea")
-          .first();
-        const byPlaceholder = page.getByPlaceholder(label, { exact: false });
-        const byAriaLabel = page.getByLabel(label, { exact: false });
-        let filled = false;
-        let passwordField = isPasswordLabel(label);
-        for (const el of [byContainer, byPlaceholder, byAriaLabel]) {
-          try {
-            await el.fill(value, { timeout: 5000 });
-            filled = true;
-            const typeAttr = await el.getAttribute("type").catch(() => null);
-            if (typeAttr === "password") passwordField = true;
-            break;
-          } catch { /* try next */ }
-        }
-        if (!filled) throw new Error(`No input field matching: ${label}`);
-        await page.waitForTimeout(300);
-        screenshot = await takeScreenshot(page, `fill_${label.slice(0, 20)}`);
-        resultText = redactFillResultText(label, value, passwordField);
-        if (passwordField) input.value = REDACTED_SECRET;
-        break;
-      }
-      case "select": {
-        const { label, value } = input as { label: string; value: string };
-        await saveSnapshotBeforeAction(page, observation);
-        await selectDescribedOption(page, { label, value });
-        await page.waitForTimeout(300);
-        screenshot = await takeScreenshot(page, `select_${label.slice(0, 20)}`);
-        resultText = `Selected "${value}" in "${label}"`;
-        break;
-      }
-      case "diff_since_last_action": {
-        resultText = await getDiffFromSnapshot(page, observation);
-        break;
-      }
-      case "read_page_text": {
-        resultText = await readPageText(page);
-        break;
-      }
-      case "read_accessibility_tree": {
-        resultText = await readAccessibilityTree(page);
-        break;
-      }
-      case "read_console_logs": {
-        const logs = getRecentConsoleLogs(observation);
-        resultText = logs.length > 0 ? JSON.stringify(logs) : "(no console logs)";
-        break;
-      }
-      case "read_network_errors": {
-        const errors = getRecentNetworkErrors(observation);
-        resultText = errors.length > 0 ? JSON.stringify(errors) : "(no network errors)";
-        break;
-      }
-      case "post_outcome": {
-        const { achieved, reason } = input as { achieved: boolean; reason: string };
-        if (scenario) {
-          const outcome: ScenarioOutcome = {
-            scenarioId: scenario.id,
-            scenarioTitle: scenario.title,
-            agentId,
-            agentName: agentLog.agentName,
-            achieved: Boolean(achieved),
-            reason: String(reason),
-            iterations: agentLog.iterations,
-          };
-          scenarioOutcomes.push(outcome);
-          console.log(`  ${achieved ? "✓" : "✗"} [outcome] "${scenario.title}": ${achieved ? "achieved" : "NOT achieved"} — ${reason}`);
-        }
-        resultText = "Outcome recorded.";
-        break;
-      }
-      case "run_a11y_audit": {
-        const audit = await runA11yAudit(page);
-        resultText = formatAuditForAgent(audit);
-        console.log(`  [a11y] ${audit.summary}`);
-        break;
-      }
-      case "check_swarm_signals": {
-        let currentPath = agentLog.visitedPaths.at(-1) ?? "/";
-        try {
-          currentPath = new URL(page.url()).pathname || currentPath;
-        } catch { /* keep last visited path */ }
-        const signals = getSwarmSignals(agentId, 8, currentPath);
-        resultText = signals.length > 0
-          ? JSON.stringify({ signals, currentPath, hint: "These reports are from your current area when possible — try to reproduce them from your own perspective." })
-          : `(no reports from other agents in ${currentPath} yet — keep exploring)`;
-        break;
-      }
-      case "post_feedback": {
-        const { title, body, category } = input as { title: string; body: string; category: string };
-        const safeCategory = VALID_CATEGORIES.includes(String(category)) ? String(category) : "ux";
-        screenshot = await takeScreenshot(page, `feedback_${String(title).slice(0, 20)}`);
-        const findingId = `${agentId}_${Date.now()}`;
-        let findingTracePath: string | undefined;
-        if (TRACE_ENABLED) {
-          const chunkPath = await saveFindingTraceChunk(page.context(), runLog.runId, findingId);
-          findingTracePath = chunkPath ?? traceAgentZipPath(runLog.runId, agentId);
-        }
-        const finding: Finding = {
-          id: findingId,
-          runId: runLog.runId,
-          agentId,
-          agentName: agentLog.agentName,
-          role: agentLog.persona,
-          title: String(title),
-          body: String(body),
-          category: safeCategory,
-          timestamp: new Date().toISOString(),
-          screenshotPath: screenshot.filePath,
-          ...(findingTracePath ? { tracePath: findingTracePath } : {}),
-        };
-        saveFinding(finding);
-        agentLog.feedbacksSaved.push({ title: String(title), category: safeCategory, findingId: finding.id });
-        console.log(`  → [findings] saved: "${title}" (${safeCategory})`);
-        resultText = `Feedback recorded: "${title}" (will become an Issue after triage)`;
-        break;
-      }
-      case "report_regression": {
-        const { original_issue_number, original_issue_title, title, body } = input as {
-          original_issue_number: string; original_issue_title: string; title: string; body: string;
-        };
-        const issueId = resolveIssueId(original_issue_number, closedIssues);
-        const url = await trackers.createIssue(
-          `[regression] ${title}`,
-          `**Regression:** ${issueId} "${original_issue_title}" has reappeared.\n\n${body}\n\n---\n*This issue was auto-generated by an AI regression agent*`,
-          ["regression", "feedback-agent"],
-        );
-        await trackers.commentOnIssue(
-          issueId,
-          `⚠️ **Regression detected** by AI agent on ${new Date().toISOString().slice(0, 10)}\n\n${body}${url ? `\n\nNew issue: ${url}` : ""}`,
-        );
-        agentLog.regressionChecks.push({
-          issueNumber: issueId,
-          issueTitle: String(original_issue_title),
-          status: "regressed",
-          note: String(body),
-          regressionUrl: url,
-        });
-        runLog.summary.regressionChecked++;
-        runLog.summary.regressionFailed++;
-        resultText = JSON.stringify({ reported: true, url });
-        break;
-      }
-      case "mark_verified": {
-        const { original_issue_number, original_issue_title, note } = input as {
-          original_issue_number: string; original_issue_title: string; note: string;
-        };
-        const issueId = resolveIssueId(original_issue_number, closedIssues);
-        await trackers.commentOnIssue(
-          issueId,
-          `✅ **Verified as fixed** by AI agent on ${new Date().toISOString().slice(0, 10)}\n\n${note}`,
-        );
-        agentLog.regressionChecks.push({
-          issueNumber: issueId,
-          issueTitle: String(original_issue_title),
-          status: "fixed",
-          note: String(note),
-          regressionUrl: null,
-        });
-        runLog.summary.regressionChecked++;
-        console.log(`  ✓ verified: ${issueId} "${original_issue_title}"`);
-        resultText = JSON.stringify({ verified: true });
-        break;
-      }
-      default: {
-        const apiResult = await targetConfig.execute(toolName, input, agentId);
-        resultText = JSON.stringify(apiResult);
-        break;
-      }
-    }
-  } catch (e) {
-    isError = true;
-    resultText = `error: ${String(e)}`;
-    try {
-      screenshot = await takeScreenshot(page, `error_${toolName}`);
-    } catch { /* ignore */ }
-  }
-
-  agentLog.actions.push({
-    timestamp: new Date().toISOString(),
-    tool: toolName,
-    input: redactToolInput(toolName, input),
-    screenshotPath: screenshot?.filePath ?? null,
-    durationMs: Date.now() - startedAt,
-  });
-
-  const sendToClaude = isError || TOOLS_THAT_SEND_SCREENSHOT.has(toolName);
-  return { text: resultText, screenshot, sendToClaude };
-}
 
 type BrowserAgentExtras = {
   extraTools?: Anthropic.Tool[];
@@ -1340,11 +840,13 @@ ${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\
     ? `\n[Your Task for This Run]\nTitle: ${assignment.scenario.title}\nYou are: ${assignment.scenario.context}\nGoal: ${assignment.scenario.goal}\nConstraints: ${assignment.scenario.constraints}\n\nFocus on completing this task naturally as this user. Report any issues you encounter along the way.\nWhen done (or if you cannot complete the goal), call post_outcome with achieved=true/false and a brief reason.`
     : assignment.lens
     ? `\n[Focus Area for This Run]\n${assignment.lens}\nKeep this perspective in mind and prioritize reporting related issues.`
-    : ""}${focusPrompt()}${describeEnvironment(agent.environment)}${sessionContinuityPrompt(hasAgentSession(agent.id))}${formatAgentMemories(agent)}${guardrailPrompt(SHOAL_MODE)}${authPrompt(authPlan.handoff)}${extras.extraPrompt ?? ""}`;
+    : ""}${focusPrompt()}${describeEnvironment(agent.environment)}${sessionContinuityPrompt(hasAgentSession(agent.id))}${formatAgentMemories(agent)}${guardrailPrompt(SHOAL_MODE)}${authPrompt(authPlan.handoff)}${extras.extraPrompt ?? ""}
+
+${untrustedContentPrompt()}`;
 
   const startUrl = resolveLoginUrl(BASE_URL, authPlan.startPath);
   await page.goto(startUrl, { waitUntil: "networkidle" });
-  await page.waitForTimeout(5000);
+  await page.waitForTimeout(RUN_TIMINGS.agentStartupMs);
   const initialScreenshot = await takeScreenshot(page, "initial");
 
   const opening = (() => {
@@ -1364,25 +866,24 @@ ${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\
     }
   })();
 
-  const MAX_ITERATIONS = extras.maxIterations ?? 12;
+  const MAX_ITERATIONS = extras.maxIterations ?? browserIterations();
   const sessionTools = [...BROWSER_TOOLS, ...(extras.extraTools ?? [])].map((t) => ({
     name: t.name,
     description: t.description ?? t.name,
     input_schema: t.input_schema as Record<string, unknown>,
     execute: async (input: Record<string, unknown>): Promise<ToolResultContent> => {
-      const { text, screenshot, sendToClaude } = await executeBrowserTool(
-        t.name,
-        input,
+      const { text, screenshot, sendToClaude } = await executeBrowserTool(t.name, input, {
+        ...browserToolBaseContext(),
         page,
+        agentId: agent.id,
         agentLog,
         observation,
-        agent.id,
         scenarioOutcomes,
         cachedHashes,
         pageHashUpdates,
-        assignment.scenario,
-        extras.closedIssues ?? [],
-      );
+        scenario: assignment.scenario,
+        closedIssues: extras.closedIssues ?? [],
+      });
       console.log(`  → ${formatToolCallLog(t.name, input, 60)}`);
 
       if (siteMap) {
@@ -1594,11 +1095,13 @@ When writing the body, match the tone to the category:
 
 [Reference: Implemented Features]
 ${productSpec.features}
-${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${goalsSection(productSpec)}${guardrailPrompt(SHOAL_MODE)}${authPrompt(authPlan.handoff)}`;
+${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${goalsSection(productSpec)}${guardrailPrompt(SHOAL_MODE)}${authPrompt(authPlan.handoff)}
+
+${untrustedContentPrompt()}`;
 
   const startUrl = resolveLoginUrl(BASE_URL, authPlan.startPath);
   await page.goto(startUrl, { waitUntil: "networkidle" });
-  await page.waitForTimeout(5000);
+  await page.waitForTimeout(RUN_TIMINGS.agentStartupMs);
   const initialScreenshot = await takeScreenshot(page, "initial");
 
   const opening = (() => {
@@ -1616,24 +1119,23 @@ ${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\
     }
   })();
 
-  const MAX_ITERATIONS = 12;
+  const MAX_ITERATIONS = thresholdIterations();
   const sessionTools = BROWSER_TOOLS.map((t) => ({
     name: t.name,
     description: t.description ?? t.name,
     input_schema: t.input_schema as Record<string, unknown>,
     execute: async (input: Record<string, unknown>): Promise<ToolResultContent> => {
-      const { text, screenshot, sendToClaude } = await executeBrowserTool(
-        t.name,
-        input,
+      const { text, screenshot, sendToClaude } = await executeBrowserTool(t.name, input, {
+        ...browserToolBaseContext(),
         page,
+        agentId: agent.id,
         agentLog,
         observation,
-        agent.id,
-        [],
+        scenarioOutcomes: [],
         cachedHashes,
         pageHashUpdates,
-        undefined,
-      );
+        closedIssues: [],
+      });
       console.log(`  → ${formatToolCallLog(t.name, input, 60)}`);
 
       return sendToClaude && screenshot
@@ -1739,7 +1241,7 @@ async function runVerifyMode(
     constraints: "Focus only on verifying this one issue. Do not explore unrelated areas.",
   };
 
-  const context = await browser.newContext({ viewport: { width: 1024, height: 640 } });
+  const context = await browser.newContext({ viewport: VIEWPORT });
   await applyBrowserGuardrails(context, SHOAL_MODE);
   const page = await context.newPage();
   try {
@@ -1770,6 +1272,14 @@ async function main() {
   // run log を最初期化しておくことで、どの段階でエラーが起きても finally で saveRunLog() が動く
   initRunLog(0, process.env.GITHUB_REPO ?? "");
 
+  // SHOAL_MAX_USD の推定コスト上限。超えた時点で以降の LLM 呼び出しを止める
+  initBudget();
+  const budgetLine = budgetStatusLine();
+  if (budgetLine) console.log(budgetLine);
+  // 価格表を先に読み込む（OpenRouter は実行時取得なので、これが無いと上限が無言で効かない）
+  const budgetWarning = await prepareBudget(defaultModel, llmProvider);
+  if (budgetWarning) console.warn(budgetWarning);
+
   // 1. product discovery (cache or live)
   const browser = await chromium.launch({ headless: true });
   let productSpec: ProductSpec;
@@ -1785,7 +1295,7 @@ async function main() {
       console.log(`\n[product-discovery] using cache (${ageStr}, confidence: ${cached.confidence})${staleHint}`);
       productSpec = cached;
     } else {
-      const discoveryContext = await browser.newContext({ viewport: { width: 1024, height: 640 } });
+      const discoveryContext = await browser.newContext({ viewport: VIEWPORT });
       const discoveryPage = await discoveryContext.newPage();
       productSpec = await discoverProduct(BASE_URL, discoveryPage, client, defaultModel, targetConfig.projectPath);
       await discoveryContext.close();
@@ -1821,7 +1331,7 @@ async function main() {
     for (const line of accountPlan.logs) console.log(line);
     switch (accountPlan.action) {
       case "run": {
-        const accountContext = await browser.newContext({ viewport: { width: 1024, height: 640 } });
+        const accountContext = await browser.newContext({ viewport: VIEWPORT });
         try {
           testAccounts = await runAccountManager(
             BASE_URL,
@@ -1843,7 +1353,7 @@ async function main() {
         break;
       }
       case "persist": {
-        const accountContext = await browser.newContext({ viewport: { width: 1024, height: 640 } });
+        const accountContext = await browser.newContext({ viewport: VIEWPORT });
         try {
           testAccounts = await persistAccountSessions(
             BASE_URL,
@@ -1941,8 +1451,12 @@ async function main() {
     // シナリオ/レンズ割り当てのグローバルカウンタ（7:3 比率）
     let dispatchIdx = 0;
 
-    const CONCURRENCY = 2;
+    const CONCURRENCY = explorerConcurrency();
     for (let i = 0; i < explorerAgents.length; i += CONCURRENCY) {
+      if (isBudgetExceeded()) {
+        console.log(`\n${budgetStopLine()}`);
+        break;
+      }
       const batch = explorerAgents.slice(i, i + CONCURRENCY);
       await Promise.all(batch.map((agent) => {
         const assignment = pickAssignment(dispatchIdx++, dispatchScenarios, "explorer");
@@ -1951,7 +1465,7 @@ async function main() {
       }));
       if (i + CONCURRENCY < explorerAgents.length) {
         console.log("\n[batch done] waiting 5s before next batch...");
-        await sleep(5000);
+        await sleep(RUN_TIMINGS.betweenExplorerBatchesMs);
       }
     }
 
@@ -1964,7 +1478,7 @@ async function main() {
         console.log(`\n[regression] skipping ${skippedUi} UI-only issue(s) — API lane cannot verify them`);
       }
       if (api.length > 0) {
-        await sleep(3000);
+        await sleep(RUN_TIMINGS.beforeRegressionMs);
         await runRegressionAgent(makeRegressionProber(), api, productSpec);
       } else {
         console.log("\n[regression] skipped (no API-verifiable closed issues)");
@@ -1994,14 +1508,20 @@ async function main() {
       console.log(`[multi-actor] "${multiScenario.title}" — ${pairLabel}`);
     }
 
-    await sleep(2000);
+    await sleep(RUN_TIMINGS.beforeBrowserLaneMs);
+
+    // コスト上限に達していたら、以降のレーンは起動せずスキップする
+    const budgetStopped = isBudgetExceeded();
+    if (budgetStopped) console.log(`\n${budgetStopLine()}`);
 
     const thresholdCandidates = sortThresholdCandidates(
       normalizeThresholdCandidates(productSpec.thresholdCandidates),
     );
     let thresholdAgents: Agent[] = [];
     let thresholdSlices: ThresholdCandidate[][] = [];
-    if (MAX_THRESHOLDS <= 0) {
+    if (budgetStopped) {
+      console.log("\n[threshold] skipped (spend cap reached)");
+    } else if (MAX_THRESHOLDS <= 0) {
       console.log("\n[threshold] skipped (MAX_THRESHOLDS=0)");
     } else if (thresholdCandidates.length === 0) {
       console.log("\n[threshold] skipped (no thresholdCandidates — set REFRESH_SPEC=1 to rediscover)");
@@ -2020,7 +1540,7 @@ async function main() {
       | { kind: "threshold"; agent: Agent; log: BrowserAgentLog }
       | { kind: "regression"; agent: Agent; log: BrowserAgentLog };
 
-    const browserJobs = browserAgents.map(async (agent): Promise<LaneResult> => {
+    const browserJobs = (budgetStopped ? [] : browserAgents).map(async (agent): Promise<LaneResult> => {
         const assignment = pairAssignments.get(agent.id) ?? pickAssignment(dispatchIdx++, dispatchScenarios, "browser");
         agentAssignments.set(agent.id, assignment);
 
@@ -2034,7 +1554,7 @@ async function main() {
         });
         console.log(describeAuthPlan(agent.name, authPlan));
         const baseOptions: Parameters<typeof browser.newContext>[0] = {
-          viewport: { width: 1024, height: 640 },
+          viewport: VIEWPORT,
         };
         if (authPlan.storageStatePath) {
           baseOptions.storageState = authPlan.storageStatePath;
@@ -2087,7 +1607,7 @@ async function main() {
       });
       console.log(describeAuthPlan(agent.name, authPlan));
       const baseOptions: Parameters<typeof browser.newContext>[0] = {
-        viewport: { width: 1024, height: 640 },
+        viewport: VIEWPORT,
       };
       if (authPlan.storageStatePath) {
         baseOptions.storageState = authPlan.storageStatePath;
@@ -2121,7 +1641,7 @@ async function main() {
     });
 
     const regressionJobs: Promise<LaneResult>[] = [];
-    if (MAX_BROWSERS > 0 && closedIssues.length > 0) {
+    if (!budgetStopped && MAX_BROWSERS > 0 && closedIssues.length > 0) {
       const regressionAgent = makeRegressionProber();
       console.log(`\nlaunching regression in the browser lane (${closedIssues.length} closed issue(s), ${regressionMaxIterations(closedIssues.length)} turns)`);
       regressionJobs.push((async (): Promise<LaneResult> => {
@@ -2135,7 +1655,7 @@ async function main() {
         });
         console.log(describeAuthPlan(regressionAgent.name, authPlan));
         const baseOptions: Parameters<typeof browser.newContext>[0] = {
-          viewport: { width: 1024, height: 640 },
+          viewport: VIEWPORT,
         };
         if (authPlan.storageStatePath) {
           baseOptions.storageState = authPlan.storageStatePath;
@@ -2225,14 +1745,20 @@ Rules:
     scenarioOutcomes.push(...reconciled);
 
     // 9. triage (API + browser + threshold findings)
-    await sleep(2000);
+    await sleep(RUN_TIMINGS.beforeTriageMs);
     console.log(`\n[triage] collected findings: ${collectedFindings.length}`);
     let triageResult = { issued: [] as string[], skipped: [] as string[], unprocessed: [] as string[], issuesCreated: 0 };
-    try {
-      triageResult = await runTriageAgent(collectedFindings, client, defaultModel, trackers, agentAssignments);
-      runLog.summary.totalIssuesPosted += triageResult.issuesCreated;
-    } catch (e) {
-      console.error("[triage] error:", e);
+    if (isBudgetExceeded()) {
+      // 起票せずに終える。findings は保存済みで、レポートと triage-only で後から処理できる
+      console.log("[triage] skipped (spend cap reached) — findings are saved; run `shoal triage` after raising SHOAL_MAX_USD");
+      triageResult.unprocessed = collectedFindings.map((f) => f.title);
+    } else {
+      try {
+        triageResult = await runTriageAgent(collectedFindings, client, defaultModel, trackers, agentAssignments);
+        runLog.summary.totalIssuesPosted += triageResult.issuesCreated;
+      } catch (e) {
+        console.error("[triage] error:", e);
+      }
     }
 
     // 10. record each agent's personal memory (frustrations / achievements)
@@ -2289,4 +1815,12 @@ Rules:
   }
 }
 
-main().catch(console.error);
+main().catch((e) => {
+  if (e instanceof BudgetExceededError) {
+    console.error(`\n${e.message}`);
+    console.error("Raise SHOAL_MAX_USD (or unset it) to continue exploring.");
+    process.exitCode = 1;
+    return;
+  }
+  console.error(e);
+});

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { apiFetch } from "../api";
 
 interface Props {
   onClose: () => void;
@@ -27,7 +28,7 @@ export function StartModal({ onClose, onStarted }: Props) {
     if (llmModel) body.llmModel = llmModel;
 
     try {
-      const res = await fetch("/api/runs/start", {
+      const res = await apiFetch("/api/runs/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

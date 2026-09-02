@@ -4,6 +4,7 @@ vi.mock("../findings", () => ({ runLog: undefined }));
 
 import * as findingsModule from "../findings";
 import { createMessageWithRetry, runAgentLoop, sleep } from "../agent-loop";
+import { BudgetExceededError, initBudget, recordSpend } from "../budget";
 import type { LLMClient } from "../llm-client";
 import type { AgentLog } from "../types";
 
@@ -222,5 +223,68 @@ describe("runAgentLoop", () => {
     const createMessage = vi.fn().mockResolvedValue({ content: [], stop_reason: "end_turn", usage: {} });
     await runAgentLoop(agentLog, "sys", [], makeClient(createMessage), "m", vi.fn(), "anthropic");
     expect(vi.mocked(findingsModule).runLog!.summary.completed).toBe(1);
+  });
+});
+
+describe("createMessageWithRetry — spend cap", () => {
+  const HAIKU = "claude-haiku-4-5-20251001";
+
+  const params = {
+    model: HAIKU,
+    max_tokens: 100,
+    system: "",
+    tools: [],
+    messages: [],
+  };
+
+  beforeEach(() => {
+    initBudget({} as NodeJS.ProcessEnv);
+  });
+
+  it("上限に達していれば呼び出しを開始しない", async () => {
+    initBudget({ SHOAL_MAX_USD: "0.001" } as NodeJS.ProcessEnv);
+    recordSpend(HAIKU, "anthropic", 1_000_000, 0); // $0.80 > $0.001
+
+    const createMessage = vi.fn();
+    await expect(
+      createMessageWithRetry({ createMessage } as unknown as LLMClient, params),
+    ).rejects.toBeInstanceOf(BudgetExceededError);
+    expect(createMessage).not.toHaveBeenCalled();
+  });
+
+  it("429 の待機中に上限へ達したらリトライを開始しない", async () => {
+    initBudget({ SHOAL_MAX_USD: "1" } as NodeJS.ProcessEnv);
+
+    const createMessage = vi.fn(async () => {
+      // 別レーンがこの待機中に上限を使い切った、という状況を再現する
+      recordSpend(HAIKU, "anthropic", 2_000_000, 0); // $1.60 > $1
+      throw Object.assign(new Error("429"), {
+        status: 429,
+        headers: { get: () => "0" },
+      });
+    });
+
+    await expect(
+      createMessageWithRetry({ createMessage } as unknown as LLMClient, params),
+    ).rejects.toBeInstanceOf(BudgetExceededError);
+    // 1 回目は走るが、リトライは上限チェックで止まる
+    expect(createMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("上限内なら通常どおりリトライする", async () => {
+    initBudget({ SHOAL_MAX_USD: "100" } as NodeJS.ProcessEnv);
+
+    let calls = 0;
+    const createMessage = vi.fn(async () => {
+      calls++;
+      if (calls === 1) {
+        throw Object.assign(new Error("429"), { status: 429, headers: { get: () => "0" } });
+      }
+      return { content: [], usage: { input_tokens: 1, output_tokens: 1 } };
+    });
+
+    const res = await createMessageWithRetry({ createMessage } as unknown as LLMClient, params);
+    expect(res).toBeTruthy();
+    expect(createMessage).toHaveBeenCalledTimes(2);
   });
 });

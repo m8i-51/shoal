@@ -33,7 +33,6 @@ describe("auth-claude script", () => {
       signal: null,
     } as never);
 
-    const { spawnSync: realSpawn } = await vi.importActual<typeof import("child_process")>("child_process");
     // Run script logic inline to avoid process.exit killing the test runner
     const which = spawnSync("sh", ["-c", "command -v claude"], { encoding: "utf-8" });
     expect(which.status).not.toBe(0);

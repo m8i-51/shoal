@@ -10,6 +10,7 @@ import { SchedulePanel } from "../components/SchedulePanel";
 import { formatDuration, formatDate, formatCostUSD, CATEGORY_COLOR } from "../utils/format";
 import type { RunSummary } from "../types";
 import i18n from "../i18n/index";
+import { apiFetch } from "../api";
 
 export function Dashboard() {
   const { t } = useTranslation();
@@ -18,7 +19,7 @@ export function Dashboard() {
   const [showModal, setShowModal] = useState(false);
 
   const fetchRuns = () => {
-    fetch("/api/runs")
+    apiFetch("/api/runs")
       .then((r) => r.json())
       .then((data: RunSummary[]) => {
         const apiIds = new Set(data.map((r: RunSummary) => r.runId));

@@ -124,6 +124,35 @@ Opens at `http://localhost:4000`. From there you can:
 - **Edit app goals** — guide the goal-gap detector by defining what the app should achieve
 - **Schedule a weekly run** — pick a day and time directly in the dashboard for automatic recurring runs (the `shoal serve` process must stay running; for a serverless alternative see [Scheduled runs](#scheduled-runs) below)
 
+### Dashboard access
+
+The dashboard can start runs against any URL your machine can reach, so it is
+treated as a control surface, not a viewer:
+
+- It binds to **`127.0.0.1`** — only this machine can reach it. No token needed.
+- To expose it (a container, a dev box you reach from elsewhere), set
+  `SHOAL_HOST=0.0.0.0`. shoal **refuses to start** on a non-loopback address
+  unless you also set `SHOAL_ALLOW_INSECURE=1`, because the listener is plain
+  HTTP — exposure has to be a decision, not a typo in a container spec. A token
+  then becomes **required**: set `SHOAL_TOKEN`, or shoal generates one and prints
+  a ready-made `?token=…` URL at startup.
+
+```text
+shoal dashboard → http://0.0.0.0:4000
+[auth] bound to 0.0.0.0, which is reachable from other machines — a token is required.
+[auth] generated token: 6f1c…
+[auth] open: http://0.0.0.0:4000/?token=6f1c…
+```
+
+The `?token=…` URL is a bootstrap: the server exchanges it for an `HttpOnly`
+session cookie and the dashboard drops it from the address bar, so the token is
+never kept anywhere page JavaScript can read.
+
+The listener itself is plain HTTP, so an exposed dashboard needs a
+TLS-terminating reverse proxy in front of it. An SSH tunnel
+(`ssh -L 4000:localhost:4000 host`) is usually a better answer than opening the
+port at all. See [SECURITY.md](SECURITY.md) for the full picture.
+
 ---
 
 ## Cross-run intelligence
@@ -206,6 +235,13 @@ shoal serve --env-file apps/shoal/.env
 | `SHOAL_MODE` | `safe` | Safety mode: `read-only` \| `safe` \| `full` (see below) |
 | `SHOAL_TRACE` | `1` | Record Playwright traces of browser agent sessions (`0` to disable). Each finding gets a trace chunk at save time (`logs/traces/<run>/<findingId>.zip`); the agent session trace remains at `logs/traces/<run>/<agentId>.zip` |
 | `REFRESH_SPEC` | — | Set to `1` to re-run product discovery |
+| `SHOAL_MAX_USD` | — | Hard spend cap for a run (estimated USD). Once reached, no further LLM call starts and the remaining lanes are skipped — findings already collected are still saved and reported |
+| `SHOAL_HOST` | `127.0.0.1` | Dashboard bind address. Loopback by default; set it to expose the dashboard (see [Dashboard access](#dashboard-access)) |
+| `SHOAL_TOKEN` | — | Dashboard token. Required whenever `SHOAL_HOST` is not loopback; generated and printed at startup if unset |
+| `SHOAL_BROWSER_ITERATIONS` | `12` | Turns a browser agent may take |
+| `SHOAL_THRESHOLD_ITERATIONS` | `12` | Turns a threshold agent may take |
+| `SHOAL_EXPLORER_CONCURRENCY` | `2` | API explorer agents run in parallel batches of this size |
+| `SHOAL_VIEWPORT` | `1024x640` | Browser viewport for agent sessions (a persona's device emulation overrides it) |
 
 **Safety modes** — agents write data as they explore, so choose how much they're allowed to touch:
 
@@ -214,6 +250,10 @@ shoal serve --env-file apps/shoal/.env
 - `full` — no restrictions. Use only against disposable environments.
 
 In `safe` and `read-only` modes, API tools marked `destructive: true` in your target config are removed from the agents' toolset. The mode can also be selected per run in the dashboard's start dialog.
+
+**Spend cap** — set `SHOAL_MAX_USD` to stop a run once its estimated cost reaches a limit. Turn budgets bound how long each agent explores; this bounds what the whole run can cost.
+
+**Content from the target app is untrusted** — agents read your app and act on what they read, so any text the app can display reaches the model. shoal fences everything it reads from the app and tells agents that fenced content is data, never instructions — but fencing is a mitigation, not a guarantee. Don't point an authenticated swarm at an app carrying content you don't control. See [SECURITY.md](SECURITY.md#prompt-injection-from-the-target-app).
 
 **Issue tracker variables** (set only what you need):
 
@@ -376,6 +416,24 @@ Scores recorded with `BENCH_RECORD=1` (see `bench/scores.json`):
 | Variant | Model | Detection | Findings | Date | Config |
 |---|---|---:|---:|---|---|
 | store | claude-sonnet-4-20250514 | 71% | 11 | 2026-08-15 | MAX_BROWSERS=3, default prompts |
+
+> **One configuration, one run.** Read that number as a single sample, not a
+> benchmark: detection rate varies run to run (agents explore
+> non-deterministically), and nothing here says how the swarm behaves on the
+> `forms` variant, on other models, or at other agent counts. Treat it as a
+> regression baseline for *this* configuration until the table has more rows.
+
+**Contributing a score** — run the bench against your provider and open a PR
+with the new `bench/scores.json` entry and matching table row:
+
+```bash
+BENCH_RECORD=1 npm run bench          # store variant
+BENCH_RECORD=1 npm run bench:forms    # forms variant
+```
+
+Each run costs real LLM spend, so cap it: `SHOAL_MAX_USD=2 BENCH_RECORD=1 npm run bench`.
+Note the model and agent counts in the `config` field — a score without its
+configuration cannot be compared against anything.
 
 Use it as a regression test when changing prompts, models, or exploration logic — and don't fix the seeded bugs (the app's test suite pins them in place).
 
