@@ -1,6 +1,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { CreateMessageParams } from "./llm-client";
 import { runLog } from "./findings";
+import { assertWithinBudget, recordSpend } from "./budget";
 
 export let rateLimitRetries = 0;
 
@@ -13,13 +14,24 @@ export async function createMessageWithRetry(
   params: CreateMessageParams,
   retries = 5
 ): Promise<Anthropic.Message> {
+  // Refuse to start another call once the run has spent its SHOAL_MAX_USD cap.
+  assertWithinBudget();
+
   for (let i = 0; i < retries; i++) {
     try {
       const response = await client.createMessage(params);
+      const inputTokens = response.usage?.input_tokens ?? 0;
+      const outputTokens = response.usage?.output_tokens ?? 0;
       if (runLog?.summary?.cost) {
-        runLog.summary.cost.inputTokens += response.usage?.input_tokens ?? 0;
-        runLog.summary.cost.outputTokens += response.usage?.output_tokens ?? 0;
+        runLog.summary.cost.inputTokens += inputTokens;
+        runLog.summary.cost.outputTokens += outputTokens;
       }
+      recordSpend(
+        params.model,
+        process.env.LLM_PROVIDER ?? "anthropic",
+        inputTokens,
+        outputTokens,
+      );
       return response;
     } catch (e: unknown) {
       const err = e as { status?: number; headers?: { get?: (key: string) => string | null } };

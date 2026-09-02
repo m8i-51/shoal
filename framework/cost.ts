@@ -78,7 +78,7 @@ function bedrockModelToAnthropicKey(model: string): string {
 }
 
 function lookupAnthropicPricing(modelKey: string): { input: number; output: number } | undefined {
-  let pricing = ANTHROPIC_PRICING[modelKey];
+  const pricing = ANTHROPIC_PRICING[modelKey];
   if (pricing) return pricing;
   const key = Object.keys(ANTHROPIC_PRICING).find((k) => modelKey.startsWith(k));
   return key ? ANTHROPIC_PRICING[key] : undefined;
@@ -149,6 +149,41 @@ async function fetchOpenRouterPricing(): Promise<Map<string, { input: number; ou
   }
 }
 
+/**
+ * Price lookup that never performs I/O. OpenRouter is only priced when its
+ * catalogue is already cached, so callers on a hot path (budget accounting)
+ * stay synchronous.
+ */
+function lookupPricingSync(
+  model: string,
+  provider: string,
+): { input: number; output: number } | undefined {
+  // Callers on the budget path may not know the model (a stubbed client, a
+  // provider that omits it) — unknown means unpriced, never free.
+  if (typeof model !== "string" || model === "") return undefined;
+  if (FREE_PROVIDERS.has(provider)) return undefined;
+  if (provider === "anthropic") return lookupAnthropicPricing(model);
+  if (provider === "bedrock") return lookupBedrockPricing(model);
+  if (provider === "openai") return OPENAI_PRICING[model];
+  if (provider === "openrouter") return openrouterCache?.get(model);
+  return undefined;
+}
+
+/**
+ * Synchronous cost estimate. Returns null when the model/provider has no known
+ * price — callers must treat null as "unknown", not as "free".
+ */
+export function estimateCostSync(
+  model: string,
+  provider: string,
+  inputTokens: number,
+  outputTokens: number,
+): number | null {
+  const pricing = lookupPricingSync(model, provider);
+  if (!pricing) return null;
+  return pricing.input * inputTokens + pricing.output * outputTokens;
+}
+
 export async function estimateCost(
   model: string,
   provider: string,
@@ -157,21 +192,14 @@ export async function estimateCost(
 ): Promise<number | null> {
   if (FREE_PROVIDERS.has(provider)) return null;
 
-  let pricing: { input: number; output: number } | undefined;
-
-  if (provider === "anthropic") {
-    pricing = lookupAnthropicPricing(model);
-  } else if (provider === "bedrock") {
-    pricing = lookupBedrockPricing(model);
-  } else if (provider === "openai") {
-    pricing = OPENAI_PRICING[model];
-  } else if (provider === "openrouter") {
+  if (provider === "openrouter") {
     const map = await fetchOpenRouterPricing();
-    pricing = map.get(model);
+    const pricing = map.get(model);
+    if (!pricing) return null;
+    return pricing.input * inputTokens + pricing.output * outputTokens;
   }
 
-  if (!pricing) return null;
-  return pricing.input * inputTokens + pricing.output * outputTokens;
+  return estimateCostSync(model, provider, inputTokens, outputTokens);
 }
 
 export function formatCostUSD(usd: number | null | undefined): string {
