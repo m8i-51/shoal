@@ -48,7 +48,7 @@ function setupFs(initial: Record<string, unknown>) {
     const key = keyFor(p);
     return key != null && files.has(key);
   });
-  vi.mocked(fs.readFileSync).mockImplementation(((p: unknown) => files.get(keyFor(p) ?? "") ?? "") as typeof fs.readFileSync);
+  vi.mocked(fs.readFileSync).mockImplementation(((p: unknown) => files.get(keyFor(p) ?? "") ?? "") as unknown as typeof fs.readFileSync);
   vi.mocked(fs.mkdirSync).mockReturnValue(undefined);
   vi.mocked(fs.writeFileSync).mockImplementation(((p: unknown, content: unknown) => {
     const key = keyFor(p);

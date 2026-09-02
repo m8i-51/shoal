@@ -94,7 +94,7 @@ export function initBudget(env: NodeJS.ProcessEnv = process.env): BudgetState {
 export async function prepareBudget(model: string, provider: string): Promise<string | null> {
   if (state.limitUSD == null) return null;
 
-  let warmed = true;
+  let warmed: boolean;
   try {
     warmed = await warmPricingCache(provider);
   } catch {

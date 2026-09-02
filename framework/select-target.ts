@@ -51,7 +51,7 @@ async function trySelect(
     return true;
   } catch { /* next */ }
 
-  let options: SelectOption[] = [];
+  let options: SelectOption[];
   try {
     options = await readOptions(el);
   } catch {

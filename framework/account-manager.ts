@@ -765,7 +765,7 @@ If user management is not accessible from this account, or the app has no role s
     input_schema: t.input_schema as Record<string, unknown>,
     execute: async (input: Record<string, unknown>): Promise<ToolResultContent> => {
       console.log(`  → ${formatToolCallLog(t.name, input)}`);
-      let resultText = "";
+      let resultText: string;
       let screenshot: string | null = null;
 
       try {

@@ -111,7 +111,7 @@ export async function executeBrowserTool(
 ): Promise<BrowserToolResult> {
   const { page, agentId, agentLog, observation, timings } = ctx;
   const startedAt = Date.now();
-  let resultText = "";
+  let resultText: string;
   let screenshot: Screenshot | null = null;
   let isError = false;
 
