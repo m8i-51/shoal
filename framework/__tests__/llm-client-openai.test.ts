@@ -11,7 +11,7 @@ vi.mock("@anthropic-ai/bedrock-sdk", () => ({ default: vi.fn() }));
 
 import OpenAI from "openai";
 import { createLLMClient } from "../llm-client";
-import type { LLMClient, CreateMessageParams } from "../llm-client";
+import type { LLMClient } from "../llm-client";
 
 const ENV_KEYS = ["LLM_PROVIDER", "LLM_BASE_URL", "LLM_MODEL", "LLM_API_KEY", "OPENAI_API_KEY"] as const;
 let saved: Record<string, string | undefined>;

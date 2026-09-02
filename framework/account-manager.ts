@@ -7,12 +7,9 @@ import type { ToolResultContent } from "./tool-types";
 import { saveFinding } from "./findings";
 import {
   setupObservation,
-  getRecentConsoleLogs,
-  getRecentNetworkErrors,
   readPageText,
   readAccessibilityTree,
   saveSnapshotBeforeAction,
-  getDiffFromSnapshot,
 } from "./observation";
 import { resolveLoginPath, isLoginPath, type ProductSpec } from "./product-discovery";
 import type { Credentials } from "../targets/types";
@@ -448,7 +445,8 @@ function collectAccountsToPersist(
 // Playwright helpers (shared with browser agent but local here)
 // ================================================================
 
-async function takeScreenshot(page: Page, label: string): Promise<string> {
+// `label` is unused here but kept so call sites read as documentation.
+async function takeScreenshot(page: Page, _label: string): Promise<string> {
   const buffer = await page.screenshot({ type: "png", fullPage: false });
   return buffer.toString("base64");
 }

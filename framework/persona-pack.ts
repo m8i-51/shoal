@@ -85,10 +85,8 @@ function loadFromFile(filePath: string): PersonaPack | null {
 
 async function loadFromPackage(packageName: string): Promise<PersonaPack | null> {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     const mod = await import(packageName);
     // Support both default export and named export
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     const raw = mod?.default ?? mod?.personas ? { personas: mod.personas } : mod;
     return parseRaw(raw, packageName);
   } catch (e) {

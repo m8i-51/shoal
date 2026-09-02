@@ -2,7 +2,7 @@
   "name": "@m8i-51/shoal",
   "version": "0.1.33",
   "type": "module",
-  "description": "Multi-agent web exploration framework — finds bugs, UX issues, and missing features by running AI agents against your app",
+  "description": "Multi-agent web exploration framework \u2014 finds bugs, UX issues, and missing features by running AI agents against your app",
   "repository": {
     "type": "git",
     "url": "https://github.com/m8i-51/shoal"
@@ -31,6 +31,8 @@
     "dev:server": "tsx watch --no-cache server/index.ts",
     "dev:web": "vite web",
     "build:web": "vite build web",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "auth:codex": "tsx scripts/auth-codex.ts",
     "auth:claude": "tsx scripts/auth-claude.ts",
     "bench": "tsx bench/index.ts",
@@ -64,6 +66,8 @@
     "@vitejs/plugin-react": "^4.7.0",
     "@vitest/coverage-v8": "^4.1.6",
     "concurrently": "^10.0.3",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react-hooks": "^5.2.0",
     "i18next": "^26.0.6",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
@@ -71,6 +75,7 @@
     "react-router-dom": "^7.14.1",
     "supertest": "^7.2.2",
     "typescript": "^5",
+    "typescript-eslint": "^8.69.0",
     "vite": "^6.4.2",
     "vitest": "^4.1.5"
   }

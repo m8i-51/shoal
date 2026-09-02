@@ -103,6 +103,7 @@ describe("runClaudeCliSession", () => {
 
   it("propagates shouldStop abort as success with captures when aborted mid-flight", async () => {
     let capturedAbort: AbortController | undefined;
+    // eslint-disable-next-line require-yield -- throws before any yield, on purpose
     const queryFn = vi.fn(async function* (params: { options?: { abortController?: AbortController } }) {
       capturedAbort = params.options?.abortController;
       capturedAbort?.abort();
