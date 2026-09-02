@@ -10,6 +10,8 @@ entries for `0.1.20` and earlier live in the commit log only.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-09-02
+
 ### Security
 
 - **The dashboard now binds to `127.0.0.1` by default.** It previously bound
@@ -162,7 +164,8 @@ entries for `0.1.20` and earlier live in the commit log only.
 
 - Documentation for the dashboard's built-in weekly scheduler.
 
-[Unreleased]: https://github.com/m8i-51/shoal/compare/v0.1.33...HEAD
+[Unreleased]: https://github.com/m8i-51/shoal/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/m8i-51/shoal/compare/v0.1.33...v0.2.0
 [0.1.33]: https://github.com/m8i-51/shoal/compare/v0.1.32...v0.1.33
 [0.1.32]: https://github.com/m8i-51/shoal/compare/v0.1.31...v0.1.32
 [0.1.31]: https://github.com/m8i-51/shoal/compare/v0.1.30...v0.1.31
