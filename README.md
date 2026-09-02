@@ -61,6 +61,39 @@ Findings are filed as issue tickets (GitHub Issues, Jira, Notion, Backlog, or As
 
 ---
 
+## Product Edge — findings that would sand the product down
+
+A swarm of personas each asking for what *their* kind of user expects is also a
+machine for making a product average. Fix every ticket and the sharp thing you
+built converges on the conventional version of its category.
+
+So shoal lets you declare what the product is deliberately sharp about — and what
+it gives up to stay that way:
+
+```
+Sharp edges      Every flow is keyboard-first — no mouse path is provided, on purpose
+Trade-offs       No onboarding wizard — the product assumes a trained operator
+```
+
+Product discovery drafts this from the app itself; you correct it in the
+dashboard's **Product Edge** panel, and your version survives re-discovery.
+
+Triage then files findings exactly as it would otherwise — nothing is dropped or
+softened — but labels an issue **`edge-risk`** when the obvious fix would blunt a
+declared edge, with the edge at stake and what would be lost written into the
+ticket:
+
+> **⚠️ Edge risk — decide before fixing**
+>
+> - **Edge at stake:** Every flow is keyboard-first — no mouse path is provided, on purpose
+> - **Why the obvious fix would blunt it:** Adding the drag-and-drop this persona expects makes the keyboard flow optional, and optional flows stop being maintained.
+
+Bugs are never marked this way: a defect is a defect whatever the positioning,
+and that rule is enforced in code, not just asked for in the prompt. Without a
+declared edge the whole mechanism stays off.
+
+---
+
 ## Quick Start
 
 **Install globally:**
@@ -122,6 +155,7 @@ Opens at `http://localhost:4000`. From there you can:
 - **Generate an Agent Diary** — after a run completes, one LLM call turns the raw log into a story-style narrative of the exploration, readable by anyone on the team
 - **Hall of Issues** — browse all findings across every run with full-text search and category filter. Export as JSON to share, or paste a GitHub raw/gist URL to import findings from other projects.
 - **Edit app goals** — guide the goal-gap detector by defining what the app should achieve
+- **Declare the product edge** — name what the product is deliberately sharp about, so triage flags tickets whose fix would flatten it (see [Product Edge](#product-edge--findings-that-would-sand-the-product-down))
 - **Schedule a weekly run** — pick a day and time directly in the dashboard for automatic recurring runs (the `shoal serve` process must stay running; for a serverless alternative see [Scheduled runs](#scheduled-runs) below)
 
 ### Dashboard access

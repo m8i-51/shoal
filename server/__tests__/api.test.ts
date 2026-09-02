@@ -570,6 +570,60 @@ describe("PATCH /api/spec/goals", () => {
 });
 
 // ================================================================
+// PATCH /api/spec/edge
+// ================================================================
+describe("PATCH /api/spec/edge", () => {
+  it("spec ファイルが存在しない → 404", async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    const res = await request(app).patch("/api/spec/edge").send({ sharpEdges: ["a"], tradeoffs: [] });
+    expect(res.status).toBe(404);
+  });
+
+  it("配列でない / 文字列以外を含む → 400", async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    expect((await request(app).patch("/api/spec/edge").send({ sharpEdges: "a", tradeoffs: [] })).status).toBe(400);
+    expect((await request(app).patch("/api/spec/edge").send({ sharpEdges: ["a"], tradeoffs: [1] })).status).toBe(400);
+    expect((await request(app).patch("/api/spec/edge").send({ sharpEdges: ["a"] })).status).toBe(400);
+  });
+
+  it("正常な宣言 → source human で保存する", async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ appName: "x" }) as unknown as ReturnType<typeof fs.readFileSync>);
+    const res = await request(app).patch("/api/spec/edge").send({
+      sharpEdges: ["Keyboard-first everywhere"],
+      tradeoffs: ["No onboarding wizard"],
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.productEdge).toMatchObject({
+      sharpEdges: ["Keyboard-first everywhere"],
+      tradeoffs: ["No onboarding wizard"],
+      source: "human",
+    });
+    const written = vi.mocked(fs.writeFileSync).mock.calls.at(-1)?.[1];
+    expect(JSON.parse(written as string).productEdge.source).toBe("human");
+  });
+
+  it("両方空なら宣言を削除する", async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({ productEdge: { sharpEdges: ["old"], tradeoffs: [], source: "human" } }) as unknown as ReturnType<typeof fs.readFileSync>
+    );
+    const res = await request(app).patch("/api/spec/edge").send({ sharpEdges: [], tradeoffs: [] });
+    expect(res.status).toBe(200);
+    expect(res.body.productEdge).toBeNull();
+    const written = vi.mocked(fs.writeFileSync).mock.calls.at(-1)?.[1];
+    expect(JSON.parse(written as string).productEdge).toBeUndefined();
+  });
+
+  it("spec ファイルの読み込みに失敗 → 500", async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue("not json" as unknown as ReturnType<typeof fs.readFileSync>);
+    const res = await request(app).patch("/api/spec/edge").send({ sharpEdges: ["a"], tradeoffs: [] });
+    expect(res.status).toBe(500);
+  });
+});
+
+// ================================================================
 // GET /api/runs
 // ================================================================
 describe("GET /api/runs", () => {

@@ -9,6 +9,7 @@ import { runTriageAgent } from "../triage";
 import type { Finding } from "../types";
 import type { IssueTracker } from "../trackers/index";
 import type { LLMClient } from "../llm-client";
+import type { ProductEdge } from "../product-edge";
 
 function makeFinding(overrides: Partial<Finding> = {}): Finding {
   return {
@@ -54,7 +55,7 @@ describe("runTriageAgent", () => {
   it("findings が空なら LLM を呼ばずに空の結果を返す", async () => {
     const tracker = makeTracker();
     const result = await runTriageAgent([], {} as LLMClient, "m", tracker);
-    expect(result).toEqual({ issued: [], skipped: [], unprocessed: [], issuesCreated: 0 });
+    expect(result).toEqual({ issued: [], skipped: [], unprocessed: [], issuesCreated: 0, edgeRisks: [] });
     expect(createMessageWithRetry).not.toHaveBeenCalled();
   });
 
@@ -227,6 +228,96 @@ describe("runTriageAgent", () => {
     );
     await runTriageAgent([makeFinding({ id: "f1" })], {} as LLMClient, "m", makeTracker());
     expect(createMessageWithRetry).toHaveBeenCalledTimes(15);
+  });
+
+  describe("product edge", () => {
+    const edge: ProductEdge = {
+      sharpEdges: ["Keyboard-first everywhere"],
+      tradeoffs: ["No onboarding wizard"],
+      source: "human",
+    };
+
+    it("edge 未宣言なら prompt にも create_issue スキーマにも edge_risk は出ない", async () => {
+      vi.mocked(createMessageWithRetry).mockResolvedValue(endTurn() as never);
+      await runTriageAgent([makeFinding()], {} as LLMClient, "m", makeTracker());
+      const [, params] = vi.mocked(createMessageWithRetry).mock.calls[0];
+      expect(params.system).not.toContain("Product Edge");
+      const createIssue = params.tools?.find((t) => t.name === "create_issue");
+      const properties = (createIssue?.input_schema as { properties: Record<string, unknown> }).properties;
+      expect(properties.edge_risk).toBeUndefined();
+    });
+
+    it("edge を宣言すると prompt に載り create_issue が edge_risk を受け取れる", async () => {
+      vi.mocked(createMessageWithRetry).mockResolvedValue(endTurn() as never);
+      await runTriageAgent([makeFinding()], {} as LLMClient, "m", makeTracker(), undefined, edge);
+      const [, params] = vi.mocked(createMessageWithRetry).mock.calls[0];
+      expect(params.system).toContain("Keyboard-first everywhere");
+      expect(params.system).toContain("No onboarding wizard");
+      const createIssue = params.tools?.find((t) => t.name === "create_issue");
+      const properties = (createIssue?.input_schema as { properties: Record<string, unknown> }).properties;
+      expect(properties.edge_risk).toBeDefined();
+    });
+
+    it("edge_risk 付きの issue は edge-risk ラベルと判断材料セクションを持つ", async () => {
+      const tracker = makeTracker();
+      vi.mocked(createMessageWithRetry)
+        .mockResolvedValueOnce(toolUseResponse("create_issue", {
+          title: "Add a mouse path", body: "b", category: "ux", merged_finding_ids: ["f1"],
+          edge_risk: { edge: "Keyboard-first everywhere", why: "A mouse path makes the keyboard flow optional" },
+        }) as never)
+        .mockResolvedValueOnce(endTurn() as never);
+      const result = await runTriageAgent([makeFinding({ id: "f1" })], {} as LLMClient, "m", tracker, undefined, edge);
+      const [, body, labels] = vi.mocked(tracker.createIssue).mock.calls[0];
+      expect(labels).toEqual(["ux", "feedback-agent", "edge-risk"]);
+      expect(body).toContain("Edge risk — decide before fixing");
+      expect(body).toContain("Keyboard-first everywhere");
+      // 指摘そのものは握りつぶさない: 通常どおり起票される
+      expect(result.issued).toEqual(["f1"]);
+      expect(result.edgeRisks).toEqual(["f1"]);
+    });
+
+    it("bug は尖りを理由に印を付けない（欠陥はポジショニングで正当化できない）", async () => {
+      const tracker = makeTracker();
+      vi.mocked(createMessageWithRetry)
+        .mockResolvedValueOnce(toolUseResponse("create_issue", {
+          title: "Save silently fails", body: "b", category: "bug", merged_finding_ids: ["f1"],
+          edge_risk: { edge: "Keyboard-first everywhere", why: "..." },
+        }) as never)
+        .mockResolvedValueOnce(endTurn() as never);
+      const result = await runTriageAgent([makeFinding({ id: "f1" })], {} as LLMClient, "m", tracker, undefined, edge);
+      const [, body, labels] = vi.mocked(tracker.createIssue).mock.calls[0];
+      expect(labels).toEqual(["bug", "feedback-agent"]);
+      expect(body).not.toContain("Edge risk");
+      expect(result.edgeRisks).toEqual([]);
+    });
+
+    it("edge 未宣言なら edge_risk が渡ってきても無視する", async () => {
+      const tracker = makeTracker();
+      vi.mocked(createMessageWithRetry)
+        .mockResolvedValueOnce(toolUseResponse("create_issue", {
+          title: "t", body: "b", category: "ux", merged_finding_ids: ["f1"],
+          edge_risk: { edge: "made up", why: "..." },
+        }) as never)
+        .mockResolvedValueOnce(endTurn() as never);
+      const result = await runTriageAgent([makeFinding({ id: "f1" })], {} as LLMClient, "m", tracker);
+      const [, , labels] = vi.mocked(tracker.createIssue).mock.calls[0];
+      expect(labels).toEqual(["ux", "feedback-agent"]);
+      expect(result.edgeRisks).toEqual([]);
+    });
+
+    it("edge_risk が半分しか無い場合は印を付けない", async () => {
+      const tracker = makeTracker();
+      vi.mocked(createMessageWithRetry)
+        .mockResolvedValueOnce(toolUseResponse("create_issue", {
+          title: "t", body: "b", category: "ux", merged_finding_ids: ["f1"],
+          edge_risk: { edge: "Keyboard-first everywhere" },
+        }) as never)
+        .mockResolvedValueOnce(endTurn() as never);
+      const result = await runTriageAgent([makeFinding({ id: "f1" })], {} as LLMClient, "m", tracker, undefined, edge);
+      const [, , labels] = vi.mocked(tracker.createIssue).mock.calls[0];
+      expect(labels).toEqual(["ux", "feedback-agent"]);
+      expect(result.edgeRisks).toEqual([]);
+    });
   });
 
   it("処理後に findings/<runId>/triage_result.json を書き込む", async () => {

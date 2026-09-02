@@ -13,6 +13,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { createLLMClient } from "./framework/llm-client";
 import { runTriageAgent } from "./framework/triage";
+import { loadCachedSpec } from "./framework/product-discovery";
 import { buildTrackers } from "./framework/trackers/index";
 import type { Finding } from "./framework/types";
 
@@ -36,6 +37,15 @@ function getLatestRunId(): string {
   return runs[runs.length - 1];
 }
 
+/** 宣言済みの product edge（キャッシュ済み spec から）。BASE_URL 未設定なら無し。 */
+function loadProductEdge() {
+  try {
+    return loadCachedSpec(process.env.BASE_URL ?? "http://localhost:3000")?.productEdge;
+  } catch {
+    return undefined;
+  }
+}
+
 async function main() {
   const runId = process.env.RUN_ID ?? getLatestRunId();
   console.log(`[トリアージ単体実行] runId: ${runId}`);
@@ -46,12 +56,13 @@ async function main() {
 
   const { client, defaultModel } = createLLMClient();
   const trackers = buildTrackers();
-  const result = await runTriageAgent(findings, client, defaultModel, trackers);
+  const result = await runTriageAgent(findings, client, defaultModel, trackers, undefined, loadProductEdge());
 
   console.log("\n=== トリアージ結果 ===");
   console.log(`  Issue作成: ${result.issuesCreated}件`);
   console.log(`  スキップ: ${result.skipped.length}件`);
   console.log(`  未処理: ${result.unprocessed.length}件`);
+  console.log(`  尖りリスク付き: ${result.edgeRisks.length}件`);
 }
 
 main().catch(console.error);

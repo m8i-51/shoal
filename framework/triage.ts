@@ -8,50 +8,81 @@ import type { IssueTracker } from "./trackers/index";
 import { recordIssueLink } from "./adoption";
 import { commentReturningUserReReports } from "./triage-rereport";
 import { formatIssueRef } from "./issue-id";
+import {
+  EDGE_RISK_LABEL,
+  canCarryEdgeRisk,
+  formatEdgeRiskSection,
+  formatProductEdgeForPrompt,
+  normalizeEdgeRisk,
+  type ProductEdge,
+} from "./product-edge";
 
-const TRIAGE_TOOLS: Anthropic.Tool[] = [
-  {
-    name: "get_all_findings",
-    description: "Get all feedback collected by agents / 全エージェントが収集したフィードバック一覧を取得する",
-    input_schema: { type: "object", properties: {}, required: [] },
-  },
-  {
-    name: "create_issue",
-    description: "Post feedback as an issue ticket; multiple related findings can be merged into one / フィードバックをissueチケットとして投稿する。類似フィードバックをまとめて1件にできる",
-    input_schema: {
-      type: "object",
-      properties: {
-        title: { type: "string", description: "Issue title (concise)" },
-        body: { type: "string", description: "Issue body with details from multiple perspectives" },
-        category: { type: "string", enum: ["ux", "feature-request", "bug", "goal-gap"] },
-        merged_finding_ids: {
-          type: "array",
-          items: { type: "string" },
-          description: "IDs of the findings merged into this Issue",
+function buildTriageTools(hasProductEdge: boolean): Anthropic.Tool[] {
+  const tools: Anthropic.Tool[] = [
+    {
+      name: "get_all_findings",
+      description: "Get all feedback collected by agents / 全エージェントが収集したフィードバック一覧を取得する",
+      input_schema: { type: "object", properties: {}, required: [] },
+    },
+    {
+      name: "create_issue",
+      description: "Post feedback as an issue ticket; multiple related findings can be merged into one / フィードバックをissueチケットとして投稿する。類似フィードバックをまとめて1件にできる",
+      input_schema: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Issue title (concise)" },
+          body: { type: "string", description: "Issue body with details from multiple perspectives" },
+          category: { type: "string", enum: ["ux", "feature-request", "bug", "goal-gap"] },
+          merged_finding_ids: {
+            type: "array",
+            items: { type: "string" },
+            description: "IDs of the findings merged into this Issue",
+          },
         },
+        required: ["title", "body", "category", "merged_finding_ids"],
       },
-      required: ["title", "body", "category", "merged_finding_ids"],
     },
-  },
-  {
-    name: "skip_finding",
-    description: "Skip a finding that duplicates an existing open issue / 既存のOpenなissueと重複するためスキップする",
-    input_schema: {
-      type: "object",
-      properties: {
-        finding_id: { type: "string", description: "ID of the finding to skip" },
-        reason: { type: "string", description: "Reason for skipping" },
+    {
+      name: "skip_finding",
+      description: "Skip a finding that duplicates an existing open issue / 既存のOpenなissueと重複するためスキップする",
+      input_schema: {
+        type: "object",
+        properties: {
+          finding_id: { type: "string", description: "ID of the finding to skip" },
+          reason: { type: "string", description: "Reason for skipping" },
+        },
+        required: ["finding_id", "reason"],
       },
-      required: ["finding_id", "reason"],
     },
-  },
-];
+  ];
+
+  if (hasProductEdge) {
+    const createIssue = tools.find((t) => t.name === "create_issue");
+    const schema = createIssue?.input_schema as { properties?: Record<string, unknown> } | undefined;
+    if (schema?.properties) {
+      schema.properties.edge_risk = {
+        type: "object",
+        description:
+          "Set ONLY when acting on this issue as reported would blunt a declared product edge or reverse a deliberate trade-off. The issue is still filed either way — this marks it for a human decision. Never set it on bug findings.",
+        properties: {
+          edge: { type: "string", description: "The declared sharp edge or trade-off at stake (quote it)" },
+          why: { type: "string", description: "Why the obvious fix would blunt that edge, and what would be lost" },
+        },
+        required: ["edge", "why"],
+      };
+    }
+  }
+
+  return tools;
+}
 
 export interface TriageResult {
   issued: string[];
   skipped: string[];
   unprocessed: string[];
   issuesCreated: number;
+  /** Finding IDs filed on issues whose fix would blunt a declared product edge. */
+  edgeRisks: string[];
 }
 
 export async function runTriageAgent(
@@ -61,10 +92,12 @@ export async function runTriageAgent(
   tracker: IssueTracker,
   // adoption 集計用: agentId → 担当 lens / scenario（省略時はリンク記録なし）
   agentAssignments?: Map<string, { scenario?: { title: string }; lens?: string }>,
+  // 宣言済みの product edge（未宣言なら edge_risk ツールごと出さない）
+  productEdge?: ProductEdge,
 ): Promise<TriageResult> {
   if (findings.length === 0) {
     console.log("\n[triage] no findings, skipping");
-    return { issued: [], skipped: [], unprocessed: [], issuesCreated: 0 };
+    return { issued: [], skipped: [], unprocessed: [], issuesCreated: 0, edgeRisks: [] };
   }
 
   console.log(`\n[triage] starting (findings: ${findings.length})`);
@@ -88,18 +121,23 @@ export async function runTriageAgent(
       skipped: reReports.filter((r) => r.commented).map((r) => r.findingId),
       unprocessed: [],
       issuesCreated: 0,
+      edgeRisks: [],
     };
   }
 
   const pendingIds = new Set(triageFindings.map((f) => f.id));
   const issuedIds: string[] = [];
   const skippedIds: string[] = reReports.filter((r) => r.commented).map((r) => r.findingId);
+  const edgeRiskIds: string[] = [];
   let issuesCreated = 0;
   let skipped = skippedIds.length;
 
   const openIssueList = openIssues.length > 0
     ? `\n\n[Existing open issues (for deduplication)]\n${openIssues.map((i) => `- ${i.number}: ${i.title}`).join("\n")}`
     : "";
+
+  const edgePrompt = formatProductEdgeForPrompt(productEdge);
+  const edgeSection = edgePrompt ? `\n\n${edgePrompt}` : "";
 
   const systemPrompt = `You are a feedback triage AI.
 Organize feedback collected by multiple agents and post it as issue tickets.
@@ -126,9 +164,9 @@ Organize feedback collected by multiple agents and post it as issue tickets.
 
 [Important Constraints]
 - merged_finding_ids must contain at least one ID
-- If a finding cannot be linked to any feedback, use skip_finding instead of create_issue`;
+- If a finding cannot be linked to any feedback, use skip_finding instead of create_issue${edgeSection}`;
 
-  const sessionTools = TRIAGE_TOOLS.map((t) => ({
+  const sessionTools = buildTriageTools(Boolean(edgePrompt)).map((t) => ({
     name: t.name,
     description: t.description ?? t.name,
     input_schema: t.input_schema as Record<string, unknown>,
@@ -149,11 +187,12 @@ Organize feedback collected by multiple agents and post it as issue tickets.
       }
 
       if (t.name === "create_issue") {
-        const { title, body, category, merged_finding_ids } = input as {
+        const { title, body, category, merged_finding_ids, edge_risk } = input as {
           title?: string;
           body?: string;
           category?: string;
           merged_finding_ids?: string[];
+          edge_risk?: unknown;
         };
         if (!title || !body || !category) {
           return JSON.stringify({ error: "create_issue: missing required fields" });
@@ -170,14 +209,30 @@ Organize feedback collected by multiple agents and post it as issue tickets.
         const screenshotSection = screenshots.length > 0
           ? `\n\n**Screenshots:**\n${screenshots.join("\n")}`
           : "";
-        const fullBody = `**Category:** ${category}\n\n${body}${screenshotSection}\n\n---\n**Reported by:** ${mergedAgents.join(", ")}\n*This Issue was auto-generated by an AI triage agent*`;
+        // edge が宣言されているときだけ、かつ defect カテゴリ以外にのみ印を付ける
+        const edgeRisk = edgePrompt && canCarryEdgeRisk(category) ? normalizeEdgeRisk(edge_risk) : null;
+        if (edge_risk && !edgeRisk) {
+          const reason = !edgePrompt
+            ? "no product edge declared"
+            : !canCarryEdgeRisk(category)
+              ? `a ${category} is a defect, not a positioning call`
+              : "edge / why missing";
+          console.log(`  [triage] edge_risk ignored — ${reason}`);
+        }
+        const edgeRiskSection = edgeRisk ? formatEdgeRiskSection(edgeRisk) : "";
+        const fullBody = `**Category:** ${category}\n\n${body}${screenshotSection}${edgeRiskSection}\n\n---\n**Reported by:** ${mergedAgents.join(", ")}\n*This Issue was auto-generated by an AI triage agent*`;
         const cleanTitle = title.replace(/^\[[^\]]+\]\s*/i, "");
-        const url = await tracker.createIssue(`[${category}] ${cleanTitle}`, fullBody, [category, "feedback-agent"]);
+        const labels = edgeRisk ? [category, "feedback-agent", EDGE_RISK_LABEL] : [category, "feedback-agent"];
+        const url = await tracker.createIssue(`[${category}] ${cleanTitle}`, fullBody, labels);
         if (url === null && !tracker.isEmpty) {
           return JSON.stringify({ created: false, error: "tracker returned null — check logs" });
         }
         mergedIds.forEach((id) => { pendingIds.delete(id); issuedIds.push(id); });
         issuesCreated++;
+        if (edgeRisk) {
+          edgeRiskIds.push(...mergedIds);
+          console.log(`  [triage] edge risk flagged: ${edgeRisk.edge}`);
+        }
         if (url && agentAssignments) {
           const lenses = new Set<string>();
           const scenarios = new Set<string>();
@@ -197,7 +252,7 @@ Organize feedback collected by multiple agents and post it as issue tickets.
           });
         }
         console.log(`  [triage] issue created: "[${category}] ${cleanTitle}" (merged ${mergedIds.length})`);
-        return JSON.stringify({ created: true, url, mergedCount: mergedIds.length });
+        return JSON.stringify({ created: true, url, mergedCount: mergedIds.length, edgeRisk: Boolean(edgeRisk) });
       }
 
       if (t.name === "skip_finding") {
@@ -238,11 +293,19 @@ Organize feedback collected by multiple agents and post it as issue tickets.
         issued: issuedIds,
         skipped: skippedIds,
         unprocessed: Array.from(pendingIds),
+        edgeRisks: edgeRiskIds,
       }, null, 2),
       "utf-8"
     );
   }
 
-  console.log(`[triage] done (issues created: ${issuesCreated} / skipped: ${skipped})`);
-  return { issued: issuedIds, skipped: skippedIds, unprocessed: Array.from(pendingIds), issuesCreated };
+  const edgeRiskNote = edgeRiskIds.length > 0 ? ` / edge-risk: ${edgeRiskIds.length}` : "";
+  console.log(`[triage] done (issues created: ${issuesCreated} / skipped: ${skipped}${edgeRiskNote})`);
+  return {
+    issued: issuedIds,
+    skipped: skippedIds,
+    unprocessed: Array.from(pendingIds),
+    issuesCreated,
+    edgeRisks: edgeRiskIds,
+  };
 }

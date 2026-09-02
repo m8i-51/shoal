@@ -120,6 +120,45 @@ describe("discoverProduct", () => {
     expect(result.thresholdCandidates).toEqual([]);
   });
 
+  it("productEdge を normalize して保存する", async () => {
+    vi.mocked(createMessageWithRetry)
+      .mockResolvedValueOnce(toolUseResponse("output_spec", {
+        ...makeOutputSpecInput(),
+        productEdge: { sharpEdges: ["Keyboard-first", "  "], tradeoffs: ["No wizard"] },
+      }) as never);
+    const result = await discoverProduct("https://example.com", makeFakePage(), {} as LLMClient, "m");
+    expect(result.productEdge).toEqual({
+      sharpEdges: ["Keyboard-first"],
+      tradeoffs: ["No wizard"],
+      source: "discovered",
+    });
+  });
+
+  it("productEdge が無い / 空なら spec に持たせない", async () => {
+    vi.mocked(createMessageWithRetry)
+      .mockResolvedValueOnce(toolUseResponse("output_spec", {
+        ...makeOutputSpecInput(),
+        productEdge: { sharpEdges: [], tradeoffs: [] },
+      }) as never);
+    const result = await discoverProduct("https://example.com", makeFakePage(), {} as LLMClient, "m");
+    expect(result.productEdge).toBeUndefined();
+  });
+
+  it("チームが宣言した productEdge は再ディスカバリの推論で上書きしない", async () => {
+    const declared = { sharpEdges: ["Declared by the team"], tradeoffs: [], source: "human" };
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({ productEdge: declared }) as unknown as ReturnType<typeof fs.readFileSync>
+    );
+    vi.mocked(createMessageWithRetry)
+      .mockResolvedValueOnce(toolUseResponse("output_spec", {
+        ...makeOutputSpecInput(),
+        productEdge: { sharpEdges: ["Inferred instead"], tradeoffs: [] },
+      }) as never);
+    const result = await discoverProduct("https://example.com", makeFakePage(), {} as LLMClient, "m");
+    expect(result.productEdge).toEqual(declared);
+  });
+
   it("output_spec が一度も呼ばれない場合はフォールバック spec を使う（8イテレーション後）", async () => {
     vi.mocked(createMessageWithRetry).mockResolvedValue(
       toolUseResponse("navigate_and_read", { path: "/" }) as never

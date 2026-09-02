@@ -1747,14 +1747,14 @@ Rules:
     // 9. triage (API + browser + threshold findings)
     await sleep(RUN_TIMINGS.beforeTriageMs);
     console.log(`\n[triage] collected findings: ${collectedFindings.length}`);
-    let triageResult = { issued: [] as string[], skipped: [] as string[], unprocessed: [] as string[], issuesCreated: 0 };
+    let triageResult = { issued: [] as string[], skipped: [] as string[], unprocessed: [] as string[], issuesCreated: 0, edgeRisks: [] as string[] };
     if (isBudgetExceeded()) {
       // 起票せずに終える。findings は保存済みで、レポートと triage-only で後から処理できる
       console.log("[triage] skipped (spend cap reached) — findings are saved; run `shoal triage` after raising SHOAL_MAX_USD");
       triageResult.unprocessed = collectedFindings.map((f) => f.title);
     } else {
       try {
-        triageResult = await runTriageAgent(collectedFindings, client, defaultModel, trackers, agentAssignments);
+        triageResult = await runTriageAgent(collectedFindings, client, defaultModel, trackers, agentAssignments, productSpec.productEdge);
         runLog.summary.totalIssuesPosted += triageResult.issuesCreated;
       } catch (e) {
         console.error("[triage] error:", e);
