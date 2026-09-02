@@ -1,0 +1,50 @@
+version: 2
+
+# Security alerts already open PRs without this file. What was missing is
+# *version* updates: shipping against a months-old LLM SDK is its own risk, and
+# the SDKs in this project move fast.
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+      prefix-development: "chore(deps-dev)"
+    groups:
+      # One PR per family keeps CI cost down and makes a breaking change easy to
+      # spot: if the group PR is red, the family is the cause.
+      llm-sdks:
+        patterns:
+          - "@anthropic-ai/*"
+          - "openai"
+          - "@modelcontextprotocol/*"
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "react-router*"
+          - "@types/react*"
+      dev-tooling:
+        patterns:
+          - "vite"
+          - "vitest"
+          - "@vitest/*"
+          - "@vitejs/*"
+          - "typescript"
+          - "typescript-eslint"
+          - "eslint*"
+          - "@types/*"
+        exclude-patterns:
+          - "@types/react*"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "ci"
