@@ -91,8 +91,12 @@ There is no formatter. Match the style of the file you are editing;
   refactors and internal test changes do not need one.
 - Keep pull requests small and scoped. Fill out the PR template and describe how
   you tested the change.
-- PRs are automatically reviewed by [CodeRabbit](https://coderabbit.ai/) in
-  addition to a human maintainer.
+- [CodeRabbit](https://coderabbit.ai/) is configured for this repo
+  (`.coderabbit.yaml`), but it does not review pull requests on its own:
+  CodeRabbit skips automatic review for repositories with fewer than 10 stars,
+  and the config also excludes drafts. Comment `@coderabbitai review` on a pull
+  request to ask for one. A human maintainer reviews every pull request either
+  way.
 - By contributing, you agree that your contributions are licensed under the
   project's [MIT License](LICENSE).
 
