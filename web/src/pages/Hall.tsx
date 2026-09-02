@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
+import { apiFetch } from "../api";
 
 interface HallFinding {
   id: string;
@@ -46,11 +47,11 @@ export function Hall() {
   const [importError, setImportError] = useState(false);
 
   useEffect(() => {
-    fetch("/api/findings")
+    apiFetch("/api/findings")
       .then((r) => (r.ok ? r.json() : []))
       .then(setFindings)
       .catch(() => {});
-    fetch("/api/findings/cross-run-duplicates")
+    apiFetch("/api/findings/cross-run-duplicates")
       .then((r) => (r.ok ? r.json() : []))
       .then(setDuplicates)
       .catch(() => {});
@@ -70,7 +71,7 @@ export function Hall() {
   const categories = Array.from(new Set(allFindings.map((f) => f.category)));
 
   const handleExport = async () => {
-    const res = await fetch("/api/findings/export");
+    const res = await apiFetch("/api/findings/export");
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -85,7 +86,7 @@ export function Hall() {
     setImporting(true);
     setImportError(false);
     try {
-      const res = await fetch("/api/findings/proxy-url", {
+      const res = await apiFetch("/api/findings/proxy-url", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: importUrl.trim() }),

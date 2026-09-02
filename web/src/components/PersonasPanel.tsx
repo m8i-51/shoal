@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useImeEnterHandler } from "../utils/ime-enter";
+import { apiFetch } from "../api";
 
 interface Persona {
   id: string;
@@ -34,7 +35,7 @@ export function PersonasPanel() {
 
   const load = async () => {
     try {
-      const res = await fetch("/api/personas?archived=1");
+      const res = await apiFetch("/api/personas?archived=1");
       if (!res.ok) return;
       const all = (await res.json()) as Persona[];
       setActive(all.filter((p) => (p.status ?? "active") !== "archived"));
@@ -54,7 +55,7 @@ export function PersonasPanel() {
     setCreating(true);
     setError(null);
     try {
-      const res = await fetch("/api/personas", {
+      const res = await apiFetch("/api/personas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ seed: trimmed }),
@@ -97,7 +98,7 @@ export function PersonasPanel() {
         .split(",")
         .map((l) => l.trim())
         .filter(Boolean);
-      const res = await fetch(`/api/personas/${editingId}`, {
+      const res = await apiFetch(`/api/personas/${editingId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -123,13 +124,13 @@ export function PersonasPanel() {
   };
 
   const archive = async (id: string) => {
-    await fetch(`/api/personas/${id}/archive`, { method: "POST" });
+    await apiFetch(`/api/personas/${id}/archive`, { method: "POST" });
     if (editingId === id) setEditingId(null);
     await load();
   };
 
   const restore = async (id: string) => {
-    await fetch(`/api/personas/${id}/restore`, { method: "POST" });
+    await apiFetch(`/api/personas/${id}/restore`, { method: "POST" });
     await load();
   };
 

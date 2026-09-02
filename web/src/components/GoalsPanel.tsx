@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { apiFetch } from "../api";
 
 interface ProductSpec {
   appName: string;
@@ -15,7 +16,7 @@ export function GoalsPanel() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    fetch("/api/spec")
+    apiFetch("/api/spec")
       .then((r) => {
         if (r.status === 404) { setNotFound(true); return null; }
         return r.json();
@@ -37,7 +38,7 @@ export function GoalsPanel() {
     const goals = draft.map((g) => g.trim()).filter(Boolean);
     setSaving(true);
     try {
-      const res = await fetch("/api/spec/goals", {
+      const res = await apiFetch("/api/spec/goals", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ goals }),

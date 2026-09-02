@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { apiFetch } from "../api";
 
 interface RunExperience {
   runId: string;
@@ -50,7 +51,7 @@ export function ExperiencePanel() {
   const [exp, setExp] = useState<ExperienceScore | null>(null);
 
   useEffect(() => {
-    fetch("/api/experience")
+    apiFetch("/api/experience")
       .then((r) => (r.ok ? r.json() : null))
       .then((data: ExperienceScore | null) => {
         if (data) setExp(data);

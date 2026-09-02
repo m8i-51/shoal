@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
+import { apiFetch } from "../api";
 
 interface ScheduleConfig {
   enabled: boolean;
@@ -15,7 +16,7 @@ export function SchedulePanel() {
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    fetch("/api/schedule")
+    apiFetch("/api/schedule")
       .then((r) => r.json())
       .then((data: ScheduleConfig) => setConfig(data))
       .catch(() => {});
@@ -26,7 +27,7 @@ export function SchedulePanel() {
     const updated = { ...config, ...partial };
     setConfig(updated);
     try {
-      const res = await fetch("/api/schedule", {
+      const res = await apiFetch("/api/schedule", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(partial),
@@ -37,7 +38,10 @@ export function SchedulePanel() {
         setSaved(true);
         setTimeout(() => setSaved(false), 2000);
       }
-    } catch {}
+    } catch {
+      // Network failure — the panel keeps the last known config and the
+      // operator can retry; there is nothing useful to show here.
+    }
   };
 
   if (!config) return null;

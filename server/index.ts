@@ -14,6 +14,7 @@ import { computeExperienceScore } from "../framework/experience-score.js";
 import { loadSiteMap, buildSiteMapDashboardView } from "../framework/site-map.js";
 import { isFinding, type Finding } from "../framework/types.js";
 import { buildSafeProxyUrl } from "./proxy-url.js";
+import { hostGuard, requireToken, resolveBinding, resolveDashboardToken } from "./auth.js";
 import {
   addAgent,
   archiveAgent,
@@ -51,10 +52,15 @@ function safeLogPath(filename: string): string | null {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
-const PORT = parseInt(process.env.PORT ?? "4000", 10);
+const binding = resolveBinding();
+const auth = resolveDashboardToken(binding);
 
 app.use(express.json());
 app.use(rateLimit({ windowMs: 60_000, limit: 120 }));
+// Host / Origin checks apply to the whole app; the token gates the API, so the
+// static bundle can still load and then authenticate its own calls.
+app.use(hostGuard(binding));
+app.use("/api", requireToken(auth.token));
 
 // ----------------------------------------------------------------
 // API: product spec (goals)
@@ -553,8 +559,11 @@ process.on("unhandledRejection", (reason) => {
 export { app };
 
 if (process.env.NODE_ENV !== "test") {
-  app.listen(PORT, () => {
-    console.log(`\nshoal dashboard → http://localhost:${PORT}\n`);
+  app.listen(binding.port, binding.host, () => {
+    const displayHost = binding.isLoopback ? "localhost" : binding.host;
+    console.log(`\nshoal dashboard → http://${displayHost}:${binding.port}`);
+    for (const notice of auth.notices) console.log(notice);
+    console.log("");
     startScheduler();
   });
 }

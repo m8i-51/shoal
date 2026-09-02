@@ -6,8 +6,10 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/api": "http://localhost:4000",
-      "/sessions": "http://localhost:4000",
+      // changeOrigin stays false so the API server sees the dev server's Host
+      // header; its host/origin guard (server/auth.ts) checks both.
+      "/api": { target: "http://localhost:4000", changeOrigin: false },
+      "/sessions": { target: "http://localhost:4000", changeOrigin: false },
     },
   },
   build: {
