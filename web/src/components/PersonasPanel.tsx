@@ -15,6 +15,16 @@ interface Persona {
   accountRole?: string;
 }
 
+async function fetchPersonas(): Promise<Persona[] | null> {
+  try {
+    const res = await apiFetch("/api/personas?archived=1");
+    if (!res.ok) return null;
+    return (await res.json()) as Persona[];
+  } catch {
+    return null;
+  }
+}
+
 export function PersonasPanel() {
   const { t } = useTranslation();
   const [active, setActive] = useState<Persona[]>([]);
@@ -33,21 +43,29 @@ export function PersonasPanel() {
   });
   const [saving, setSaving] = useState(false);
 
-  const load = async () => {
-    try {
-      const res = await apiFetch("/api/personas?archived=1");
-      if (!res.ok) return;
-      const all = (await res.json()) as Persona[];
-      setActive(all.filter((p) => (p.status ?? "active") !== "archived"));
-      setArchived(all.filter((p) => p.status === "archived"));
-    } catch {
-      /* ignore */
-    }
-  };
+  const applyPersonas = useCallback((all: Persona[]) => {
+    setActive(all.filter((p) => (p.status ?? "active") !== "archived"));
+    setArchived(all.filter((p) => p.status === "archived"));
+  }, []);
+
+  const load = useCallback(async () => {
+    const all = await fetchPersonas();
+    if (all) applyPersonas(all);
+  }, [applyPersonas]);
 
   useEffect(() => {
-    void load();
-  }, []);
+    // The mount fetch runs inside the effect and is guarded by `ignore`, so a
+    // response landing after unmount is dropped instead of setting state.
+    let ignore = false;
+    async function loadOnMount() {
+      const all = await fetchPersonas();
+      if (!ignore && all) applyPersonas(all);
+    }
+    void loadOnMount();
+    return () => {
+      ignore = true;
+    };
+  }, [applyPersonas]);
 
   const createFromSeed = useCallback(async () => {
     const trimmed = seed.trim();
@@ -72,7 +90,7 @@ export function PersonasPanel() {
     } finally {
       setCreating(false);
     }
-  }, [seed, t]);
+  }, [seed, t, load]);
 
   const seedEnterHandlers = useImeEnterHandler(() => {
     void createFromSeed();

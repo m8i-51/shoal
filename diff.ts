@@ -98,7 +98,7 @@ async function main() {
     }
     focusRoutes = expanded;
   } catch {
-    focusRoutes = fileRoutes;
+    // No page cache for this host — the file-derived routes stand as-is.
   }
 
   if (focusRoutes.length > 0) {
