@@ -23,7 +23,8 @@ write it in English, wherever it sits.
 
 ## Prerequisites
 
-- **Node.js 20+** (CI runs on Node 20; the release build uses Node 22)
+- **Node.js 22+** (CI and the release build both run on Node 22; the openai
+  SDK and `concurrently` declare `engines: node >= 22`)
 - **npm** (the repo ships a `package-lock.json`)
 - A supported LLM provider key if you want to run agents end-to-end — Anthropic
   by default. See the [LLM providers](README.md#llm-providers) table for

@@ -60,6 +60,10 @@ entries for `0.1.20` and earlier live in the commit log only.
   `framework/agent-tools.ts` (tool schemas), and `framework/run-config.ts`
   (timings and limits). The tool layer takes its collaborators through a context
   object, so it is now unit-tested rather than reachable only through a live run.
+- **The minimum supported Node.js version is now 22.** The openai SDK (v7) and
+  `concurrently` (v10) both declare `engines: node >= 22`, and the release build
+  already ran on 22; CI, the example workflows, and `package.json` now say so
+  too. Node 20 is no longer tested.
 
 ## [0.1.33] — 2026-08-28
 

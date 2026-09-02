@@ -7,6 +7,9 @@
     "type": "git",
     "url": "https://github.com/m8i-51/shoal"
   },
+  "engines": {
+    "node": ">=22"
+  },
   "bin": {
     "shoal": "./bin/shoal.js"
   },
