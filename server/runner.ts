@@ -20,6 +20,19 @@ export interface Session {
 
 export const activeSessions = new Map<string, Session>();
 
+/**
+ * How long a finished session's log lines and listeners stay in memory after
+ * its process exits. `shoal serve` with the weekly scheduler enabled runs
+ * for weeks at a time, and `Session.lines` holds every stdout/stderr line for
+ * a run's entire lifetime — without eviction, `activeSessions` grows without
+ * bound as runs accumulate. Every route that reads a session already falls
+ * back to the persisted log file when it is missing from memory (the log,
+ * diary, and `/api/runs` endpoints in server/index.ts), so eviction after a
+ * generous grace period loses nothing but the in-memory fast path for a run
+ * nobody is actively viewing any more.
+ */
+export const SESSION_RETENTION_MS = 30 * 60 * 1000;
+
 export function spawnRun(opts: {
   baseUrl?: string;
   maxBrowsers?: number;
@@ -107,6 +120,14 @@ export function spawnRun(opts: {
     session.exitCode = code ?? 0;
     try { unlinkSync(pendingPath); } catch { /* ignore */ }
     for (const listener of session.doneListeners) listener();
+
+    const evict = setTimeout(() => {
+      // Only drop this exact session object — a cleared-then-recreated
+      // sessionId (unlikely given the Date.now() id, but not impossible in a
+      // test) must not be evicted out from under a fresh run.
+      if (activeSessions.get(sessionId) === session) activeSessions.delete(sessionId);
+    }, SESSION_RETENTION_MS);
+    evict.unref?.();
   });
 
   return sessionId;

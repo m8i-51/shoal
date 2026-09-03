@@ -1267,7 +1267,7 @@ async function runVerifyMode(
   console.log(`[verify] result saved: ${outPath}`);
 }
 
-async function main() {
+export async function main() {
   initDirs();
   // run log を最初期化しておくことで、どの段階でエラーが起きても finally で saveRunLog() が動く
   initRunLog(0, process.env.GITHUB_REPO ?? "");
@@ -1817,12 +1817,19 @@ Rules:
   }
 }
 
-main().catch((e) => {
-  if (e instanceof BudgetExceededError) {
-    console.error(`\n${e.message}`);
-    console.error("Raise SHOAL_MAX_USD (or unset it) to continue exploring.");
-    process.exitCode = 1;
-    return;
-  }
-  console.error(e);
-});
+// Guarded so run.ts can be imported (e.g. by a unit test exercising one of its
+// exported helpers) without launching a real agent swarm against BASE_URL.
+// Unlike server/index.ts and server/mcp.ts, this had no such guard: importing
+// this module for any reason — even just to reuse a pure function — used to
+// spawn a live Playwright browser and start exploring.
+if (process.env.NODE_ENV !== "test") {
+  main().catch((e) => {
+    if (e instanceof BudgetExceededError) {
+      console.error(`\n${e.message}`);
+      console.error("Raise SHOAL_MAX_USD (or unset it) to continue exploring.");
+      process.exitCode = 1;
+      return;
+    }
+    console.error(e);
+  });
+}

@@ -119,13 +119,56 @@ describe("createMessageWithRetry", () => {
       .mockResolvedValueOnce({ content: [], stop_reason: "end_turn", usage: {} });
 
     const promise = createMessageWithRetry(makeClient(createMessage), {} as never, 3);
-    await vi.advanceTimersByTimeAsync(10000);
+    await vi.advanceTimersByTimeAsync(11000);
     await expect(promise).resolves.toBeDefined();
     vi.useRealTimers();
   });
 
-  it("429 以外のエラーは即座に throw する", async () => {
-    const err = { status: 500 };
+  it.each([500, 502, 503, 504, 529])("status %i（5xx / overloaded）も 429 と同様にリトライする", async (status) => {
+    vi.useFakeTimers();
+    const err = { status, headers: { get: () => null } };
+    const createMessage = vi.fn()
+      .mockRejectedValueOnce(err)
+      .mockResolvedValueOnce({ content: [], stop_reason: "end_turn", usage: {} });
+
+    const promise = createMessageWithRetry(makeClient(createMessage), {} as never, 3);
+    await vi.advanceTimersByTimeAsync(11000);
+    await expect(promise).resolves.toBeDefined();
+    expect(createMessage).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it("APIConnectionError（ネットワーク切断、status なし）もリトライする", async () => {
+    vi.useFakeTimers();
+    const err = { name: "APIConnectionError", message: "fetch failed" };
+    const createMessage = vi.fn()
+      .mockRejectedValueOnce(err)
+      .mockResolvedValueOnce({ content: [], stop_reason: "end_turn", usage: {} });
+
+    const promise = createMessageWithRetry(makeClient(createMessage), {} as never, 3);
+    await vi.advanceTimersByTimeAsync(11000);
+    await expect(promise).resolves.toBeDefined();
+    vi.useRealTimers();
+  });
+
+  it("retry-after が HTTP-date 形式でも正しく待機する（以前は NaN 待機で即時リトライしていた）", async () => {
+    vi.useFakeTimers();
+    const retryAt = new Date(Date.now() + 3000).toUTCString();
+    const err = { status: 429, headers: { get: (k: string) => (k === "retry-after" ? retryAt : null) } };
+    const createMessage = vi.fn()
+      .mockRejectedValueOnce(err)
+      .mockResolvedValueOnce({ content: [], stop_reason: "end_turn", usage: {} });
+
+    const promise = createMessageWithRetry(makeClient(createMessage), {} as never, 3);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(createMessage).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(2000);
+    await expect(promise).resolves.toBeDefined();
+    vi.useRealTimers();
+  });
+
+  it("400 のような真のクライアントエラーは即座に throw する（リトライしない）", async () => {
+    const err = { status: 400 };
     const createMessage = vi.fn().mockRejectedValue(err);
     await expect(createMessageWithRetry(makeClient(createMessage), {} as never, 3)).rejects.toBe(err);
     expect(createMessage).toHaveBeenCalledTimes(1);

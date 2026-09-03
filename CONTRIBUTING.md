@@ -11,8 +11,8 @@ shoal is developed bilingually, with one rule so that neither audience is shut
 out:
 
 - **English** for anything a user or a new contributor reads first: the README,
-  `SECURITY.md`, this file, ADR titles, exported symbol names, and the
-  descriptions of tools and prompts sent to the LLM.
+  `SECURITY.md`, this file, `.env.example`, ADR titles, exported symbol names,
+  and the descriptions of tools and prompts sent to the LLM.
 - **English or Japanese** for inline comments, commit messages, PR descriptions,
   and test names. Much of the existing code comments in Japanese; matching the
   file you are editing is always acceptable.
@@ -55,15 +55,18 @@ To develop the web dashboard, `npm run dev` is usually what you want.
 ## Checks (please run before opening a PR)
 
 ```bash
-npm run lint         # eslint (same as CI); `npm run lint:fix` fixes the easy ones
-npx tsc --noEmit     # type check (same as CI)
-npm test             # vitest — the full unit/integration suite
-npm run build:web    # ensure the web bundle still builds
+npm run lint          # eslint (same as CI); `npm run lint:fix` fixes the easy ones
+npx tsc --noEmit      # type check (same as CI)
+npm run test:coverage # vitest — the full unit/integration suite, with coverage (same as CI)
+npm run build:web     # ensure the web bundle still builds
 ```
 
-CI (`.github/workflows/ci.yml`) runs lint, the type check, the test suite, and
-the web build on every pull request, so running these locally first saves a
-round trip.
+CI (`.github/workflows/ci.yml`) runs lint, the type check, the test suite with
+coverage, and the web build on every pull request, so running these locally
+first saves a round trip. The coverage thresholds are in `vitest.config.ts`;
+`npm test` (no coverage) is faster for quick local iteration, but a PR that
+drops coverage below the configured thresholds fails CI even if every test
+passes.
 
 There is no formatter. Match the style of the file you are editing;
 `.editorconfig` covers indentation and line endings.
@@ -99,6 +102,8 @@ There is no formatter. Match the style of the file you are editing;
   way.
 - By contributing, you agree that your contributions are licensed under the
   project's [MIT License](LICENSE).
+- Participation in this project is governed by the
+  [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Reporting bugs and requesting features
 

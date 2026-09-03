@@ -179,6 +179,8 @@ shoal dashboard → http://0.0.0.0:4000
 
 リスナー自体は平文 HTTP なので、外部公開する場合は TLS 終端するリバースプロキシを前段に置くこと。そもそもポートを開けるより SSH トンネル（`ssh -L 4000:localhost:4000 host`）のほうが安全なことが多い。詳細は [SECURITY.md](SECURITY.md) を参照。
 
+**リバースプロキシの前段に置く場合** — 推奨構成は shoal 自体を `SHOAL_HOST=127.0.0.1` のまま保ち、プロキシ（nginx / Caddy / Traefik）が外部に公開して TLS を終端し、ループバック経由で shoal に転送する形である。この構成にはもう一つ変数が要る。**`SHOAL_ALLOWED_HOSTS`** にプロキシの公開ホスト名を設定する（複数ならカンマ区切り）。設定しないと shoal 自身の Host / Origin チェックに全リクエストが引っかかる。Host ヘッダーを保持するプロキシは shoal が知らないホスト名をそのまま送ってくるし、Host を shoal 自身のアドレスに書き換えるプロキシ（nginx の既定動作）でも、ブラウザの本来の `Origin` はそのまま転送されるため一致しなくなる。`SHOAL_ALLOWED_HOSTS` を設定すると、`SHOAL_HOST` を非ループバックにしたときと同様にトークンも必須になる。
+
 ---
 
 ## run を重ねるごとに賢くなる
@@ -263,7 +265,8 @@ shoal serve --env-file apps/shoal/.env
 | `REFRESH_SPEC` | — | `1` を設定するとプロダクト仕様を再探索する |
 | `SHOAL_MAX_USD` | — | 1 run のコスト上限（推定 USD）。到達時点で以降の LLM 呼び出しを止め、残りのレーンをスキップする（それまでの findings は保存・レポートされる） |
 | `SHOAL_HOST` | `127.0.0.1` | ダッシュボードの bind アドレス。既定はループバックのみ。外部公開する場合に設定する（[ダッシュボードへのアクセス](#ダッシュボードへのアクセス)参照） |
-| `SHOAL_TOKEN` | — | ダッシュボードのトークン。`SHOAL_HOST` がループバック以外のときは必須。未設定なら起動時に自動生成して表示する |
+| `SHOAL_TOKEN` | — | ダッシュボードのトークン。`SHOAL_HOST` がループバック以外、または `SHOAL_ALLOWED_HOSTS` 設定時は必須。未設定なら起動時に自動生成して表示する |
+| `SHOAL_ALLOWED_HOSTS` | — | ダッシュボード前段のリバースプロキシの公開ホスト名（カンマ区切り、[ダッシュボードへのアクセス](#ダッシュボードへのアクセス) 参照） |
 | `SHOAL_BROWSER_ITERATIONS` | `12` | ブラウザエージェントのターン数上限 |
 | `SHOAL_THRESHOLD_ITERATIONS` | `12` | しきい値エージェントのターン数上限 |
 | `SHOAL_EXPLORER_CONCURRENCY` | `2` | API エージェントの並列実行数 |
@@ -499,6 +502,43 @@ BENCH_RECORD=1 npm run bench:forms    # forms バリアント
 | Ollama | `LLM_BASE_URL=http://localhost:11434/v1`, `LLM_MODEL` |
 | LM Studio | `LLM_BASE_URL=http://localhost:1234/v1`, `LLM_MODEL` |
 
+### Codex（ChatGPT サブスク）
+
+ChatGPT Plus / Pro サブスクを、公式 Codex CLI のログイン経由で使う方式です。
+
+**前提**
+
+- `npx` が使えること（公式 `@openai/codex` CLI を `npx @openai/codex login` で起動するだけで、別途インストールは不要）
+- ChatGPT Plus / Pro（またはそれに準ずる）サブスク
+
+**セットアップ**
+
+```bash
+npm run auth:codex
+```
+
+公式 Codex CLI の OAuth ログインを実行し、`~/.codex/auth.json` が作成されたことを確認したうえで、`.env` に `LLM_PROVIDER=codex` と既定の `LLM_MODEL` を書き込みます。
+
+**起動**
+
+いつもどおりです。
+
+```bash
+shoal
+# または
+npm start
+shoal serve
+```
+
+**規約について**
+
+下記の `claude-cli` は公式 Claude Code CLI を起動するだけで OAuth トークンには一切触れませんが、`codex` は `~/.codex/auth.json` からアクセストークン・リフレッシュトークンを直接読み取り、期限切れ時は shoal 自身がそれを更新してこのファイルに書き戻し、公式 Codex CLI 自身の client id を使って ChatGPT の非公開エンドポイント `chatgpt.com/backend-api/codex` を直接呼び出します。これは公式 `@openai/codex` CLI と同じ OAuth フローをなぞってはいますが、実際に API を叩いているのはその CLI ではなく shoal 自身です。OpenAI がサードパーティ向けに公開・承認している連携方式ではないため、エンドポイントや認証方式が予告なく変わって動かなくなる可能性があります。shoal をホスト／再配布する用途では、代わりに OpenAI の API キー（`LLM_PROVIDER=openai`）を推奨します。
+
+**トラブルシュート**
+
+- ログインに失敗する → `npx @openai/codex login` を直接実行して元のエラーを確認する
+- ログイン後も `~/.codex/auth.json` が見つからない → 公式 CLI 側のログインが完了していない。`npm run auth:codex` を再実行する前に、まずそちらを直接やり直す
+
 ### Claude CLI（Claude Code サブスク）
 
 Anthropic の Free / Pro / Max サブスクを、**公式 Claude Code のログイン**経由で使う方式です（xangi / OpenClaw と同型）。shoal は OAuth トークンを読みません・保存しません。
@@ -555,7 +595,7 @@ Anthropic は、サードパーティが Claude.ai ログインや Free/Pro/Max 
 
 | スコープ | `LLM_MODEL` の例 | 典型的な `AWS_REGION` |
 |---|---|---|
-| 基盤モデル（オンデマンド、リージョンが提供している場合） | `anthropic.claude-3-5-haiku-20241022-v1:0` | モデルがあるリージョン |
+| 基盤モデル（オンデマンド、リージョンが提供している場合） | `anthropic.claude-haiku-4-5-20251001-v1:0`（既定値） | モデルがあるリージョン |
 | US クロスリージョン | `us.anthropic.claude-sonnet-4-5-20250929-v1:0` | `us-east-1` |
 | EU クロスリージョン | `eu.anthropic.claude-sonnet-4-5-20250929-v1:0` | `eu-central-1` |
 | APAC クロスリージョン | `apac.anthropic.claude-sonnet-4-5-20250929-v1:0` | `ap-northeast-1` |

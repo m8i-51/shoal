@@ -17,7 +17,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version-file: '.nvmrc'
           registry-url: 'https://registry.npmjs.org'
 
       - name: Install latest npm
@@ -38,6 +38,12 @@ jobs:
           done
           [ "$missing" -eq 0 ] && echo "All CLI entrypoints are present in the package."
           exit $missing
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npx tsc --noEmit
 
       - name: Test
         run: npm test

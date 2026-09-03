@@ -36,7 +36,7 @@ describe("createLLMClient", () => {
     process.env.LLM_PROVIDER = "bedrock";
     const result = createLLMClient();
     expect(result.provider).toBe("bedrock");
-    expect(result.defaultModel).toBe("anthropic.claude-3-5-haiku-20241022-v1:0");
+    expect(result.defaultModel).toBe("anthropic.claude-haiku-4-5-20251001-v1:0");
   });
 
   it("bedrock でも LLM_MODEL で上書きできる", () => {
@@ -72,7 +72,7 @@ describe("createLLMClient", () => {
     ["groq", "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile"],
     ["gemini", "https://generativelanguage.googleapis.com/v1beta/openai", "gemini-2.0-flash"],
     ["openai", "https://api.openai.com/v1", "gpt-4o-mini"],
-    ["openrouter", "https://openrouter.ai/api/v1", "google/gemini-flash-1.5"],
+    ["openrouter", "https://openrouter.ai/api/v1", "google/gemini-2.0-flash-001"],
   ])("LLM_PROVIDER=%s は既知の baseURL/デフォルトモデルを使う", (provider, _baseUrl, defaultModel) => {
     process.env.LLM_PROVIDER = provider;
     const result = createLLMClient();

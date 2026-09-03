@@ -1,18 +1,27 @@
 import { intro, outro, select, multiselect, text, confirm, isCancel, cancel } from "@clack/prompts";
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
-import { join } from "path";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from "fs";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 
-const PROVIDERS = [
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const packageRoot = join(__dirname, "..");
+
+// Kept in sync with framework/llm-client.ts's PROVIDER_DEFAULT_MODELS by
+// framework/__tests__/provider-defaults.test.ts — this file is plain JS run
+// directly by node (no tsx), so it cannot import that .ts module at runtime
+// and instead carries its own copy of the same default model ids.
+export const PROVIDERS = [
   { value: "anthropic",   label: "Anthropic (Claude)",  hint: "recommended",        defaultModel: "claude-haiku-4-5-20251001" },
-  { value: "bedrock",     label: "Amazon Bedrock",      hint: "AWS credentials",    defaultModel: "anthropic.claude-3-5-haiku-20241022-v1:0" },
+  { value: "bedrock",     label: "Amazon Bedrock",      hint: "AWS credentials",    defaultModel: "anthropic.claude-haiku-4-5-20251001-v1:0" },
   { value: "openai",      label: "OpenAI",                                           defaultModel: "gpt-4o-mini" },
   { value: "groq",        label: "Groq",                hint: "free tier available", defaultModel: "llama-3.3-70b-versatile" },
   { value: "gemini",      label: "Gemini",              hint: "free tier available", defaultModel: "gemini-2.0-flash" },
   { value: "ollama",      label: "Ollama",              hint: "local",               defaultModel: null },
   { value: "lm-studio",   label: "LM Studio",          hint: "local",               defaultModel: null },
-  { value: "openrouter",  label: "OpenRouter",                                       defaultModel: "google/gemini-flash-1.5" },
+  { value: "openrouter",  label: "OpenRouter",                                       defaultModel: "google/gemini-2.0-flash-001" },
 ];
 
+/* v8 ignore start -- thin wrapper around @clack/prompts cancellation; not meaningfully unit-testable without mocking the whole prompt library */
 function guard(value) {
   if (isCancel(value)) {
     cancel("Setup cancelled.");
@@ -20,7 +29,45 @@ function guard(value) {
   }
   return value;
 }
+/* v8 ignore stop */
 
+/**
+ * Generate .github/workflows/shoal-weekly.yml by substituting into the
+ * packaged shoal-weekly.example.yml, instead of keeping a second hand-written
+ * copy of the workflow. Two copies drifted before: this one still had
+ * actions/checkout@v4, setup-node@v4, and Node 20 after the example (and
+ * shoal's own CI) moved to v7 / Node 22.
+ *
+ * The example file is designed to be copied verbatim and stays inert until a
+ * STAGING_URL repository variable is set; here the user already typed the URL
+ * into the prompt, so it is baked in directly and the `if:` guard is removed.
+ */
+export function renderWeeklyWorkflow(stagingUrl) {
+  const templatePath = join(packageRoot, ".github", "workflows", "shoal-weekly.example.yml");
+  const content = readFileSync(templatePath, "utf-8");
+
+  const conditionalBlock =
+    "    # Only runs once STAGING_URL is configured as a repository variable.\n" +
+    "    # This keeps the file inert in the upstream shoal repo (where it isn't set)\n" +
+    "    # and self-activating in your repo as soon as you add the variable.\n" +
+    "    if: ${{ vars.STAGING_URL != '' }}\n";
+  const baseUrlLine = "BASE_URL: ${{ vars.STAGING_URL }}";
+  const requiredVarsLine = "# Required variables: STAGING_URL (e.g. https://staging.example.com)\n";
+
+  if (!content.includes(conditionalBlock) || !content.includes(baseUrlLine) || !content.includes(requiredVarsLine)) {
+    throw new Error(
+      "shoal-weekly.example.yml no longer matches what bin/init.js expects to substitute — " +
+        "update renderWeeklyWorkflow() in bin/init.js to match its current shape",
+    );
+  }
+
+  return content
+    .replace(conditionalBlock, "")
+    .replace(baseUrlLine, `BASE_URL: ${JSON.stringify(stagingUrl)}`)
+    .replace(requiredVarsLine, "");
+}
+
+/* v8 ignore start -- interactive @clack/prompts wizard; exercised manually (`shoal init`), not by unit tests */
 export async function runInit(cwd) {
   const envPath = join(cwd, ".env");
 
@@ -122,6 +169,11 @@ export async function runInit(cwd) {
   // ── Write .env ────────────────────────────────────────────────────
   const lines = Object.entries(env).map(([k, v]) => `${k}=${v}`);
   writeFileSync(envPath, lines.join("\n") + "\n", "utf-8");
+  // This file holds API keys and tracker tokens in plain text — the default
+  // 0o644 would leave it world-readable on a shared machine. chmod, not just
+  // writeFileSync's `mode` option: that option only takes effect when the
+  // write creates the file, and is silently ignored on an existing one.
+  chmodSync(envPath, 0o600);
 
   // ── GitHub Actions workflow (optional) ────────────────────────────
   const wantsWorkflow = guard(await confirm({
@@ -139,48 +191,7 @@ export async function runInit(cwd) {
     const workflowDir = join(cwd, ".github", "workflows");
     const workflowPath = join(workflowDir, "shoal-weekly.yml");
     mkdirSync(workflowDir, { recursive: true });
-    writeFileSync(workflowPath, `# shoal weekly run
-#
-# Required secrets:  ANTHROPIC_API_KEY
-# Required variables: STAGING_URL is hardcoded below — update as needed
-#
-# GitHub Issues are filed automatically using the built-in GITHUB_TOKEN.
-
-name: shoal weekly run
-
-on:
-  schedule:
-    - cron: '0 9 * * 1'   # every Monday at 09:00 UTC
-  workflow_dispatch:        # also allow manual trigger from the Actions tab
-
-jobs:
-  shoal:
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install shoal
-        run: npm install -g @m8i-51/shoal
-
-      - name: Install Playwright browsers
-        run: npx playwright install chromium --with-deps
-
-      - name: Run shoal
-        env:
-          ANTHROPIC_API_KEY: \${{ secrets.ANTHROPIC_API_KEY }}
-          BASE_URL: ${stagingUrl.trim()}
-          GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPO: \${{ github.repository }}
-          MAX_BROWSERS: '2'
-          MAX_EXPLORERS: '0'
-        run: shoal
-`, "utf-8");
+    writeFileSync(workflowPath, renderWeeklyWorkflow(stagingUrl.trim()), "utf-8");
 
     console.log(`\n  Created ${workflowPath}`);
     console.log("  Next: add ANTHROPIC_API_KEY to your repo's Actions secrets");
@@ -188,6 +199,8 @@ jobs:
 
   outro("Created .env\n\n  shoal serve   — open the dashboard at http://localhost:4000\n  shoal         — run agents from the terminal");
 }
+
+/* v8 ignore stop */
 
 // ── Tracker config helpers ─────────────────────────────────────────
 
@@ -200,7 +213,7 @@ const TRACKER_KEYS = [
   "ASANA_ACCESS_TOKEN", "ASANA_PROJECT_ID",
 ];
 
-function parseEnv(content) {
+export function parseEnv(content) {
   const result = {};
   for (const line of content.split("\n")) {
     const trimmed = line.trim();
@@ -212,7 +225,7 @@ function parseEnv(content) {
   return result;
 }
 
-function updateEnvFile(envPath, newKeys, removeKeys) {
+export function updateEnvFile(envPath, newKeys, removeKeys) {
   const content = existsSync(envPath) ? readFileSync(envPath, "utf-8") : "";
   const lines = content.split("\n").filter((line) => {
     const key = line.split("=")[0].trim();
@@ -221,8 +234,13 @@ function updateEnvFile(envPath, newKeys, removeKeys) {
   while (lines.length > 0 && lines[lines.length - 1].trim() === "") lines.pop();
   const newLines = Object.entries(newKeys).map(([k, v]) => `${k}=${v}`);
   writeFileSync(envPath, [...lines, "", ...newLines, ""].join("\n"), "utf-8");
+  // Same reasoning as runInit's own writeFileSync above — and this path
+  // always rewrites an existing .env, exactly the case where a mode passed
+  // to writeFileSync itself would be silently ignored.
+  chmodSync(envPath, 0o600);
 }
 
+/* v8 ignore start -- interactive @clack/prompts wizard; exercised manually (`shoal init` / `shoal config`), not by unit tests */
 async function promptTrackers(existing = {}) {
   const currentTrackers = (existing.ISSUE_TRACKERS ?? "")
     .split(",").map((s) => s.trim()).filter(Boolean);

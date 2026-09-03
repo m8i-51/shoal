@@ -19,6 +19,15 @@
  * hostname to 127.0.0.1 and reach a loopback server from the victim's browser.
  * Requiring the Host header to name a loopback address (or the configured host)
  * closes that, and the Origin check below stops ordinary cross-site calls.
+ *
+ * A TLS-terminating reverse proxy in front of a loopback bind (the setup
+ * SECURITY.md recommends) breaks both checks unless the operator names the
+ * public hostname: a proxy that preserves the Host header sends one the Host
+ * check has never heard of, and a proxy that rewrites Host to the upstream
+ * address (nginx's default) still forwards the browser's real `Origin`
+ * unchanged, which then fails to match the rewritten Host. `SHOAL_ALLOWED_HOSTS`
+ * (see `resolveAllowedHosts`) is the operator naming that hostname explicitly —
+ * unset, behavior is identical to before.
  */
 import { randomBytes, timingSafeEqual } from "crypto";
 import type { NextFunction, Request, Response } from "express";
@@ -43,6 +52,24 @@ export function resolveBinding(env: NodeJS.ProcessEnv = process.env): Binding {
   const parsedPort = Number((env.PORT ?? "").trim() || "4000");
   const port = Number.isInteger(parsedPort) && parsedPort > 0 && parsedPort < 65536 ? parsedPort : 4000;
   return { host, port, isLoopback: isLoopbackHost(host) };
+}
+
+/**
+ * Hostnames a reverse proxy is trusted to front the dashboard as, from
+ * `SHOAL_ALLOWED_HOSTS` (comma-separated, e.g. `shoal.example.com`). A port
+ * suffix is stripped — the proxy's public port (443) and shoal's internal
+ * one (4000) are expected to differ. Empty when unset, which reproduces the
+ * exact pre-existing behavior: no additional host is trusted.
+ */
+export function resolveAllowedHosts(env: NodeJS.ProcessEnv = process.env): Set<string> {
+  const raw = (env.SHOAL_ALLOWED_HOSTS ?? "").trim();
+  if (!raw) return new Set();
+  return new Set(
+    raw
+      .split(",")
+      .map((h) => h.trim().toLowerCase().replace(/:\d+$/, ""))
+      .filter(Boolean),
+  );
 }
 
 /**
@@ -89,13 +116,17 @@ const MIN_TOKEN_LENGTH = 16;
 /**
  * Decide the dashboard token.
  *
- * - loopback + no `SHOAL_TOKEN` → no token (the local-only default, unchanged UX)
- * - non-loopback → a token is mandatory; generated when not supplied
+ * - loopback + no `SHOAL_TOKEN` + not proxied → no token (the local-only default, unchanged UX)
+ * - non-loopback, or loopback with `SHOAL_ALLOWED_HOSTS` set (`proxied`) → a
+ *   token is mandatory; generated when not supplied. A reverse proxy in front
+ *   of a loopback bind makes the dashboard reachable from the network just as
+ *   surely as a non-loopback bind does, so it gets the same requirement.
  * - a supplied token shorter than 16 chars is refused rather than weakly accepted
  */
 export function resolveDashboardToken(
   binding: Binding,
   env: NodeJS.ProcessEnv = process.env,
+  proxied = false,
 ): TokenDecision {
   const supplied = (env.SHOAL_TOKEN ?? "").trim();
   const notices: string[] = [];
@@ -111,18 +142,27 @@ export function resolveDashboardToken(
     return { token: supplied, generated: false, notices };
   }
 
-  if (binding.isLoopback) {
+  if (binding.isLoopback && !proxied) {
     notices.push(`[auth] no token required — bound to ${binding.host} (local only)`);
     return { token: null, generated: false, notices };
   }
 
   const token = randomBytes(24).toString("hex");
-  notices.push(
-    `[auth] bound to ${binding.host}, which is reachable from other machines — a token is required.`,
-    `[auth] generated token: ${token}`,
-    `[auth] open: http://${binding.host}:${binding.port}/?token=${token}`,
-    "[auth] set SHOAL_TOKEN in .env to keep the same token across restarts.",
-  );
+  if (proxied) {
+    notices.push(
+      "[auth] SHOAL_ALLOWED_HOSTS is set — a reverse proxy may expose this dashboard beyond this machine, so a token is required.",
+      `[auth] generated token: ${token}`,
+      `[auth] open the dashboard through your proxy with ?token=${token} appended`,
+      "[auth] set SHOAL_TOKEN in .env to keep the same token across restarts.",
+    );
+  } else {
+    notices.push(
+      `[auth] bound to ${binding.host}, which is reachable from other machines — a token is required.`,
+      `[auth] generated token: ${token}`,
+      `[auth] open: http://${binding.host}:${binding.port}/?token=${token}`,
+      "[auth] set SHOAL_TOKEN in .env to keep the same token across restarts.",
+    );
+  }
   return { token, generated: true, notices };
 }
 
@@ -159,6 +199,16 @@ function parseCookies(header: string | undefined): Record<string, string> {
   return out;
 }
 
+/**
+ * Token for an already-authenticated request: a header, or the session
+ * cookie `issueSessionCookie` already exchanged a `?token=` for. Deliberately
+ * does NOT accept `?token=` itself — that would make the bootstrap URL a
+ * standing credential good against every `/api` call, not a one-time
+ * exchange, and it would put the token in server access logs, browser
+ * history, and any `Referer` header on every request that carried it.
+ * `issueSessionCookie` (mounted ahead of this on every route, not just
+ * `/api`) is the only place `?token=` is read.
+ */
 function presentedToken(req: Request): string | null {
   const header = req.get("authorization");
   if (header?.startsWith("Bearer ")) return header.slice("Bearer ".length).trim();
@@ -166,9 +216,6 @@ function presentedToken(req: Request): string | null {
   if (custom) return custom.trim();
   const cookie = parseCookies(req.get("cookie"))[SESSION_COOKIE];
   if (cookie) return cookie;
-  // The bootstrap URL the operator pastes, before the cookie is established.
-  const query = req.query?.token;
-  if (typeof query === "string" && query) return query;
   return null;
 }
 
@@ -206,7 +253,9 @@ export function issueSessionCookie(token: string | null) {
 /**
  * Reject requests that do not present the token. Mounted on `/api` only — the
  * static bundle stays reachable so the browser can load the UI and then send
- * the token with its own calls.
+ * the token with its own calls. A `?token=` on the request itself is not
+ * accepted here — see `presentedToken` — only the cookie it was already
+ * exchanged for, or a header from a scripted client.
  */
 export function requireToken(token: string | null) {
   return (req: Request, res: Response, next: NextFunction): void => {
@@ -227,8 +276,12 @@ export function requireToken(token: string | null) {
  * Reject requests whose Host header is not one we are serving, and cross-origin
  * requests from a browser. Together these stop DNS rebinding and drive-by calls
  * from another site the operator happens to have open.
+ *
+ * `allowedHosts` (from `resolveAllowedHosts` / `SHOAL_ALLOWED_HOSTS`) extends
+ * both checks with hostnames a reverse proxy is trusted to front this
+ * dashboard as — see the module doc comment for why a proxy needs this.
  */
-export function hostGuard(binding: Binding) {
+export function hostGuard(binding: Binding, allowedHosts: Set<string> = new Set()) {
   return (req: Request, res: Response, next: NextFunction): void => {
     const hostHeader = req.get("host") ?? "";
     const hostname = hostHeader.replace(/:\d+$/, "").toLowerCase();
@@ -237,6 +290,7 @@ export function hostGuard(binding: Binding) {
       hostname === "" ||
       isLoopbackHost(hostname) ||
       hostname === binding.host.toLowerCase() ||
+      allowedHosts.has(hostname) ||
       // 0.0.0.0 means "every interface", so any Host that resolves here is ours.
       binding.host === "0.0.0.0" ||
       binding.host === "::";
@@ -260,7 +314,12 @@ export function hostGuard(binding: Binding) {
       // this is `npm run dev`, where Vite serves the UI on :5173 and proxies
       // /api to :4000. A remote attacker's page can never present one.
       const localDevOrigin = binding.isLoopback && isLoopbackHost(originUrl.hostname);
-      if (!sameOrigin && !localDevOrigin) {
+      // A proxy that rewrites Host to shoal's own upstream address (nginx's
+      // default) still forwards the browser's real Origin unchanged, so Host
+      // and Origin stop matching even on a legitimate same-site request.
+      // Trust that Origin only when its hostname is one the operator named.
+      const proxiedAllowedOrigin = allowedHosts.has(originUrl.hostname.toLowerCase());
+      if (!sameOrigin && !localDevOrigin && !proxiedAllowedOrigin) {
         res.status(403).json({ error: "cross-origin request refused" });
         return;
       }

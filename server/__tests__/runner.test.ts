@@ -6,7 +6,7 @@ vi.mock("fs");
 
 import { spawn } from "child_process";
 import * as fs from "fs";
-import { spawnRun, cancelSession, activeSessions } from "../runner";
+import { spawnRun, cancelSession, activeSessions, SESSION_RETENTION_MS } from "../runner";
 
 function createFakeChild() {
   const child = new EventEmitter() as EventEmitter & { stdout: EventEmitter; stderr: EventEmitter; kill: ReturnType<typeof vi.fn> };
@@ -165,6 +165,58 @@ describe("spawnRun", () => {
     const sessionId = spawnRun({});
     fakeChild.emit("exit", null);
     expect(activeSessions.get(sessionId)?.exitCode).toBe(0);
+  });
+
+  describe("完了後の activeSessions 退避（メモリリーク対策）", () => {
+    it("SESSION_RETENTION_MS 経過後に activeSessions から削除される", () => {
+      vi.useFakeTimers();
+      const fakeChild = createFakeChild();
+      vi.mocked(spawn).mockReturnValue(fakeChild as never);
+
+      const sessionId = spawnRun({});
+      fakeChild.emit("exit", 0);
+      expect(activeSessions.has(sessionId)).toBe(true);
+
+      vi.advanceTimersByTime(SESSION_RETENTION_MS - 1);
+      expect(activeSessions.has(sessionId)).toBe(true);
+
+      vi.advanceTimersByTime(1);
+      expect(activeSessions.has(sessionId)).toBe(false);
+      vi.useRealTimers();
+    });
+
+    it("実行中の session は退避タイマーの対象にならない", () => {
+      vi.useFakeTimers();
+      const fakeChild = createFakeChild();
+      vi.mocked(spawn).mockReturnValue(fakeChild as never);
+
+      const sessionId = spawnRun({});
+      // exit していないので退避タイマー自体がまだセットされていない
+      vi.advanceTimersByTime(SESSION_RETENTION_MS * 2);
+      expect(activeSessions.has(sessionId)).toBe(true);
+      vi.useRealTimers();
+    });
+
+    it("退避前に同じ sessionId で新しい run が再登録されていれば、古いタイマーは新しい session を消さない", () => {
+      vi.useFakeTimers();
+      const fakeChild = createFakeChild();
+      vi.mocked(spawn).mockReturnValue(fakeChild as never);
+
+      const sessionId = spawnRun({});
+      fakeChild.emit("exit", 0);
+
+      // 同じ sessionId で別の session オブジェクトを手動で再登録する
+      // （Date.now() の衝突を確実にテストするための直接操作）
+      const freshSession = {
+        sessionId, startedAt: "", completedAt: null, done: false,
+        exitCode: null, lines: [], listeners: [], doneListeners: [], child: null,
+      };
+      activeSessions.set(sessionId, freshSession);
+
+      vi.advanceTimersByTime(SESSION_RETENTION_MS);
+      expect(activeSessions.get(sessionId)).toBe(freshSession);
+      vi.useRealTimers();
+    });
   });
 });
 

@@ -8,6 +8,7 @@ import {
   isLoopbackHost,
   issueSessionCookie,
   requireToken,
+  resolveAllowedHosts,
   resolveBinding,
   resolveDashboardToken,
   type Binding,
@@ -45,6 +46,22 @@ describe("resolveBinding", () => {
   it("不正な PORT は 4000 に倒す", () => {
     expect(resolveBinding(env({ PORT: "not-a-port" })).port).toBe(4000);
     expect(resolveBinding(env({ PORT: "70000" })).port).toBe(4000);
+  });
+});
+
+describe("resolveAllowedHosts", () => {
+  it("未設定なら空集合", () => {
+    expect(resolveAllowedHosts(env({}))).toEqual(new Set());
+  });
+
+  it("カンマ区切りを小文字化・trim してポートを落とす", () => {
+    expect(resolveAllowedHosts(env({ SHOAL_ALLOWED_HOSTS: " Shoal.Example.com , other.test:8443 " }))).toEqual(
+      new Set(["shoal.example.com", "other.test"]),
+    );
+  });
+
+  it("空文字だけの要素は無視する", () => {
+    expect(resolveAllowedHosts(env({ SHOAL_ALLOWED_HOSTS: "a.test,,  ," }))).toEqual(new Set(["a.test"]));
   });
 });
 
@@ -116,6 +133,19 @@ describe("resolveDashboardToken", () => {
   it("短すぎる SHOAL_TOKEN は黙って受け入れず失敗させる", () => {
     expect(() => resolveDashboardToken(exposed, env({ SHOAL_TOKEN: "short" }))).toThrow(/too short/);
   });
+
+  it("ループバック bind でも proxied=true ならトークンを必須にする（SHOAL_ALLOWED_HOSTS 経由の公開）", () => {
+    const decision = resolveDashboardToken(loopback, env({}), true);
+    expect(decision.token).toBeTruthy();
+    expect(decision.generated).toBe(true);
+    expect(decision.notices.join("\n")).toContain("SHOAL_ALLOWED_HOSTS");
+  });
+
+  it("proxied=true でも SHOAL_TOKEN があればそれを使う", () => {
+    const decision = resolveDashboardToken(loopback, env({ SHOAL_TOKEN: "a".repeat(20) }), true);
+    expect(decision.token).toBe("a".repeat(20));
+    expect(decision.generated).toBe(false);
+  });
 });
 
 function appWithToken(token: string | null) {
@@ -153,10 +183,10 @@ describe("requireToken", () => {
       .expect(200);
   });
 
-  it("EventSource 用に ?token= も受け付ける", async () => {
+  it("?token= 単体では通さない — ブートストラップ専用で、標準的な認証情報にはしない（SECURITY.md の記述どおり）", async () => {
     await request(appWithToken("s3cret-token-value"))
       .get("/api/ping?token=s3cret-token-value")
-      .expect(200);
+      .expect(401);
   });
 
   it("誤ったトークンは 401", async () => {
@@ -248,12 +278,23 @@ describe("issueSessionCookie", () => {
       .set("Cookie", "novalue; =empty; %ZZ=bad")
       .expect(401);
   });
+
+  it("実際のブラウザと同じ流れ — ?token= での初回アクセス後は、URL にトークンを付けずに /api を呼べる", async () => {
+    const agent = request.agent(appWithSession(TOKEN));
+    // ブートストラップ: cookie ジャーが Set-Cookie を自動的に保持する
+    await agent.get("/?token=" + TOKEN).expect(200);
+    // 以降は cookie だけで通る — URL にトークンは一切現れない
+    await agent.get("/api/ping").expect(200);
+  });
 });
 
-function appWithHostGuard(binding: Binding) {
+function appWithHostGuard(binding: Binding, allowedHosts: Set<string> = new Set()) {
   const app = express();
-  app.use(hostGuard(binding));
+  app.use(hostGuard(binding, allowedHosts));
   app.get("/api/ping", (_req, res) => {
+    res.json({ ok: true });
+  });
+  app.patch("/api/ping", (_req, res) => {
     res.json({ ok: true });
   });
   return app;
@@ -331,5 +372,47 @@ describe("hostGuard", () => {
       .set("Host", "localhost:4000")
       .set("Origin", "not a url")
       .expect(403);
+  });
+
+  describe("SHOAL_ALLOWED_HOSTS 経由のリバースプロキシ", () => {
+    const allowedHosts = new Set(["shoal.example.com"]);
+
+    it("Host を保持するプロキシ（Caddy / Traefik）— allowedHosts に無ければ拒否のまま", async () => {
+      await request(appWithHostGuard(loopbackBinding))
+        .get("/api/ping")
+        .set("Host", "shoal.example.com")
+        .expect(403);
+    });
+
+    it("Host を保持するプロキシ — allowedHosts にあれば通す", async () => {
+      await request(appWithHostGuard(loopbackBinding, allowedHosts))
+        .get("/api/ping")
+        .set("Host", "shoal.example.com")
+        .expect(200);
+    });
+
+    it("Host を書き換えるプロキシ（nginx 既定）+ ブラウザの Origin — allowedHosts に無ければ拒否のまま", async () => {
+      await request(appWithHostGuard(loopbackBinding))
+        .patch("/api/ping")
+        .set("Host", "127.0.0.1:4000")
+        .set("Origin", "https://shoal.example.com")
+        .expect(403);
+    });
+
+    it("Host を書き換えるプロキシ + ブラウザの Origin — allowedHosts にあれば通す", async () => {
+      await request(appWithHostGuard(loopbackBinding, allowedHosts))
+        .patch("/api/ping")
+        .set("Host", "127.0.0.1:4000")
+        .set("Origin", "https://shoal.example.com")
+        .expect(200);
+    });
+
+    it("allowedHosts に無いオリジンは通さない", async () => {
+      await request(appWithHostGuard(loopbackBinding, allowedHosts))
+        .patch("/api/ping")
+        .set("Host", "127.0.0.1:4000")
+        .set("Origin", "https://evil.example.com")
+        .expect(403);
+    });
   });
 });

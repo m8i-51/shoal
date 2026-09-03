@@ -16,7 +16,15 @@ import { computeExperienceScore } from "../framework/experience-score.js";
 import { loadSiteMap, buildSiteMapDashboardView } from "../framework/site-map.js";
 import { isFinding, type Finding } from "../framework/types.js";
 import { buildSafeProxyUrl } from "./proxy-url.js";
-import { assertBindingAllowed, hostGuard, issueSessionCookie, requireToken, resolveBinding, resolveDashboardToken } from "./auth.js";
+import {
+  assertBindingAllowed,
+  hostGuard,
+  issueSessionCookie,
+  requireToken,
+  resolveAllowedHosts,
+  resolveBinding,
+  resolveDashboardToken,
+} from "./auth.js";
 import {
   addAgent,
   archiveAgent,
@@ -47,6 +55,11 @@ function isValidRunId(id: string): boolean {
   return RUN_ID_RE.test(id);
 }
 
+/** Same bounds as server/mcp.ts's start_run tool (zod: int, 0-8) — kept in sync by hand, both are small and unlikely to drift. */
+function isValidAgentCount(value: unknown): value is number | undefined {
+  return value === undefined || (typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 8);
+}
+
 const logsBase = resolve(process.cwd(), "logs");
 function safeLogPath(filename: string): string | null {
   const p = resolve(logsBase, filename);
@@ -56,13 +69,14 @@ function safeLogPath(filename: string): string | null {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
 const binding = resolveBinding();
-const auth = resolveDashboardToken(binding);
+const allowedHosts = resolveAllowedHosts();
+const auth = resolveDashboardToken(binding, process.env, allowedHosts.size > 0);
 
 app.use(express.json());
 app.use(rateLimit({ windowMs: 60_000, limit: 120 }));
 // Host / Origin checks apply to the whole app; the token gates the API, so the
 // static bundle can still load and then authenticate its own calls.
-app.use(hostGuard(binding));
+app.use(hostGuard(binding, allowedHosts));
 // A valid ?token= becomes an HttpOnly cookie, so the token leaves the URL and
 // never has to live in JavaScript-readable storage.
 app.use(issueSessionCookie(auth.token));
@@ -474,6 +488,10 @@ app.post("/api/runs/start", (req, res) => {
   };
   if (mode !== undefined && !["read-only", "safe", "full"].includes(mode)) {
     res.status(400).json({ error: "mode must be one of: read-only, safe, full" });
+    return;
+  }
+  if (!isValidAgentCount(maxBrowsers) || !isValidAgentCount(maxExplorers) || !isValidAgentCount(maxThresholds)) {
+    res.status(400).json({ error: "maxBrowsers, maxExplorers, and maxThresholds must be integers between 0 and 8" });
     return;
   }
   const sessionId = spawnRun({ baseUrl, maxBrowsers, maxExplorers, maxThresholds, mode, llmBaseUrl, llmApiKey, llmModel });

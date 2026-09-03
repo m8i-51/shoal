@@ -3,12 +3,31 @@
   "version": "0.2.0",
   "type": "module",
   "description": "Multi-agent web exploration framework \u2014 finds bugs, UX issues, and missing features by running AI agents against your app",
+  "license": "MIT",
+  "author": "m8i-51",
+  "homepage": "https://github.com/m8i-51/shoal#readme",
+  "bugs": {
+    "url": "https://github.com/m8i-51/shoal/issues"
+  },
+  "keywords": [
+    "ai-agents",
+    "browser-automation",
+    "llm",
+    "multi-agent",
+    "playwright",
+    "qa",
+    "test-automation",
+    "ux-testing"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/m8i-51/shoal"
   },
   "engines": {
     "node": ">=22"
+  },
+  "overrides": {
+    "fast-uri": "^3.1.7"
   },
   "bin": {
     "shoal": "./bin/shoal.js"
@@ -23,6 +42,7 @@
     "triage-only.ts",
     "diff.ts",
     ".env.example",
+    ".github/workflows/shoal-weekly.example.yml",
     "!**/__tests__/**"
   ],
   "scripts": {
