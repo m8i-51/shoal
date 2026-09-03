@@ -2,9 +2,10 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState } from "react";
 import { SwarmVisualizer } from "../components/SwarmVisualizer";
+import { TriageResultPanel } from "../components/TriageResultPanel";
 import { apiFetch } from "../api";
 
-type Tab = "log" | "swarm" | "report" | "diary";
+type Tab = "log" | "swarm" | "triage" | "report" | "diary";
 
 export function RunDetail() {
   const { runId } = useParams<{ runId: string }>();
@@ -185,6 +186,14 @@ export function RunDetail() {
         >
           {t("detail.tabSwarm")}
         </button>
+        {/* Not gated on `done`: a run started from the CLI writes no live log, so
+            `done` never flips for it. The panel says so when there is no result. */}
+        <button
+          style={{ ...styles.tab, ...(tab === "triage" ? styles.tabActive : {}) }}
+          onClick={() => setTab("triage")}
+        >
+          {t("detail.tabTriage")}
+        </button>
         <button
           style={{ ...styles.tab, ...(tab === "report" ? styles.tabActive : {}), ...(hasReport ? {} : styles.tabDisabled) }}
           onClick={() => hasReport && setTab("report")}
@@ -219,6 +228,10 @@ export function RunDetail() {
             <div style={styles.logDone}>— {t("status.completed")} —</div>
           )}
         </div>
+      )}
+
+      {tab === "triage" && runId && (
+        <TriageResultPanel runId={runId} refreshKey={String(done)} />
       )}
 
       {tab === "report" && (

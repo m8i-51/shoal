@@ -57,7 +57,7 @@ At the end of each run:
 - **Feature suggestions** — things that would add real value
 - **Goal gaps** — where the app falls short of what it's trying to achieve
 
-Findings are filed as issue tickets (GitHub Issues, Jira, Notion, Backlog, or Asana) or saved as a self-contained HTML report. A **web dashboard** lets you start runs, watch live progress, review findings by category, and track estimated LLM cost per run.
+Findings are filed as issue tickets (GitHub Issues, Jira, Notion, Backlog, or Asana) or saved as a self-contained HTML report. A **web dashboard** lets you start runs, watch live progress, review findings by category, see what triage filed, and track adoption and LLM cost across runs.
 
 ---
 
@@ -152,6 +152,9 @@ Opens at `http://localhost:4000`. From there you can:
 - **Start a run** — configure agent count, target URL, and custom instructions
 - **Watch agents swim live** — the Swarm tab shows an animated real-time view of agents as they explore. When a finding is discovered, the agent's chip flashes with the finding title.
 - **Review past runs** — findings by category, agent count, duration, and estimated cost
+- **See what triage did** — the Triage tab of a run shows the issues it actually filed: which findings were merged into each one, the tracker link, why a finding was skipped, and which tickets were flagged `edge-risk` along with the declared edge at stake
+- **Track finding adoption** — how many filed issues the team actually fixed versus closed as *not planned*, broken down by lens and category. This is the signal shoal already feeds back into persona hiring; the panel makes it visible.
+- **Track LLM cost across runs** — cumulative spend, per-run average, the last 30 days, and total tokens, alongside a per-run trend
 - **Generate an Agent Diary** — after a run completes, one LLM call turns the raw log into a story-style narrative of the exploration, readable by anyone on the team
 - **Hall of Issues** — browse all findings across every run with full-text search and category filter. Export as JSON to share, or paste a GitHub raw/gist URL to import findings from other projects.
 - **Edit app goals** — guide the goal-gap detector by defining what the app should achieve

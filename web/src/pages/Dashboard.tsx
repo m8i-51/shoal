@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { StartModal } from "../components/StartModal";
 import { ExperiencePanel } from "../components/ExperiencePanel";
+import { AdoptionPanel } from "../components/AdoptionPanel";
+import { CostPanel } from "../components/CostPanel";
 import { SiteMapPanel } from "../components/SiteMapPanel";
 import { GoalsPanel } from "../components/GoalsPanel";
 import { EdgePanel } from "../components/EdgePanel";
@@ -55,6 +57,8 @@ export function Dashboard() {
               hasReport: false,
               isLive: true,
               estimatedCostUSD: null,
+              inputTokens: 0,
+              outputTokens: 0,
               regressionChecked: 0,
               regressionFailed: 0,
             }];
@@ -82,6 +86,8 @@ export function Dashboard() {
       </div>
 
       <ExperiencePanel />
+      <CostPanel runs={runs} />
+      <AdoptionPanel />
       <SiteMapPanel />
       <GoalsPanel />
       <EdgePanel />

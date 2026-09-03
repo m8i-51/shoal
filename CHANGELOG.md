@@ -12,6 +12,24 @@ entries for `0.1.20` and earlier live in the commit log only.
 
 ### Added
 
+- **Triage results reach the dashboard.** Every reader of `findings/` skipped
+  `triage_result.json` by name, so the step that decides what the team actually
+  receives left no trace in the UI. Triage now records each issue as it files it
+  — the findings merged into it, the tracker URL, the edge-risk call and its
+  reason, and why a finding was skipped — and a Triage tab on the run detail
+  page (`GET /api/runs/:runId/triage`) shows it. A declared product edge and the
+  tickets it flagged are finally visible in the same place. Results written
+  before this carry ID lists only; they still load, labelled as such.
+- **Finding adoption panel.** `coverage/adoption.json` — how many filed issues
+  the team fixed versus closed as *not planned* — already steered persona hiring
+  and scenario design, but had no API and no UI. `GET /api/adoption` and a
+  dashboard panel now show the overall rate, the breakdown by lens and category,
+  what is still open, and the most recently resolved issues.
+- **Cross-run LLM cost.** Cost was per-run only. The dashboard now shows
+  cumulative spend, the per-run average, the last 30 days, total input/output
+  tokens, and a per-run trend, derived from `/api/runs` (which now also carries
+  token counts). Runs with no estimate are excluded from the total and counted
+  separately rather than silently understating it.
 - **Product Edge — a declared answer to "fix everything and the product goes
   flat".** A product can now state what it is deliberately sharp about
   (`sharpEdges`) and what it gives up to stay that way (`tradeoffs`). Product

@@ -31,3 +31,19 @@ export function formatCostUSD(usd: number | null | undefined): string {
   if (usd < 1) return `$${usd.toFixed(3)}`;
   return `$${usd.toFixed(2)}`;
 }
+
+/**
+ * Only http(s) URLs become links. Issue URLs come from a tracker response and
+ * are stored on disk, so they are not attacker-controlled today — but an
+ * href is one of the few places in this UI where a string becomes executable
+ * (`javascript:`), and the check costs nothing.
+ */
+export function safeExternalUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" || parsed.protocol === "http:" ? url : null;
+  } catch {
+    return null;
+  }
+}

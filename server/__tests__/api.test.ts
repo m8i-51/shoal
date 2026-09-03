@@ -9,6 +9,8 @@ vi.mock("path", async (importOriginal) => {
 });
 vi.mock("../runner.js", () => ({ activeSessions: new Map(), spawnRun: vi.fn(), cancelSession: vi.fn() }));
 vi.mock("../runs.js", () => ({ listRuns: vi.fn(() => []), getReportPath: vi.fn(() => null) }));
+vi.mock("../triage-view.js", () => ({ buildTriageView: vi.fn(() => null) }));
+vi.mock("../adoption-view.js", () => ({ buildAdoptionView: vi.fn(() => null) }));
 vi.mock("../scheduler.js", () => ({ loadSchedule: vi.fn(() => ({ enabled: false, dayOfWeek: 1, hour: 9, minute: 0, lastRunDate: null })), saveSchedule: vi.fn(), startScheduler: vi.fn() }));
 vi.mock("../../framework/diary.js", () => ({ generateDiary: vi.fn(), getDiaryPath: vi.fn(() => null) }));
 vi.mock("../../framework/experience-score.js", () => ({ computeExperienceScore: vi.fn(() => null) }));
@@ -58,6 +60,8 @@ import {
 } from "../../framework/agent-store.js";
 import { activeSessions, spawnRun, cancelSession } from "../runner.js";
 import { listRuns, getReportPath } from "../runs.js";
+import { buildTriageView } from "../triage-view.js";
+import { buildAdoptionView } from "../adoption-view.js";
 import { loadSchedule } from "../scheduler.js";
 
 // NODE_ENV=test なので app.listen は呼ばれない
@@ -117,6 +121,8 @@ beforeEach(() => {
   vi.mocked(fs.mkdirSync).mockReturnValue(undefined);
   vi.mocked(getDiaryPath).mockReturnValue(null);
   vi.mocked(generateDiary).mockResolvedValue("# 探索日誌");
+  vi.mocked(buildTriageView).mockReset().mockReturnValue(null);
+  vi.mocked(buildAdoptionView).mockReset().mockReturnValue(null);
   (activeSessions as Map<string, unknown>).clear();
 });
 
@@ -863,6 +869,94 @@ describe("personas API", () => {
     const rest = await request(app).post("/api/personas/f1/restore");
     expect(rest.status).toBe(200);
     expect(rest.body.status).toBe("active");
+  });
+});
+
+// ================================================================
+// GET /api/adoption
+// ================================================================
+describe("GET /api/adoption", () => {
+  it("起票実績が無い → 404", async () => {
+    vi.mocked(buildAdoptionView).mockReturnValue(null);
+    const res = await request(app).get("/api/adoption");
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe("no adoption data yet");
+  });
+
+  it("集計がある → 200 + 採用率", async () => {
+    vi.mocked(buildAdoptionView).mockReturnValue({
+      overall: { adopted: 3, rejected: 1, total: 4, rate: 0.75 },
+      byLens: [{ name: "Accessibility", adopted: 3, rejected: 1, total: 4, rate: 0.75 }],
+      byCategory: [{ name: "bug", adopted: 3, rejected: 1, total: 4, rate: 0.75 }],
+      pending: 2,
+      recent: [{
+        title: "[bug] Login broken",
+        url: "https://github.com/o/r/issues/12",
+        category: "bug",
+        resolution: "adopted",
+        resolvedAt: "2026-07-01T00:00:00.000Z",
+      }],
+    });
+    const res = await request(app).get("/api/adoption");
+    expect(res.status).toBe(200);
+    expect(res.body.overall.rate).toBe(0.75);
+    expect(res.body.byLens[0].name).toBe("Accessibility");
+    expect(res.body.pending).toBe(2);
+  });
+
+  it("読み取りが例外を投げる → 500", async () => {
+    vi.mocked(buildAdoptionView).mockImplementation(() => { throw new Error("boom"); });
+    const res = await request(app).get("/api/adoption");
+    expect(res.status).toBe(500);
+  });
+});
+
+// ================================================================
+// GET /api/runs/:runId/triage
+// ================================================================
+describe("GET /api/runs/:runId/triage", () => {
+  const view = {
+    runId: "run_1",
+    completedAt: "2026-01-02T00:00:00.000Z",
+    issues: [{
+      title: "[bug] Login broken",
+      category: "bug",
+      url: "https://example.com/issues/7",
+      edgeRisk: null,
+      createdAt: "2026-01-02T00:00:00.000Z",
+      mergedFindings: [{ id: "f1", title: "Login is broken", agentName: "Alice", category: "bug" }],
+    }],
+    skips: [],
+    unprocessed: [],
+    stats: { issuesCreated: 1, findingsIssued: 1, findingsSkipped: 0, findingsUnprocessed: 0, edgeRisks: 0 },
+    legacy: false,
+  };
+
+  it("不正な run id → 400", async () => {
+    const res = await request(app).get("/api/runs/not-a-run/triage");
+    expect(res.status).toBe(400);
+    expect(buildTriageView).not.toHaveBeenCalled();
+  });
+
+  it("triage 結果が無い → 404", async () => {
+    vi.mocked(buildTriageView).mockReturnValue(null);
+    const res = await request(app).get("/api/runs/run_1/triage");
+    expect(res.status).toBe(404);
+  });
+
+  it("triage 結果がある → 200 + 起票内容", async () => {
+    vi.mocked(buildTriageView).mockReturnValue(view);
+    const res = await request(app).get("/api/runs/run_1/triage");
+    expect(res.status).toBe(200);
+    expect(res.body.issues[0].mergedFindings[0].title).toBe("Login is broken");
+    expect(res.body.stats.issuesCreated).toBe(1);
+    expect(buildTriageView).toHaveBeenCalledWith("run_1");
+  });
+
+  it("読み取りが例外を投げる → 500", async () => {
+    vi.mocked(buildTriageView).mockImplementation(() => { throw new Error("boom"); });
+    const res = await request(app).get("/api/runs/run_1/triage");
+    expect(res.status).toBe(500);
   });
 });
 
