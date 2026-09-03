@@ -12,6 +12,8 @@ to `0.1.20` or earlier, so those releases are not separately documented here.
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-09-03
+
 ### Added
 
 - **Triage results reach the dashboard.** Every reader of `findings/` skipped
@@ -301,7 +303,8 @@ to `0.1.20` or earlier, so those releases are not separately documented here.
 
 - Documentation for the dashboard's built-in weekly scheduler.
 
-[Unreleased]: https://github.com/m8i-51/shoal/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/m8i-51/shoal/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/m8i-51/shoal/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/m8i-51/shoal/compare/v0.1.33...v0.2.0
 [0.1.33]: https://github.com/m8i-51/shoal/compare/v0.1.32...v0.1.33
 [0.1.32]: https://github.com/m8i-51/shoal/compare/v0.1.31...v0.1.32
