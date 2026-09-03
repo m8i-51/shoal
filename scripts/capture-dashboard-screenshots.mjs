@@ -25,7 +25,10 @@ async function shot(name, url, waitTexts, viewport) {
     viewport,
     deviceScaleFactor: 2,
   });
-  await context.addInitScript(() => localStorage.setItem("shoal-lang", "en"));
+  // Runs in the browser page context; use globalThis so Node eslint no-undef stays quiet.
+  await context.addInitScript(() => {
+    globalThis.localStorage.setItem("shoal-lang", "en");
+  });
   const page = await context.newPage();
   await page.goto(url, { waitUntil: "networkidle" });
   for (const text of waitTexts) {
