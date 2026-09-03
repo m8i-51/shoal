@@ -67,7 +67,16 @@ to `0.1.20` or earlier, so those releases are not separately documented here.
   same white-on-badge contrast problem in every one of its badge colours —
   category, finding/agent status, scenario/lens tags, and regression
   outcomes — and is now darkened to match, reusing the dashboard's category
-  colours where the category is the same.
+  colours where the category is the same. Its foreground text colours had
+  the identical problem — muted gray captions, the amber/green/red status and
+  score text, and the violet scenario-ID label all fell below 4.5:1 against
+  the backgrounds they actually render on (white cards, the light table
+  header, the dark category bar) — and are now darkened the same way,
+  checked pair-by-pair against their real background rather than assumed
+  against plain white. `header .meta`, already correct as light text on the
+  report's dark header bar, is untouched. Text inside a skipped finding card
+  stays as-is: `.finding.skipped`'s reduced opacity is a deliberate
+  de-emphasis this audit doesn't try to override.
 - **Bench scoring matched keywords as bare substrings.** `findingMatchesLabel`
   used `text.includes(keyword)`, so an unrelated finding ("Although the page
   loads quickly... Totally fine otherwise.") was counted as detecting
