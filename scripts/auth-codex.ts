@@ -4,7 +4,7 @@
  *
  * 1. Runs `npx @openai/codex login` (official Codex CLI OAuth flow)
  * 2. Verifies ~/.codex/auth.json was created
- * 3. Writes LLM_PROVIDER=codex and LLM_MODEL=codex-mini-latest to .env
+ * 3. Writes LLM_PROVIDER=codex and LLM_MODEL=gpt-5.1-codex-mini to .env
  *
  * Usage: npm run auth:codex
  */

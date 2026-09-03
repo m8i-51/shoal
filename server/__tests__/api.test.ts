@@ -669,12 +669,69 @@ describe("GET /api/runs/:runId/report", () => {
 // POST /api/runs/start
 // ================================================================
 describe("POST /api/runs/start", () => {
+  // spawnRun は他の describe ブロックの assertion に影響しないよう、この
+  // ブロック内では毎回呼び出し履歴をクリアする（グローバル beforeEach は
+  // reset していないため、蓄積した過去の呼び出しで
+  // not.toHaveBeenCalled() 系の assertion が誤って失敗するのを防ぐ）。
+  beforeEach(() => {
+    vi.mocked(spawnRun).mockClear();
+  });
+
   it("spawnRun を呼んで sessionId を返す", async () => {
     vi.mocked(spawnRun).mockReturnValue("run_999");
     const res = await request(app).post("/api/runs/start").send({ baseUrl: "https://example.com" });
     expect(res.status).toBe(200);
     expect(res.body.sessionId).toBe("run_999");
     expect(spawnRun).toHaveBeenCalledWith(expect.objectContaining({ baseUrl: "https://example.com" }));
+  });
+
+  it("maxBrowsers/maxExplorers/maxThresholds を指定しても spawnRun に渡す", async () => {
+    vi.mocked(spawnRun).mockReturnValue("run_999");
+    const res = await request(app)
+      .post("/api/runs/start")
+      .send({ baseUrl: "https://example.com", maxBrowsers: 3, maxExplorers: 0, maxThresholds: 8 });
+    expect(res.status).toBe(200);
+    expect(spawnRun).toHaveBeenCalledWith(expect.objectContaining({ maxBrowsers: 3, maxExplorers: 0, maxThresholds: 8 }));
+  });
+
+  it("不正な mode は 400（spawnRun は呼ばれない）", async () => {
+    const res = await request(app).post("/api/runs/start").send({ mode: "godmode" });
+    expect(res.status).toBe(400);
+    expect(spawnRun).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { maxBrowsers: -1 },
+    { maxBrowsers: 9 },
+    { maxBrowsers: 1.5 },
+    { maxBrowsers: "3" },
+    { maxExplorers: -1 },
+    { maxExplorers: 100 },
+    { maxThresholds: -1 },
+    { maxThresholds: 9 },
+  ])("agent count が範囲外/非整数/非数値なら 400 で spawnRun を呼ばない: %j", async (body) => {
+    const res = await request(app).post("/api/runs/start").send(body);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/maxBrowsers, maxExplorers, and maxThresholds/);
+    expect(spawnRun).not.toHaveBeenCalled();
+  });
+
+  it("agent count は 0 と 8（境界値）を許可する", async () => {
+    vi.mocked(spawnRun).mockReturnValue("run_999");
+    const res = await request(app)
+      .post("/api/runs/start")
+      .send({ maxBrowsers: 0, maxExplorers: 8, maxThresholds: 0 });
+    expect(res.status).toBe(200);
+    expect(spawnRun).toHaveBeenCalled();
+  });
+
+  it("agent count 未指定なら素通しする（デフォルトは spawnRun/run.ts 側で決まる）", async () => {
+    vi.mocked(spawnRun).mockReturnValue("run_999");
+    const res = await request(app).post("/api/runs/start").send({ baseUrl: "https://example.com" });
+    expect(res.status).toBe(200);
+    expect(spawnRun).toHaveBeenCalledWith(
+      expect.objectContaining({ maxBrowsers: undefined, maxExplorers: undefined, maxThresholds: undefined }),
+    );
   });
 });
 

@@ -74,6 +74,15 @@ the log and findings endpoints return whatever the swarm saw inside your app.
   handling belongs to the proxy, not to a test tool.
 - Every request is checked for a `Host` we serve and a same-origin `Origin`,
   which blocks DNS rebinding and drive-by calls from another site you have open.
+  Putting a reverse proxy in front — even one that leaves `SHOAL_HOST` at the
+  loopback default and only the proxy listens publicly — fails both checks
+  unless the proxy's public hostname is named in **`SHOAL_ALLOWED_HOSTS`**
+  (comma-separated): a proxy that preserves the `Host` header sends one shoal
+  has never heard of, and a proxy that rewrites `Host` to the upstream address
+  (nginx's default) still forwards the browser's real `Origin` unchanged,
+  which then no longer matches. Setting `SHOAL_ALLOWED_HOSTS` also makes a
+  token mandatory, the same as a non-loopback `SHOAL_HOST` — the dashboard is
+  reachable from the network either way.
 
 Exposing the dashboard to a shared network — even with a token — means anyone
 with that token can point a swarm at any URL your machine can reach. Prefer an

@@ -190,6 +190,17 @@ TLS-terminating reverse proxy in front of it. An SSH tunnel
 (`ssh -L 4000:localhost:4000 host`) is usually a better answer than opening the
 port at all. See [SECURITY.md](SECURITY.md) for the full picture.
 
+**Behind a reverse proxy** — the recommended shape keeps shoal itself on
+`SHOAL_HOST=127.0.0.1` and lets the proxy (nginx, Caddy, Traefik) listen
+publicly and terminate TLS, forwarding to shoal over loopback. That needs one
+more variable: set **`SHOAL_ALLOWED_HOSTS`** to the proxy's public hostname
+(comma-separated for more than one), or every request fails shoal's own
+Host/Origin checks — a proxy that preserves the `Host` header sends one shoal
+doesn't recognize, and one that rewrites it to shoal's own address (nginx's
+default) still forwards the browser's real `Origin` unchanged, which then no
+longer matches. Setting `SHOAL_ALLOWED_HOSTS` also makes a token mandatory,
+the same as a non-loopback `SHOAL_HOST`.
+
 ---
 
 ## Cross-run intelligence
@@ -274,7 +285,8 @@ shoal serve --env-file apps/shoal/.env
 | `REFRESH_SPEC` | — | Set to `1` to re-run product discovery |
 | `SHOAL_MAX_USD` | — | Hard spend cap for a run (estimated USD). Once reached, no further LLM call starts and the remaining lanes are skipped — findings already collected are still saved and reported |
 | `SHOAL_HOST` | `127.0.0.1` | Dashboard bind address. Loopback by default; set it to expose the dashboard (see [Dashboard access](#dashboard-access)) |
-| `SHOAL_TOKEN` | — | Dashboard token. Required whenever `SHOAL_HOST` is not loopback; generated and printed at startup if unset |
+| `SHOAL_TOKEN` | — | Dashboard token. Required whenever `SHOAL_HOST` is not loopback or `SHOAL_ALLOWED_HOSTS` is set; generated and printed at startup if unset |
+| `SHOAL_ALLOWED_HOSTS` | — | Comma-separated public hostname(s) of a reverse proxy in front of the dashboard (see [Dashboard access](#dashboard-access)) |
 | `SHOAL_BROWSER_ITERATIONS` | `12` | Turns a browser agent may take |
 | `SHOAL_THRESHOLD_ITERATIONS` | `12` | Turns a threshold agent may take |
 | `SHOAL_EXPLORER_CONCURRENCY` | `2` | API explorer agents run in parallel batches of this size |
@@ -516,6 +528,43 @@ shoal defaults to Anthropic Claude. To use a different provider, set these varia
 | Ollama | `LLM_BASE_URL=http://localhost:11434/v1`, `LLM_MODEL` |
 | LM Studio | `LLM_BASE_URL=http://localhost:1234/v1`, `LLM_MODEL` |
 
+### Codex (ChatGPT subscription)
+
+Use your ChatGPT Plus / Pro subscription through the official Codex CLI login.
+
+**Prerequisites**
+
+- `npx` available (the official `@openai/codex` CLI is run via `npx @openai/codex login`, no separate install needed)
+- A ChatGPT Plus / Pro (or equivalent) subscription
+
+**Setup**
+
+```bash
+npm run auth:codex
+```
+
+This runs the official Codex CLI's OAuth login flow, verifies `~/.codex/auth.json` was created, and writes `LLM_PROVIDER=codex` and a default `LLM_MODEL` to `.env`.
+
+**Run**
+
+Same as usual:
+
+```bash
+shoal
+# or
+npm start
+shoal serve
+```
+
+**Terms note**
+
+Unlike `claude-cli` (below), which only launches the official Claude Code CLI and never touches its OAuth tokens, `codex` reads the access and refresh tokens from `~/.codex/auth.json` directly, refreshes them itself when they expire (rewriting that file), and calls ChatGPT's undocumented `chatgpt.com/backend-api/codex` endpoint using the official Codex CLI's own client id. This mirrors the OAuth flow the official `@openai/codex` CLI uses, but shoal — not that CLI — is the one making the API calls: an integration pattern OpenAI has not published or endorsed for third-party tools, and one that can break without notice if the endpoint or its authentication changes. For hosting or redistributing shoal, prefer an OpenAI API key (`LLM_PROVIDER=openai`) instead.
+
+**Troubleshooting**
+
+- Login fails → run `npx @openai/codex login` directly to see the underlying error
+- `~/.codex/auth.json` not found after login → the official CLI's login did not complete; retry it directly before re-running `npm run auth:codex`
+
 ### Claude CLI (Claude Code subscription)
 
 Use your Anthropic Free / Pro / Max subscription through the **official Claude Code login** (same pattern as xangi / OpenClaw). shoal never reads or stores OAuth tokens.
@@ -572,7 +621,7 @@ Set `LLM_MODEL` to a Bedrock model ID **or** an inference profile ID. Not every 
 
 | Scope | Example `LLM_MODEL` | Typical `AWS_REGION` |
 |---|---|---|
-| Foundation model (on-demand, when offered) | `anthropic.claude-3-5-haiku-20241022-v1:0` | region that hosts the model |
+| Foundation model (on-demand, when offered) | `anthropic.claude-haiku-4-5-20251001-v1:0` (default) | region that hosts the model |
 | US cross-region | `us.anthropic.claude-sonnet-4-5-20250929-v1:0` | `us-east-1` |
 | EU cross-region | `eu.anthropic.claude-sonnet-4-5-20250929-v1:0` | `eu-central-1` |
 | APAC cross-region | `apac.anthropic.claude-sonnet-4-5-20250929-v1:0` | `ap-northeast-1` |

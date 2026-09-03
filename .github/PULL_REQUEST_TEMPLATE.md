@@ -15,7 +15,7 @@
 <!-- How did you verify this change? Paste relevant output where helpful. -->
 
 - [ ] `npx tsc --noEmit` passes
-- [ ] `npm test` passes
+- [ ] `npm run test:coverage` passes (CI enforces the thresholds in `vitest.config.ts`)
 - [ ] `npm run build:web` passes (if the web UI changed)
 
 ## Notes for reviewers

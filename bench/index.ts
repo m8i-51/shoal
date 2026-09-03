@@ -17,9 +17,28 @@ import * as path from "path";
 import { fileURLToPath } from "url";
 import { loadLabels, loadRunFindings, scoreFindings, formatBenchResult, recordBenchScore } from "./score";
 import { labelsPathForVariant, resolveBenchVariant } from "./variants";
+import { createLLMClient } from "../framework/llm-client";
 
 const benchDir = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.join(benchDir, "..");
+
+/**
+ * The model a recorded score should be attributed to.
+ *
+ * `bench` used to read `ANTHROPIC_MODEL` / `OPENAI_MODEL` / `SHOAL_MODEL` —
+ * none of which shoal itself ever sets; the real variable is `LLM_MODEL`
+ * (`LLM_PROVIDER` selects the provider). That mismatch meant `BENCH_RECORD=1`
+ * always recorded "unknown", so a score in `bench/scores.json` could not be
+ * told apart from any other run. `run.ts` runs as a separate child process,
+ * but `createLLMClient()` is a pure function of the same env vars this
+ * process already has (and inherits into the child), so calling it here
+ * reproduces exactly what the child will resolve to, without touching the
+ * network — provider client construction is lazy in every provider's SDK.
+ */
+export function resolveBenchModelLabel(): string {
+  const { provider, defaultModel } = createLLMClient();
+  return `${provider}/${defaultModel}`;
+}
 
 function runShoal(runId: string, baseUrl: string): Promise<number> {
   const tsxBin = path.join(packageRoot, "node_modules", ".bin", "tsx");
@@ -73,10 +92,9 @@ async function main() {
   console.log(`[bench] result saved: ${outPath}`);
 
   if (process.env.BENCH_RECORD === "1") {
-    const model = process.env.ANTHROPIC_MODEL ?? process.env.OPENAI_MODEL ?? process.env.SHOAL_MODEL ?? "unknown";
     recordBenchScore({
       variant: variant.id,
-      model,
+      model: resolveBenchModelLabel(),
       detectionRate: Math.round(result.detectionRate * 100),
       totalFindings: result.totalFindings,
       runDate: new Date().toISOString().slice(0, 10),
@@ -92,7 +110,11 @@ async function main() {
   }
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+// Guarded so this file can be imported (e.g. to unit-test resolveBenchModelLabel)
+// without spinning up the seeded app and spawning a full shoal run.
+if (process.env.NODE_ENV !== "test") {
+  main().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}

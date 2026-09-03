@@ -5,8 +5,10 @@ All notable changes to shoal are recorded here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while the version
 stays below `1.0.0`, minor-looking releases may still change behaviour.
 
-Releases up to and including `0.1.33` are reconstructed from the git history;
-entries for `0.1.20` and earlier live in the commit log only.
+Releases up to and including `0.1.33` are reconstructed after the fact from
+commit messages, pull request numbers, and release dates. This repository's
+commit history begins on 2026-08-14 (pull request #22) and does not reach back
+to `0.1.20` or earlier, so those releases are not separately documented here.
 
 ## [Unreleased]
 
@@ -44,6 +46,106 @@ entries for `0.1.20` and earlier live in the commit log only.
   `TriageResult.edgeRisks` and `triage_result.json`. Findings categorised as
   `bug` can never be marked this way, and with no edge declared the mechanism
   stays off entirely.
+
+### Security
+
+- **`SHOAL_ALLOWED_HOSTS`, for the recommended reverse-proxy setup.** Putting a
+  TLS-terminating proxy in front of a loopback-bound dashboard — exactly what
+  SECURITY.md recommends — used to fail outright: a proxy that preserves the
+  `Host` header sent one shoal didn't recognise (403 `host not allowed`), and
+  one that rewrites `Host` to shoal's own address still forwarded the
+  browser's real `Origin` unchanged, which then failed to match (403
+  `cross-origin request refused`). Setting `SHOAL_ALLOWED_HOSTS` to the
+  proxy's public hostname fixes both checks, and — like a non-loopback
+  `SHOAL_HOST` — makes a dashboard token mandatory, since the dashboard is
+  reachable from the network either way.
+- **`?token=` is no longer a standing credential on `/api` calls.** It was
+  documented as a bootstrap-only mechanism (exchanged for an `HttpOnly`
+  session cookie on first use) but was still accepted directly on every
+  `/api` request afterwards, which put it in server logs and browser history
+  as a reusable credential. Only the cookie, or an `Authorization`/
+  `X-Shoal-Token` header, authenticates `/api` calls now; the query
+  parameter still works exactly once, to establish the cookie.
+- **`shoal init` now writes `.env` with `0600` permissions**, not the default
+  `0644` — it holds API keys and tracker tokens in plain text, and the old
+  permissions left it world-readable on a shared machine. `shoal config`
+  re-tightens permissions on an existing `.env` it updates, too.
+- Fixed a `fast-uri` transitive dependency vulnerability (via
+  `@modelcontextprotocol/sdk` → `ajv`) with a version override; `npm audit`
+  is clean again.
+
+### Fixed
+
+- **Amazon Bedrock's default model was retired.**
+  `anthropic.claude-3-5-haiku-20241022-v1:0` — used whenever
+  `LLM_PROVIDER=bedrock` was set without an explicit `LLM_MODEL` — no longer
+  exists. The default is now `anthropic.claude-haiku-4-5-20251001-v1:0`.
+  OpenRouter's default moved off a retired Gemini 1.5 generation to
+  `google/gemini-2.0-flash-001`. Both defaults now live in one place
+  (`framework/llm-client.ts`'s `PROVIDER_DEFAULT_MODELS`), cross-checked by a
+  test against `bin/init.js`'s copy of the same table, so the next retirement
+  can't silently drift between the two again.
+- **`shoal init`'s generated weekly-run workflow had drifted from the shipped
+  example.** It still hardcoded Node 20 and `actions/checkout@v4` /
+  `actions/setup-node@v4` after both the repo's own CI and
+  `shoal-weekly.example.yml` moved to Node 22 and `@v7`. It's now generated
+  from that same example file instead of a second hand-written copy, so the
+  two can't diverge again.
+- **LLM calls only retried on HTTP 429.** A 529 (Anthropic's "overloaded"),
+  a 5xx from the provider or an intermediary, or a dropped connection failed
+  the whole agent immediately instead of retrying. All of those now retry
+  with the same backoff as 429. Also fixed: a `retry-after` header in
+  HTTP-date form (RFC 7231's other allowed format, as opposed to a plain
+  number of seconds) was parsed with `parseInt`, which returns `NaN` for a
+  date string — the run waited `NaN` ms, in practice retrying immediately
+  instead of honoring the provider's requested delay.
+- **`shoal-bench`'s `BENCH_RECORD=1` always recorded the model as `"unknown"`.**
+  It read `ANTHROPIC_MODEL` / `OPENAI_MODEL` / `SHOAL_MODEL`, none of which
+  shoal itself ever sets (the real variable is `LLM_MODEL`, selected via
+  `LLM_PROVIDER`). It now reads the same `provider`/`defaultModel` shoal's
+  own LLM client resolves to.
+- **GitHub issue/regression lookups were capped at one page** (20 closed
+  issues, 50 open issues) with no way to see more, which silently limited
+  regression checking and triage deduplication on any repo whose
+  `feedback-agent`-labeled issues outgrew that page. Both now paginate
+  through up to 1,000 issues. Also switched to the current `Authorization:
+  Bearer` scheme (matching the rest of the GitHub tracker), and a malformed
+  JSON response body is now handled instead of throwing.
+- **A long-running `shoal serve`'s memory grew without bound.** Every run
+  spawned from the dashboard stayed in `activeSessions` — logs, listeners,
+  and all — forever, which matters for the weekly-scheduler use case the
+  dashboard itself supports. A finished session is now evicted from memory
+  30 minutes after it completes; every endpoint that reads a session already
+  falls back to its log file when it isn't in memory, so nothing is lost.
+- `POST /api/runs/start` now validates `maxBrowsers` / `maxExplorers` /
+  `maxThresholds` (integers, 0–8) the same way the MCP `start_run` tool
+  already did, rejecting anything else with `400` instead of passing it
+  through to the spawned run's environment.
+
+### Changed
+
+- `run.ts` can now be imported without launching a real Playwright browser
+  and agent swarm — it had no `NODE_ENV=test` guard around its top-level
+  `main()` call (unlike `server/index.ts` and `server/mcp.ts`), which is part
+  of why it had no test coverage at all.
+- CI now runs `npm run test:coverage` instead of `npm test`, so the coverage
+  thresholds already declared in `vitest.config.ts` are actually enforced
+  rather than just aspirational.
+- `.env.example`'s comments are now in English, matching CONTRIBUTING.md's
+  policy for anything a user reads first — it was previously Japanese-heavy
+  despite shipping in the npm package as the first file `shoal init` pairs
+  with.
+- Documented the `codex` provider's Terms note (README/README_JA), matching
+  the one `claude-cli` already had: unlike `claude-cli`, it reads and
+  refreshes OAuth tokens from `~/.codex/auth.json` directly and calls
+  ChatGPT's undocumented backend endpoint itself, an integration pattern
+  OpenAI has not published or endorsed.
+- Added `CODE_OF_CONDUCT.md` (Contributor Covenant) and `.nvmrc`; CI and the
+  publish workflow now read the Node version from `.nvmrc` instead of a
+  separate hardcoded value. `package.json` now declares `license`,
+  `keywords`, `homepage`, and `bugs` for npm and GitHub's own metadata
+  surfaces. The publish workflow now runs lint and the type check before
+  publishing, matching CI.
 
 ## [0.2.0] — 2026-09-02
 

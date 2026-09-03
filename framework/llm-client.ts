@@ -478,15 +478,43 @@ export type LLMClient =
   | CodexClient
   | { createMessage: (params: CreateMessageParams) => Promise<Message> };
 
+/**
+ * Default model per provider, when `.env` sets `LLM_PROVIDER` without
+ * `LLM_MODEL`. This is the single source of truth for those defaults —
+ * `bin/init.js`'s interactive prompt (its own copy, since it runs as plain
+ * JS and cannot import this `.ts` module directly) is cross-checked against
+ * it by `framework/__tests__/provider-defaults.test.ts`, so a retired model
+ * id has one place to fix instead of drifting silently in a second copy.
+ *
+ * `ollama` and `lm-studio` are intentionally absent: local model catalogs
+ * vary per machine, so both the runtime (`""` for lm-studio, `llama3.2` as a
+ * common Ollama pull) and the interactive prompt ask rather than assume.
+ */
+export const PROVIDER_DEFAULT_MODELS: Record<string, string> = {
+  anthropic: "claude-haiku-4-5-20251001",
+  // anthropic.claude-3-5-haiku-20241022-v1:0 (the previous default) is retired.
+  bedrock: "anthropic.claude-haiku-4-5-20251001-v1:0",
+  codex: "gpt-5.1-codex-mini",
+  "claude-cli": "claude-sonnet-4-6",
+  ollama: "llama3.2",
+  "lm-studio": "",
+  groq: "llama-3.3-70b-versatile",
+  gemini: "gemini-2.0-flash",
+  openai: "gpt-4o-mini",
+  // google/gemini-flash-1.5 (the previous default) points at a retired Gemini
+  // 1.5 generation; keep it aligned with the "gemini" compat provider above.
+  openrouter: "google/gemini-2.0-flash-001",
+};
+
 // OpenAI-compat プロバイダのデフォルト設定
 // LLM_BASE_URL / LLM_MODEL で個別上書き可能
 const COMPAT_PROVIDERS: Record<string, { baseURL: string; defaultModel: string }> = {
-  ollama:       { baseURL: "http://localhost:11434/v1",                               defaultModel: "llama3.2" },
-  "lm-studio":  { baseURL: "http://localhost:1234/v1",                                defaultModel: "" },
-  groq:         { baseURL: "https://api.groq.com/openai/v1",                         defaultModel: "llama-3.3-70b-versatile" },
-  gemini:       { baseURL: "https://generativelanguage.googleapis.com/v1beta/openai", defaultModel: "gemini-2.0-flash" },
-  openai:       { baseURL: "https://api.openai.com/v1",                              defaultModel: "gpt-4o-mini" },
-  openrouter:   { baseURL: "https://openrouter.ai/api/v1",                           defaultModel: "google/gemini-flash-1.5" },
+  ollama:       { baseURL: "http://localhost:11434/v1",                               defaultModel: PROVIDER_DEFAULT_MODELS.ollama },
+  "lm-studio":  { baseURL: "http://localhost:1234/v1",                                defaultModel: PROVIDER_DEFAULT_MODELS["lm-studio"] },
+  groq:         { baseURL: "https://api.groq.com/openai/v1",                         defaultModel: PROVIDER_DEFAULT_MODELS.groq },
+  gemini:       { baseURL: "https://generativelanguage.googleapis.com/v1beta/openai", defaultModel: PROVIDER_DEFAULT_MODELS.gemini },
+  openai:       { baseURL: "https://api.openai.com/v1",                              defaultModel: PROVIDER_DEFAULT_MODELS.openai },
+  openrouter:   { baseURL: "https://openrouter.ai/api/v1",                           defaultModel: PROVIDER_DEFAULT_MODELS.openrouter },
 };
 
 export function createLLMClient(): { client: LLMClient; defaultModel: string; provider: string } {
@@ -496,7 +524,7 @@ export function createLLMClient(): { client: LLMClient; defaultModel: string; pr
 
   // Bedrock
   if (provider === "bedrock") {
-    const effectiveModel = model ?? "anthropic.claude-3-5-haiku-20241022-v1:0";
+    const effectiveModel = model ?? PROVIDER_DEFAULT_MODELS.bedrock;
     console.log(`[LLM] provider: Amazon Bedrock (region: ${process.env.AWS_REGION ?? "us-east-1"}), model: ${effectiveModel}`);
     return {
       client: new BedrockClient(),
@@ -507,7 +535,7 @@ export function createLLMClient(): { client: LLMClient; defaultModel: string; pr
 
   // Codex は独自クライアント
   if (provider === "codex") {
-    const effectiveModel = model ?? "gpt-5.1-codex-mini";
+    const effectiveModel = model ?? PROVIDER_DEFAULT_MODELS.codex;
     console.log(`[LLM] provider: Codex (ChatGPT subscription), model: ${effectiveModel}`);
     return {
       client: new CodexClient(effectiveModel),
@@ -518,7 +546,7 @@ export function createLLMClient(): { client: LLMClient; defaultModel: string; pr
 
   // Claude CLI / Agent SDK（Claude Code ログイン）。Messages createMessage は使わない。
   if (provider === "claude-cli") {
-    const effectiveModel = model ?? "claude-sonnet-4-6";
+    const effectiveModel = model ?? PROVIDER_DEFAULT_MODELS["claude-cli"];
     console.log(`[LLM] provider: Claude CLI (Claude Code login), model: ${effectiveModel}`);
     return {
       client: {
@@ -538,7 +566,7 @@ export function createLLMClient(): { client: LLMClient; defaultModel: string; pr
   if (compatDefaults || baseURL) {
     const apiKey = process.env.LLM_API_KEY ?? process.env.OPENAI_API_KEY ?? "";
     const effectiveBaseURL = baseURL ?? compatDefaults?.baseURL ?? "https://api.openai.com/v1";
-    const effectiveModel = model ?? compatDefaults?.defaultModel ?? "gpt-4o-mini";
+    const effectiveModel = model ?? compatDefaults?.defaultModel ?? PROVIDER_DEFAULT_MODELS.openai;
     console.log(`[LLM] provider: ${provider} (${effectiveBaseURL}), model: ${effectiveModel}`);
     return {
       client: new OpenAICompatClient(apiKey, effectiveBaseURL, effectiveModel),
@@ -549,7 +577,7 @@ export function createLLMClient(): { client: LLMClient; defaultModel: string; pr
 
   // Anthropic (default)
   const apiKey = process.env.ANTHROPIC_API_KEY ?? "";
-  const effectiveModel = model ?? "claude-haiku-4-5-20251001";
+  const effectiveModel = model ?? PROVIDER_DEFAULT_MODELS.anthropic;
   console.log(`[LLM] provider: Anthropic, model: ${effectiveModel}`);
   return {
     client: new AnthropicClient(apiKey),
