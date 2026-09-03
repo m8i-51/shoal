@@ -41,6 +41,8 @@ import { buildContextOptions, sanitizeEnvironment, describeEnvironment, applyNet
 import { agentSessionPath, hasAgentSession, saveAgentSession, sessionContinuityPrompt } from "./framework/session-store";
 import { loadPageHashes, updatePageHashes } from "./framework/page-cache";
 import { traceAgentZipPath } from "./framework/trace-chunk";
+import { registerSecrets, scrubTraceZipSafely } from "./framework/trace-scrub";
+import { getRetentionDays, pruneRunArtifacts } from "./framework/retention";
 import { loadPersonaPack, formatPackForPrompt, type PersonaPack } from "./framework/persona-pack";
 import { buildTrackers, formatIssuesCreatedLine } from "./framework/trackers/index";
 import { setupObservation, buildObservationWarning } from "./framework/observation";
@@ -789,6 +791,7 @@ async function runBrowserAgent(
   const host = new URL(BASE_URL).host;
   const cachedHashes = loadPageHashes(host);
   const pageHashUpdates: Record<string, string> = {};
+  const MAX_ITERATIONS = extras.maxIterations ?? browserIterations();
 
   const systemPrompt = `You are "${agent.name}".
 Role: ${agent.role}
@@ -805,7 +808,7 @@ ${productSpec.appDescription}
 2. Perform actual tasks on that page
 3. If you find any issues, record them with post_feedback (they become Issues after triage)
 4. Move to another page and repeat
-5. Finish after 8–10 actions
+5. Finish within ${MAX_ITERATIONS} actions
 
 When writing the body, match the tone to the category:
 - bug: technical ("The endpoint returned 500 when...", "Expected X but got Y")
@@ -845,7 +848,7 @@ ${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\
 ${untrustedContentPrompt()}`;
 
   const startUrl = resolveLoginUrl(BASE_URL, authPlan.startPath);
-  await page.goto(startUrl, { waitUntil: "networkidle" });
+  await page.goto(startUrl, { waitUntil: "load", timeout: 15000 });
   await page.waitForTimeout(RUN_TIMINGS.agentStartupMs);
   const initialScreenshot = await takeScreenshot(page, "initial");
 
@@ -866,7 +869,6 @@ ${untrustedContentPrompt()}`;
     }
   })();
 
-  const MAX_ITERATIONS = extras.maxIterations ?? browserIterations();
   const sessionTools = [...BROWSER_TOOLS, ...(extras.extraTools ?? [])].map((t) => ({
     name: t.name,
     description: t.description ?? t.name,
@@ -1061,6 +1063,7 @@ async function runThresholdAgent(
   const host = new URL(BASE_URL).host;
   const cachedHashes = loadPageHashes(host);
   const pageHashUpdates: Record<string, string> = {};
+  const MAX_ITERATIONS = thresholdIterations();
 
   const systemPrompt = `You are "${agent.name}".
 Role: ${agent.role}
@@ -1082,7 +1085,7 @@ ${formatThresholdCandidatesForPrompt(candidates)}
 4. If the boundary crashes, silently fails, loses data, or shows an unclear/wrong message — report with post_feedback
 5. If the boundary behaves clearly and safely, do NOT invent a finding — move to the next candidate
 6. If an area does not exist, skip that candidate
-7. Finish after probing your list (about 8–10 actions)
+7. Finish after probing your list (within ${MAX_ITERATIONS} actions)
 
 When writing the body, match the tone to the category:
 - bug: technical ("Submitting 501 chars returned 500 with no validation...", "Expected a 403 at the plan limit but the create succeeded")
@@ -1100,7 +1103,7 @@ ${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\
 ${untrustedContentPrompt()}`;
 
   const startUrl = resolveLoginUrl(BASE_URL, authPlan.startPath);
-  await page.goto(startUrl, { waitUntil: "networkidle" });
+  await page.goto(startUrl, { waitUntil: "load", timeout: 15000 });
   await page.waitForTimeout(RUN_TIMINGS.agentStartupMs);
   const initialScreenshot = await takeScreenshot(page, "initial");
 
@@ -1119,7 +1122,6 @@ ${untrustedContentPrompt()}`;
     }
   })();
 
-  const MAX_ITERATIONS = thresholdIterations();
   const sessionTools = BROWSER_TOOLS.map((t) => ({
     name: t.name,
     description: t.description ?? t.name,
@@ -1269,6 +1271,13 @@ async function runVerifyMode(
 
 export async function main() {
   initDirs();
+  // logs/screenshots/run_* と logs/traces/run_* の古いディレクトリを削除する
+  // （SHOAL_RETENTION_DAYS、デフォルト30日。0で無効化）
+  const retentionDays = getRetentionDays();
+  const prunedCount = pruneRunArtifacts(process.cwd(), retentionDays);
+  if (prunedCount > 0) {
+    console.log(`[retention] removed ${prunedCount} run artifact director(ies) older than ${retentionDays} day(s)`);
+  }
   // run log を最初期化しておくことで、どの段階でエラーが起きても finally で saveRunLog() が動く
   initRunLog(0, process.env.GITHUB_REPO ?? "");
 
@@ -1371,6 +1380,10 @@ export async function main() {
         throw new Error(`unhandled account setup action: ${String(_exhaustive)}`);
       }
     }
+    // trace-scrub: 既知の秘匿値（テストアカウントのパスワード）を登録しておき、
+    // 以降 tracing.stop() で保存される zip から確実に除去できるようにする
+    registerSecrets(testAccounts.map((a) => a.password));
+    registerSecrets([targetConfig.credentials?.password]);
 
     // 4.8. scenario design（role が 2 つ以上あればマルチアクターシナリオも生成される）
     const scenarioContext = FOCUS_PATHS.length > 0
@@ -1587,6 +1600,7 @@ export async function main() {
             try {
               fs.mkdirSync(path.dirname(tracePath), { recursive: true });
               await context.tracing.stop({ path: tracePath });
+              await scrubTraceZipSafely(tracePath, `agent trace ${agent.name}`);
             } catch (e) {
               console.warn(`[trace] failed to save for ${agent.name}:`, e);
             }
@@ -1632,6 +1646,7 @@ export async function main() {
           try {
             fs.mkdirSync(path.dirname(tracePath), { recursive: true });
             await context.tracing.stop({ path: tracePath });
+            await scrubTraceZipSafely(tracePath, `agent trace ${agent.name}`);
           } catch (e) {
             console.warn(`[trace] failed to save for ${agent.name}:`, e);
           }
@@ -1708,6 +1723,7 @@ Rules:
             try {
               fs.mkdirSync(path.dirname(tracePath), { recursive: true });
               await context.tracing.stop({ path: tracePath });
+              await scrubTraceZipSafely(tracePath, `agent trace ${regressionAgent.name}`);
             } catch (e) {
               console.warn(`[trace] failed to save for ${regressionAgent.name}:`, e);
             }
@@ -1817,19 +1833,28 @@ Rules:
   }
 }
 
+/**
+ * Handles a fatal error from main(): always sets a non-zero exit code so a
+ * run that never started (a browser-launch failure, a config error, anything
+ * that isn't the expected BudgetExceededError) is reported as a failure —
+ * exported so this is testable without launching a real agent swarm.
+ */
+export function handleFatalRunError(e: unknown): void {
+  if (e instanceof BudgetExceededError) {
+    console.error(`\n${e.message}`);
+    console.error("Raise SHOAL_MAX_USD (or unset it) to continue exploring.");
+    process.exitCode = 1;
+    return;
+  }
+  console.error(e);
+  process.exitCode = 1;
+}
+
 // Guarded so run.ts can be imported (e.g. by a unit test exercising one of its
 // exported helpers) without launching a real agent swarm against BASE_URL.
 // Unlike server/index.ts and server/mcp.ts, this had no such guard: importing
 // this module for any reason — even just to reuse a pure function — used to
 // spawn a live Playwright browser and start exploring.
 if (process.env.NODE_ENV !== "test") {
-  main().catch((e) => {
-    if (e instanceof BudgetExceededError) {
-      console.error(`\n${e.message}`);
-      console.error("Raise SHOAL_MAX_USD (or unset it) to continue exploring.");
-      process.exitCode = 1;
-      return;
-    }
-    console.error(e);
-  });
+  main().catch(handleFatalRunError);
 }

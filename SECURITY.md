@@ -33,19 +33,62 @@ point it at. Two settings materially affect its blast radius:
 
 - **`SHOAL_MODE`** controls how much agents may write to your app:
   - `read-only` — mutation requests (POST/PUT/PATCH/DELETE) from browser agents
-    are blocked at the network layer. Safe to point at production.
+    are blocked at the network layer, so shoal itself writes nothing to the
+    target app. It does **not** mean nothing leaves the machine: everything
+    agents read (page text, accessibility tree, console/network output,
+    screenshots) is still sent to your configured LLM provider. See
+    [What is sent to the LLM provider](#what-is-sent-to-the-llm-provider)
+    before pointing it at an app with real user data.
   - `safe` (default) — test data is allowed, but irreversible actions (delete,
-    payment, sending email/invites) are avoided.
+    payment, sending email/invites) are avoided; the destructive-click guard
+    recognizes both English and Japanese phrasing and can be extended with
+    `SHOAL_DESTRUCTIVE_PATTERNS`.
   - `full` — no restrictions. Use only against disposable environments.
 - **Credentials** (LLM keys, `GITHUB_TOKEN`, tracker tokens, `test-accounts/`)
   are read from your environment / local files. Keep them out of commits — `.env`
   and `test-accounts/` are gitignored. Never paste secrets into issues or logs.
+  Known credentials (test-account passwords, anything typed into a field
+  detected as a password) are scrubbed from Playwright trace zips at save
+  time, on top of the masking already applied to console output, run JSON,
+  and the HTML report; set `SHOAL_TRACE=0` to disable tracing entirely.
 - **`SHOAL_MAX_USD`** caps estimated LLM spend for a run. Without it, the only
   limits are the per-agent turn budgets. Set it when a run is triggered by
   anything other than you typing the command.
 
-When in doubt, run against a staging or disposable environment rather than
-production.
+When in doubt, run against a staging environment, or with data that has been
+anonymised, rather than production data — regardless of `SHOAL_MODE`, since
+the mode only governs writes to your app, not what agents read and send to
+the LLM provider.
+
+## What is sent to the LLM provider
+
+shoal's agents decide what to do next by sending what they observe to the LLM
+provider you configured. No `SHOAL_MODE` changes this — it only controls
+whether shoal writes to your app, not what leaves the machine. What is sent
+includes:
+
+- Page text and the accessibility tree of every screen an agent visits
+- Console messages and network errors captured during a session
+- DOM diffs computed between actions
+- Screenshots (as images, for models that accept them)
+- API tool results (whatever your target's API returns)
+- Test-account credentials, in the prompt that hands an agent its login —
+  the email and password shoal signs it in with, not real user credentials
+
+Where this data goes is entirely a function of your provider configuration:
+
+- **Provider choice** (`LLM_PROVIDER` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`
+  / an OpenAI-compatible `LLM_BASE_URL`) decides which company's servers see
+  it.
+- **`AWS_REGION`** (with `LLM_PROVIDER=bedrock`) decides which AWS region
+  processes it, if data residency matters for your compliance requirements.
+
+If the target app can display real personal data — customer records, support
+tickets, uploaded documents — that data reaches whichever LLM provider you
+configured the moment an agent reads the screen it's on. Point shoal at a
+staging environment with synthetic data, or at production data that has been
+anonymised, rather than at an app carrying real personal data you would not
+otherwise send to a third-party API.
 
 ## The dashboard is an authenticated control surface
 

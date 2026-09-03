@@ -312,12 +312,12 @@ const styles = {
   },
   subHint: {
     fontSize: "0.75rem",
-    color: "#94a3b8",
+    color: "#475569",
     margin: "0 0 0.75rem",
   },
   hint: {
     fontSize: "0.8rem",
-    color: "#94a3b8",
+    color: "#475569",
     margin: "0.5rem 0 0",
   },
   createRow: {
@@ -332,7 +332,6 @@ const styles = {
     border: "1px solid #cbd5e1",
     borderRadius: "5px",
     color: "#1e293b",
-    outline: "none",
     width: "100%",
     boxSizing: "border-box" as const,
   },
@@ -343,7 +342,6 @@ const styles = {
     border: "1px solid #cbd5e1",
     borderRadius: "5px",
     color: "#1e293b",
-    outline: "none",
     resize: "vertical" as const,
     boxSizing: "border-box" as const,
     fontFamily: "inherit",
@@ -376,7 +374,7 @@ const styles = {
   },
   seed: {
     fontSize: "0.7rem",
-    color: "#94a3b8",
+    color: "#475569",
     margin: "0.25rem 0 0",
   },
   persona: {
@@ -408,7 +406,7 @@ const styles = {
   archiveBtn: {
     background: "transparent",
     border: "1px solid #e2e8f0",
-    color: "#94a3b8",
+    color: "#475569",
     borderRadius: "5px",
     padding: "3px 10px",
     fontSize: "0.75rem",

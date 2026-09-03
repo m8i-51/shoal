@@ -22,6 +22,7 @@ import { saveFindingTraceChunk, traceAgentZipPath } from "./trace-chunk";
 import { resolveIssueId, type IssueIdentifier } from "./issue-id";
 import { saveFinding, getSwarmSignals, runLog } from "./findings";
 import { redactFillResultText, redactToolInput, isPasswordLabel, REDACTED_SECRET } from "./redact";
+import { registerSecret } from "./trace-scrub";
 import { wrapUntrusted } from "./untrusted";
 import {
   getRecentConsoleLogs,
@@ -125,7 +126,7 @@ export async function executeBrowserTool(
       case "navigate": {
         const { path: navPath } = input as { path: string };
         await saveSnapshotBeforeAction(page, observation);
-        await page.goto(`${ctx.baseUrl}${navPath}`, { waitUntil: "networkidle" });
+        await page.goto(`${ctx.baseUrl}${navPath}`, { waitUntil: "load", timeout: 15000 });
         await page.waitForTimeout(timings.afterNavigateMs);
         screenshot = await ctx.takeScreenshot(page, `navigate_${navPath.replace(/\//g, "_")}`);
         agentLog.visitedPaths.push(navPath);
@@ -185,6 +186,7 @@ export async function executeBrowserTool(
           } catch { /* try next */ }
         }
         if (!filled) throw new Error(`No input field matching: ${label}`);
+        if (passwordField) registerSecret(value);
         await page.waitForTimeout(timings.afterInputMs);
         screenshot = await ctx.takeScreenshot(page, `fill_${label.slice(0, 20)}`);
         resultText = redactFillResultText(label, value, passwordField);

@@ -8,11 +8,13 @@ export default function App() {
   return (
     <>
       <Header />
-      <Routes>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/runs/:runId" element={<RunDetail />} />
-        <Route path="/hall" element={<Hall />} />
-      </Routes>
+      <main>
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/runs/:runId" element={<RunDetail />} />
+          <Route path="/hall" element={<Hall />} />
+        </Routes>
+      </main>
     </>
   );
 }

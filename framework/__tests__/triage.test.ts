@@ -5,7 +5,7 @@ vi.mock("../llm-retry", () => ({ createMessageWithRetry: vi.fn(), sleep: vi.fn()
 
 import * as fs from "fs";
 import { createMessageWithRetry } from "../llm-retry";
-import { runTriageAgent } from "../triage";
+import { runTriageAgent, neutralizeMentions } from "../triage";
 import type { Finding } from "../types";
 import type { IssueTracker } from "../trackers/index";
 import type { LLMClient } from "../llm-client";
@@ -140,6 +140,25 @@ describe("runTriageAgent", () => {
       const [, body] = vi.mocked(tracker.createIssue).mock.calls[0];
       expect(body).toContain("**Screenshots:**");
       expect(body).toContain("/tmp/shot.png");
+    });
+
+    it("LLM が書いた body 中の @mention をバッククォートで無害化する", async () => {
+      const tracker = makeTracker();
+      vi.mocked(createMessageWithRetry)
+        .mockResolvedValueOnce(toolUseResponse("create_issue", {
+          title: "t",
+          body: "cc @someone please review, also see @some-team and user@example.com",
+          category: "bug",
+          merged_finding_ids: ["f1"],
+        }) as never)
+        .mockResolvedValueOnce(endTurn() as never);
+      await runTriageAgent([makeFinding({ id: "f1" })], {} as LLMClient, "m", tracker);
+      const [, body] = vi.mocked(tracker.createIssue).mock.calls[0];
+      expect(body).toContain("cc `@someone` please review");
+      expect(body).toContain("also see `@some-team`");
+      // preceded by a word char — not a mention, must stay intact
+      expect(body).toContain("user@example.com");
+      expect(body).not.toContain("`@example`");
     });
 
     it("title/body/category が欠けている場合はエラーを返しスキップする", async () => {
@@ -397,5 +416,31 @@ describe("runTriageAgent", () => {
       expect(result.skips[0].findingId).toBe("f1");
       expect(result.skips[0].reason).toContain("Checkout still broken");
     });
+  });
+});
+
+describe("neutralizeMentions", () => {
+  it("@word をバッククォートで囲む", () => {
+    expect(neutralizeMentions("hey @alice check this")).toBe("hey `@alice` check this");
+  });
+
+  it("文頭の @mention も検出する", () => {
+    expect(neutralizeMentions("@bob take a look")).toBe("`@bob` take a look");
+  });
+
+  it("ハイフンやアンダースコアを含む GitHub チームメンションにも対応する", () => {
+    expect(neutralizeMentions("cc @some_team and @some-team")).toBe("cc `@some_team` and `@some-team`");
+  });
+
+  it("メールアドレスの @ は無視する（直前が単語文字）", () => {
+    expect(neutralizeMentions("contact user@example.com for help")).toBe("contact user@example.com for help");
+  });
+
+  it("既にバッククォートで囲まれた @mention は二重に囲まない", () => {
+    expect(neutralizeMentions("see `@already`")).toBe("see `@already`");
+  });
+
+  it("@ を含まない文字列はそのまま返す", () => {
+    expect(neutralizeMentions("no mentions here")).toBe("no mentions here");
   });
 });

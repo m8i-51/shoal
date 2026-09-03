@@ -148,6 +148,47 @@ describe("isDestructiveBrowserAction", () => {
     expect(isDestructiveBrowserAction("Send invitation")).toBe(true);
     expect(isDestructiveBrowserAction("Save changes")).toBe(false);
   });
+
+  it("日本語の破壊的操作の文言を検出する", () => {
+    expect(isDestructiveBrowserAction("削除する")).toBe(true);
+    expect(isDestructiveBrowserAction("購入する")).toBe(true);
+    expect(isDestructiveBrowserAction("購入を確定")).toBe(true);
+    expect(isDestructiveBrowserAction("注文を確定")).toBe(true);
+    expect(isDestructiveBrowserAction("決済に進む")).toBe(true);
+    expect(isDestructiveBrowserAction("支払いを行う")).toBe(true);
+    expect(isDestructiveBrowserAction("送金する")).toBe(true);
+    expect(isDestructiveBrowserAction("退会する")).toBe(true);
+    expect(isDestructiveBrowserAction("解約する")).toBe(true);
+    expect(isDestructiveBrowserAction("消去する")).toBe(true);
+    expect(isDestructiveBrowserAction("破棄する")).toBe(true);
+    expect(isDestructiveBrowserAction("招待を送信")).toBe(true);
+    expect(isDestructiveBrowserAction("メールを送信")).toBe(true);
+    expect(isDestructiveBrowserAction("完全に削除")).toBe(true);
+    expect(isDestructiveBrowserAction("取り消せません")).toBe(true);
+    expect(isDestructiveBrowserAction("元に戻せません")).toBe(true);
+  });
+
+  it("「送信」単体では通常のフォーム送信までブロックしない", () => {
+    expect(isDestructiveBrowserAction("送信")).toBe(false);
+    expect(isDestructiveBrowserAction("フォームを送信")).toBe(false);
+    expect(isDestructiveBrowserAction("Submit")).toBe(false);
+  });
+
+  it("SHOAL_DESTRUCTIVE_PATTERNS で追加した正規表現を検出する", () => {
+    const env = { SHOAL_DESTRUCTIVE_PATTERNS: "アーカイブ,\\bnuke\\b" };
+    expect(isDestructiveBrowserAction("アーカイブする", env)).toBe(true);
+    expect(isDestructiveBrowserAction("Nuke database", env)).toBe(true);
+    expect(isDestructiveBrowserAction("Save changes", env)).toBe(false);
+  });
+
+  it("不正な正規表現は console.warn して無視し、実行を止めない", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const env = { SHOAL_DESTRUCTIVE_PATTERNS: "(unterminated" };
+    expect(() => isDestructiveBrowserAction("delete", env)).not.toThrow();
+    expect(isDestructiveBrowserAction("delete", env)).toBe(true);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
 });
 
 describe("guardSafeBrowserClick", () => {

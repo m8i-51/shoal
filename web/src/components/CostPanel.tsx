@@ -93,7 +93,7 @@ const styles = {
   },
   runCount: {
     fontSize: "0.7rem",
-    color: "#94a3b8",
+    color: "#475569",
   },
   body: {
     display: "flex",
@@ -114,7 +114,7 @@ const styles = {
   },
   totalLabel: {
     fontSize: "0.75rem",
-    color: "#94a3b8",
+    color: "#475569",
   },
   bars: {
     display: "flex",
@@ -143,7 +143,7 @@ const styles = {
   },
   caveat: {
     fontSize: "0.72rem",
-    color: "#94a3b8",
+    color: "#475569",
     margin: "0.75rem 0 0",
   },
 } as const;

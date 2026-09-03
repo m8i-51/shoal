@@ -77,7 +77,7 @@ export function Dashboard() {
   }, []);
 
   return (
-    <main style={styles.main}>
+    <div style={styles.main}>
       <div style={styles.pageHeader}>
         <h1 style={styles.pageTitle}>{t("dashboard.title")}</h1>
         <button onClick={() => setShowModal(true)} style={styles.startBtn}>
@@ -106,8 +106,12 @@ export function Dashboard() {
             <thead>
               <tr>
                 {(["status", "started", "duration", "findings", "agents", "cost", "actions"] as const).map((col) => (
-                  <th key={col} style={{ ...styles.th, ...(col === "agents" || col === "findings" || col === "cost" ? { textAlign: "center" } : {}) }}>
-                    {t(`table.${col}`)}
+                  <th
+                    key={col}
+                    scope="col"
+                    style={{ ...styles.th, ...(col === "agents" || col === "findings" || col === "cost" ? { textAlign: "center" } : {}) }}
+                  >
+                    {col === "actions" ? <span style={styles.srOnly}>{t("table.actionsLabel")}</span> : t(`table.${col}`)}
                   </th>
                 ))}
               </tr>
@@ -133,7 +137,7 @@ export function Dashboard() {
           }}
         />
       )}
-    </main>
+    </div>
   );
 }
 
@@ -147,7 +151,7 @@ function RunRow({ run, onView }: { run: RunSummary; onView: () => void }) {
   return (
     <tr style={styles.row}>
       <td style={styles.td}>
-        <span style={{ ...styles.badge, background: isRunning ? "#f59e0b" : "#22c55e" }}>
+        <span style={{ ...styles.badge, background: isRunning ? "#b45309" : "#15803d" }}>
           {t(`status.${run.status}`)}
         </span>
       </td>
@@ -166,7 +170,7 @@ function RunRow({ run, onView }: { run: RunSummary; onView: () => void }) {
           <span style={styles.muted}>—</span>
         )}
         {run.regressionChecked > 0 && (
-          <span style={{ display: "block", fontSize: "0.7rem", marginTop: "0.25rem", color: run.regressionFailed > 0 ? "#ef4444" : "#22c55e" }}>
+          <span style={{ display: "block", fontSize: "0.7rem", marginTop: "0.25rem", color: run.regressionFailed > 0 ? "#dc2626" : "#15803d" }}>
             {run.regressionFailed > 0
               ? t("dashboard.regressionFailed", { count: run.regressionFailed })
               : t("dashboard.regressionPassed", { count: run.regressionChecked })}
@@ -191,6 +195,20 @@ function RunRow({ run, onView }: { run: RunSummary; onView: () => void }) {
 }
 
 const styles = {
+  // Visually hidden but readable by screen readers — for the "actions"
+  // column header, which is intentionally blank on screen (it just holds a
+  // per-row "view" button) but still needs a real accessible name.
+  srOnly: {
+    position: "absolute" as const,
+    width: "1px",
+    height: "1px",
+    padding: 0,
+    margin: "-1px",
+    overflow: "hidden",
+    clip: "rect(0, 0, 0, 0)",
+    whiteSpace: "nowrap" as const,
+    border: 0,
+  },
   main: {
     maxWidth: "960px",
     margin: "0 auto",
@@ -221,7 +239,7 @@ const styles = {
   empty: {
     textAlign: "center" as const,
     padding: "4rem 2rem",
-    color: "#94a3b8",
+    color: "#475569",
   },
   emptyMascot: {
     width: "100px",
@@ -253,7 +271,7 @@ const styles = {
     padding: "0.6rem 1rem",
     textAlign: "left" as const,
     fontWeight: 700,
-    color: "#64748b",
+    color: "#475569",
     fontSize: "0.7rem",
     textTransform: "uppercase" as const,
     letterSpacing: "0.05em",

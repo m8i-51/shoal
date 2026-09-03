@@ -77,11 +77,24 @@ function bedrockModelToAnthropicKey(model: string): string {
     .replace(/-v\d+(?::0)?$/, "");
 }
 
+/**
+ * Picks the longest table key that `modelKey` starts with, so a more specific
+ * entry (e.g. "gpt-4o-mini") always wins over a shorter one that also matches
+ * as a prefix (e.g. "gpt-4o") regardless of the table's key order. An exact
+ * match is just the longest possible prefix, so this needs no separate check.
+ */
+function longestPrefixMatch<T>(table: Record<string, T>, modelKey: string): T | undefined {
+  let bestKey: string | undefined;
+  for (const key of Object.keys(table)) {
+    if (modelKey.startsWith(key) && (bestKey === undefined || key.length > bestKey.length)) {
+      bestKey = key;
+    }
+  }
+  return bestKey !== undefined ? table[bestKey] : undefined;
+}
+
 function lookupAnthropicPricing(modelKey: string): { input: number; output: number } | undefined {
-  const pricing = ANTHROPIC_PRICING[modelKey];
-  if (pricing) return pricing;
-  const key = Object.keys(ANTHROPIC_PRICING).find((k) => modelKey.startsWith(k));
-  return key ? ANTHROPIC_PRICING[key] : undefined;
+  return longestPrefixMatch(ANTHROPIC_PRICING, modelKey);
 }
 
 function lookupBedrockPricing(model: string): { input: number; output: number } | undefined {
@@ -164,7 +177,7 @@ function lookupPricingSync(
   if (FREE_PROVIDERS.has(provider)) return undefined;
   if (provider === "anthropic") return lookupAnthropicPricing(model);
   if (provider === "bedrock") return lookupBedrockPricing(model);
-  if (provider === "openai") return OPENAI_PRICING[model];
+  if (provider === "openai") return longestPrefixMatch(OPENAI_PRICING, model);
   if (provider === "openrouter") return openrouterCache?.get(model);
   return undefined;
 }

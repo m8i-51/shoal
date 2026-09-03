@@ -17,11 +17,15 @@ export function formatDate(iso: string): string {
   });
 }
 
+// Darker than the "500" shade of each hue on purpose: these are used as a
+// badge background under white text, and the lighter shade fails WCAG AA
+// contrast (white on #ef4444/#f97316/#3b82f6/#8b5cf6 is 2.8-4.2:1, all below
+// the required 4.5:1).
 export const CATEGORY_COLOR: Record<string, string> = {
-  bug: "#ef4444",
-  ux: "#f97316",
-  "feature-request": "#3b82f6",
-  "goal-gap": "#8b5cf6",
+  bug: "#dc2626",
+  ux: "#c2410c",
+  "feature-request": "#2563eb",
+  "goal-gap": "#7c3aed",
 };
 
 export function formatCostUSD(usd: number | null | undefined): string {

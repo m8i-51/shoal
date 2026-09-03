@@ -8,7 +8,7 @@ import { existsSync, readFileSync, writeFileSync, readdirSync } from "fs";
 import { listRuns, getReportPath } from "./runs.js";
 import { buildTriageView } from "./triage-view.js";
 import { buildAdoptionView } from "./adoption-view.js";
-import { activeSessions, spawnRun, cancelSession } from "./runner.js";
+import { activeSessions, spawnRun, cancelSession, hasActiveRun } from "./runner.js";
 import { loadSchedule, saveSchedule, startScheduler, type ScheduleConfig } from "./scheduler.js";
 import { generateDiary, getDiaryPath } from "../framework/diary.js";
 import { findCrossRunDuplicates } from "../framework/cross-run-dedup.js";
@@ -494,6 +494,19 @@ app.post("/api/runs/start", (req, res) => {
     res.status(400).json({ error: "maxBrowsers, maxExplorers, and maxThresholds must be integers between 0 and 8" });
     return;
   }
+  if (hasActiveRun()) {
+    res.status(409).json({ error: "a run is already in progress" });
+    return;
+  }
+  if (llmBaseUrl && !llmApiKey) {
+    // Without this, the child process would fall back to the server's own
+    // inherited LLM_API_KEY/OPENAI_API_KEY and send it as a Bearer token to
+    // whatever URL the caller supplied — a dashboard token holder could
+    // exfiltrate the operator's API key by pointing llmBaseUrl at their own
+    // server. Require the caller to bring their own key with a custom endpoint.
+    res.status(400).json({ error: "llmApiKey is required when llmBaseUrl is set" });
+    return;
+  }
   const sessionId = spawnRun({ baseUrl, maxBrowsers, maxExplorers, maxThresholds, mode, llmBaseUrl, llmApiKey, llmModel });
   res.json({ sessionId });
 });
@@ -670,4 +683,18 @@ if (process.env.NODE_ENV !== "test") {
     console.log("");
     startScheduler();
   });
+
+  // shoal serve dying without forwarding the signal orphaned any in-flight
+  // swarm's browser/tsx process, and left its running_*.json behind so
+  // listRuns() kept reporting it as "running" forever after. Forward the
+  // signal to every unfinished session's child before exiting.
+  const shutdown = (signal: NodeJS.Signals) => {
+    console.log(`\n[server] received ${signal}, cancelling ${activeSessions.size} tracked session(s)...`);
+    for (const [sessionId, session] of activeSessions) {
+      if (!session.done) cancelSession(sessionId);
+    }
+    process.exit(0);
+  };
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
 }

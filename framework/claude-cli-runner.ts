@@ -1,15 +1,31 @@
 /**
  * Claude CLI / Agent SDK runner.
  * Uses the official Claude Code login; does not read or store OAuth tokens.
+ *
+ * `@anthropic-ai/claude-agent-sdk` is an optional peerDependency (~200MB,
+ * non-OSI licence) needed only when `LLM_PROVIDER=claude-cli` — so it is
+ * imported dynamically here rather than statically, letting everyone else
+ * install shoal without it.
  */
-import { createSdkMcpServer, tool, query as defaultQuery } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import type Anthropic from "@anthropic-ai/sdk";
+import type { query as QueryFnType } from "@anthropic-ai/claude-agent-sdk";
 import type { SessionTool, ToolSessionResult, UserPrompt } from "./tool-types";
 
 export const SHOAL_MCP_SERVER = "shoal";
 
-export type QueryFn = typeof defaultQuery;
+export type QueryFn = typeof QueryFnType;
+
+async function loadClaudeAgentSdk(): Promise<typeof import("@anthropic-ai/claude-agent-sdk")> {
+  try {
+    return await import("@anthropic-ai/claude-agent-sdk");
+  } catch {
+    throw new Error(
+      "LLM_PROVIDER=claude-cli requires the optional package @anthropic-ai/claude-agent-sdk — " +
+        "run: npm install @anthropic-ai/claude-agent-sdk",
+    );
+  }
+}
 
 export interface ClaudeCliRunnerOptions {
   model: string;
@@ -123,6 +139,8 @@ async function* multimodalPrompt(userPrompt: UserPrompt): AsyncGenerator<{
 }
 
 export async function runClaudeCliSession(opts: ClaudeCliRunnerOptions): Promise<ToolSessionResult> {
+  const { createSdkMcpServer, tool, query: defaultQuery } = await loadClaudeAgentSdk();
+
   const toolCaptures: Record<string, unknown> = {};
   let iteration = 0;
   const abort = new AbortController();

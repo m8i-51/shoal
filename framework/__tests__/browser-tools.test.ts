@@ -207,6 +207,22 @@ describe("fill", () => {
     const result = await executeBrowserTool("fill", { label: "Email", value: "a@b.c" }, makeContext());
     expect(result.text).toBe('Filled "Email" with "a@b.c"');
   });
+
+  it("パスワード欄に入力した値は trace scrub 用レジストリに登録する", async () => {
+    const { clearKnownSecrets, getKnownSecrets } = await import("../trace-scrub");
+    clearKnownSecrets();
+    const ctx = makeContext();
+    await executeBrowserTool("fill", { label: "Password", value: SAMPLE_SECRET }, ctx);
+    expect(getKnownSecrets()).toContain(SAMPLE_SECRET);
+    clearKnownSecrets();
+  });
+
+  it("通常の欄に入力した値は trace scrub 用レジストリに登録しない", async () => {
+    const { clearKnownSecrets, getKnownSecrets } = await import("../trace-scrub");
+    clearKnownSecrets();
+    await executeBrowserTool("fill", { label: "Email", value: "a@b.c" }, makeContext());
+    expect(getKnownSecrets()).toEqual([]);
+  });
 });
 
 describe("untrusted content fencing", () => {

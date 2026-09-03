@@ -65,4 +65,7 @@ async function main() {
   console.log(`  尖りリスク付き: ${result.edgeRisks.length}件`);
 }
 
-main().catch(console.error);
+main().catch((e) => {
+  console.error(e);
+  process.exitCode = 1;
+});

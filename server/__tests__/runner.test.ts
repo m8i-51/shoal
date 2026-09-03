@@ -6,7 +6,7 @@ vi.mock("fs");
 
 import { spawn } from "child_process";
 import * as fs from "fs";
-import { spawnRun, cancelSession, activeSessions, SESSION_RETENTION_MS } from "../runner";
+import { spawnRun, cancelSession, activeSessions, SESSION_RETENTION_MS, hasActiveRun } from "../runner";
 
 function createFakeChild() {
   const child = new EventEmitter() as EventEmitter & { stdout: EventEmitter; stderr: EventEmitter; kill: ReturnType<typeof vi.fn> };
@@ -68,6 +68,51 @@ describe("spawnRun", () => {
     expect(env.LLM_BASE_URL).toBe("https://llm.example.com");
     expect(env.LLM_API_KEY).toBe("key123");
     expect(env.LLM_MODEL).toBe("model-x");
+  });
+
+  it("llmBaseUrl 指定時はサーバー自身の LLM 資格情報を子プロセスに継承させない", () => {
+    const fakeChild = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(fakeChild as never);
+
+    const saved = {
+      LLM_API_KEY: process.env.LLM_API_KEY,
+      OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+      LLM_PROVIDER: process.env.LLM_PROVIDER,
+    };
+    process.env.LLM_API_KEY = "operators-own-secret-key";
+    process.env.OPENAI_API_KEY = "operators-openai-key";
+    process.env.LLM_PROVIDER = "anthropic";
+
+    spawnRun({ llmBaseUrl: "https://attacker.example.com/v1", llmApiKey: "caller-supplied-key" });
+    const [, , spawnOpts] = vi.mocked(spawn).mock.calls[0];
+    const env = (spawnOpts as { env: Record<string, string | undefined> }).env;
+
+    // The operator's own keys must never reach a caller-supplied endpoint.
+    expect(env.LLM_API_KEY).toBe("caller-supplied-key");
+    expect(env.OPENAI_API_KEY).toBeUndefined();
+    expect(env.LLM_PROVIDER).toBeUndefined();
+    expect(env.LLM_BASE_URL).toBe("https://attacker.example.com/v1");
+
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
+
+  it("llmBaseUrl 未指定なら既存の LLM_PROVIDER 等はそのまま引き継がれる", () => {
+    const fakeChild = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(fakeChild as never);
+
+    const saved = process.env.LLM_PROVIDER;
+    process.env.LLM_PROVIDER = "bedrock";
+
+    spawnRun({});
+    const [, , spawnOpts] = vi.mocked(spawn).mock.calls[0];
+    const env = (spawnOpts as { env: Record<string, string | undefined> }).env;
+    expect(env.LLM_PROVIDER).toBe("bedrock");
+
+    if (saved === undefined) delete process.env.LLM_PROVIDER;
+    else process.env.LLM_PROVIDER = saved;
   });
 
   it("opts が空の場合は対応する env 変数を設定しない", () => {
@@ -217,6 +262,27 @@ describe("spawnRun", () => {
       expect(activeSessions.get(sessionId)).toBe(freshSession);
       vi.useRealTimers();
     });
+  });
+});
+
+describe("hasActiveRun", () => {
+  it("activeSessions が空なら false", () => {
+    expect(hasActiveRun()).toBe(false);
+  });
+
+  it("done でない session があれば true", () => {
+    const fakeChild = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(fakeChild as never);
+    spawnRun({});
+    expect(hasActiveRun()).toBe(true);
+  });
+
+  it("全ての session が done なら false", () => {
+    const fakeChild = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(fakeChild as never);
+    spawnRun({});
+    fakeChild.emit("exit", 0);
+    expect(hasActiveRun()).toBe(false);
   });
 });
 

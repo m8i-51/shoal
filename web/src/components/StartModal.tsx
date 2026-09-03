@@ -130,6 +130,7 @@ export function StartModal({ onClose, onStarted }: Props) {
                   placeholder="http://localhost:11434/v1"
                   style={styles.input}
                 />
+                <span style={styles.modeHint}>{t("startModal.llmBaseUrlHint")}</span>
               </label>
               <div style={styles.row}>
                 <label style={styles.label}>
@@ -216,7 +217,6 @@ const styles = {
     borderRadius: "6px",
     padding: "8px 10px",
     fontSize: "0.875rem",
-    outline: "none",
     width: "100%",
     color: "#1e293b",
     background: "#fff",
@@ -224,11 +224,11 @@ const styles = {
   modeHint: {
     fontSize: "0.7rem",
     fontWeight: 400,
-    color: "#94a3b8",
+    color: "#475569",
   },
   fixedHint: {
     fontSize: "0.75rem",
-    color: "#94a3b8",
+    color: "#475569",
     margin: 0,
     lineHeight: 1.4,
   },
@@ -236,7 +236,7 @@ const styles = {
     background: "none",
     border: "none",
     padding: 0,
-    color: "#94a3b8",
+    color: "#475569",
     fontSize: "0.8rem",
     fontWeight: 600,
     textAlign: "left" as const,

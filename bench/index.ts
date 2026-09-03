@@ -99,6 +99,8 @@ async function main() {
       totalFindings: result.totalFindings,
       runDate: new Date().toISOString().slice(0, 10),
       config: `MAX_BROWSERS=${process.env.MAX_BROWSERS ?? "3"}`,
+      precision: result.precision,
+      unmatchedFindings: result.unmatchedFindings,
     });
     console.log("[bench] score appended to bench/scores.json");
   }

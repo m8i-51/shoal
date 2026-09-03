@@ -15,3 +15,15 @@ button {
   font-family: inherit;
   font-size: 14px;
 }
+
+/* Several components used to set outline: none on inputs with nothing in its
+   place, leaving keyboard users with no visible focus indicator at all. This
+   is the replacement: a visible ring on keyboard focus (not on mouse click,
+   via :focus-visible) for every interactive form control. */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+button:focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: 2px;
+}

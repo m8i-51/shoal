@@ -68,14 +68,27 @@ export function spawnRun(opts: {
 
   // running_*.json で実行中フラグをディスクに残す
   const pendingPath = join(logsDir, `running_${sessionId}.json`);
-  writeFileSync(pendingPath, JSON.stringify({ runId: sessionId, startedAt: session.startedAt }));
 
   const tsxBin = join(packageRoot, "node_modules", ".bin", "tsx");
   const bin = existsSync(tsxBin) ? tsxBin : "tsx";
   const script = join(packageRoot, "run.ts");
 
+  const baseEnv: NodeJS.ProcessEnv = { ...process.env };
+  if (opts.llmBaseUrl) {
+    // A caller-supplied llmBaseUrl must never be able to see the operator's
+    // own LLM credentials — without this, the child would inherit
+    // LLM_API_KEY/OPENAI_API_KEY from the server's own environment and send
+    // it as a Bearer token to whatever URL the caller supplied. Strip the
+    // server's own provider config so only the caller's own key (validated
+    // as required alongside llmBaseUrl by the caller) reaches the caller's URL.
+    delete baseEnv.LLM_API_KEY;
+    delete baseEnv.OPENAI_API_KEY;
+    delete baseEnv.LLM_BASE_URL;
+    delete baseEnv.LLM_PROVIDER;
+  }
+
   const env: NodeJS.ProcessEnv = {
-    ...process.env,
+    ...baseEnv,
     SHOAL_RUN_ID: sessionId,
     ...(opts.baseUrl ? { BASE_URL: opts.baseUrl } : {}),
     ...(opts.maxBrowsers != null ? { MAX_BROWSERS: String(opts.maxBrowsers) } : {}),
@@ -93,6 +106,10 @@ export function spawnRun(opts: {
     stdio: ["ignore", "pipe", "pipe"],
   });
   session.child = child;
+
+  // pid を残しておくと、サーバー再起動後に listRuns() がこの pid の生死を確認して
+  // 死んでいる run を「実行中」と誤報告しないようにできる（server/runs.ts 参照）
+  writeFileSync(pendingPath, JSON.stringify({ runId: sessionId, startedAt: session.startedAt, pid: child.pid }));
 
   const emit = (line: string) => {
     session.lines.push(line);
@@ -132,6 +149,14 @@ export function spawnRun(opts: {
   });
 
   return sessionId;
+}
+
+/** Whether a spawned run is still in flight — used to refuse starting a second one concurrently. */
+export function hasActiveRun(): boolean {
+  for (const session of activeSessions.values()) {
+    if (!session.done) return true;
+  }
+  return false;
 }
 
 export function cancelSession(sessionId: string): boolean {

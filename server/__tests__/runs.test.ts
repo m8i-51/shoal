@@ -67,6 +67,58 @@ describe("listRuns", () => {
     expect(result[0]).toMatchObject({ runId: "run_live", status: "running", isLive: true });
   });
 
+  it("pid が死んでいる running_*.json は実行中と報告せずファイルを削除する", () => {
+    vi.mocked(fs.existsSync).mockImplementation((p: unknown) => String(p).endsWith("logs"));
+    vi.mocked(fs.readdirSync).mockReturnValue(["running_run_dead.json"] as unknown as ReturnType<typeof fs.readdirSync>);
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({ runId: "run_dead", startedAt: "2026-06-01T00:00:00.000Z", pid: 999999 }) as unknown as ReturnType<typeof fs.readFileSync>
+    );
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(() => {
+      const err = new Error("no such process") as NodeJS.ErrnoException;
+      err.code = "ESRCH";
+      throw err;
+    });
+
+    const result = listRuns();
+
+    expect(result).toEqual([]);
+    expect(fs.unlinkSync).toHaveBeenCalledWith(expect.stringContaining("running_run_dead.json"));
+    killSpy.mockRestore();
+  });
+
+  it("pid が生きている running_*.json は実行中として報告する", () => {
+    vi.mocked(fs.unlinkSync).mockClear();
+    vi.mocked(fs.existsSync).mockImplementation((p: unknown) => String(p).endsWith("logs"));
+    vi.mocked(fs.readdirSync).mockReturnValue(["running_run_alive.json"] as unknown as ReturnType<typeof fs.readdirSync>);
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({ runId: "run_alive", startedAt: "2026-06-01T00:00:00.000Z", pid: 123 }) as unknown as ReturnType<typeof fs.readFileSync>
+    );
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
+
+    const result = listRuns();
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ runId: "run_alive", status: "running", isLive: true });
+    expect(fs.unlinkSync).not.toHaveBeenCalled();
+    killSpy.mockRestore();
+  });
+
+  it("pid の無い running_*.json（旧フォーマット）は生死を確認せず実行中として報告する", () => {
+    vi.mocked(fs.existsSync).mockImplementation((p: unknown) => String(p).endsWith("logs"));
+    vi.mocked(fs.readdirSync).mockReturnValue(["running_run_legacy.json"] as unknown as ReturnType<typeof fs.readdirSync>);
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({ runId: "run_legacy", startedAt: "2026-06-01T00:00:00.000Z" }) as unknown as ReturnType<typeof fs.readFileSync>
+    );
+    const killSpy = vi.spyOn(process, "kill");
+
+    const result = listRuns();
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ runId: "run_legacy", status: "running" });
+    expect(killSpy).not.toHaveBeenCalled();
+    killSpy.mockRestore();
+  });
+
   it("report_ プレフィックスのファイルは run ログとして扱わない", () => {
     vi.mocked(fs.existsSync).mockImplementation((p: unknown) => String(p).endsWith("logs"));
     vi.mocked(fs.readdirSync).mockReturnValue(["report_run_1.html"] as unknown as ReturnType<typeof fs.readdirSync>);

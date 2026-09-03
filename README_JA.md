@@ -164,9 +164,11 @@ npm run serve      # クローンしたリポジトリから
 <p align="center">
   <img src="assets/dashboard.png" alt="shoal Web ダッシュボード — Experience Score・LLM コスト・採用率・サイトマップ・アプリゴール" width="800">
 </p>
+<p align="center"><em>bench store から seed したサンプルデータ（<code>scripts/seed-dashboard-demo.mjs</code>）。実際の run ではない。</em></p>
 <p align="center">
   <img src="assets/dashboard-hall.png" alt="Hall of Issues — カテゴリ別・横断検索できる findings 一覧" width="800">
 </p>
+<p align="center"><em>同じく seed したサンプルデータ。実際の run ではない。</em></p>
 
 ### ダッシュボードへのアクセス
 
@@ -268,8 +270,10 @@ shoal serve --env-file apps/shoal/.env
 | `ANTHROPIC_API_KEY` | — | 必須 |
 | `ISSUE_TRACKERS` | — | 有効にするトラッカーをカンマ区切りで指定: `github`, `jira`, `notion`, `backlog`, `asana` |
 | `SHOAL_MODE` | `safe` | セーフティモード: `read-only` \| `safe` \| `full`（下記参照） |
+| `SHOAL_DESTRUCTIVE_PATTERNS` | — | `safe` モードの破壊的クリック検出に追加する正規表現（カンマ区切り、大文字小文字を無視）。組み込みの英語・日本語パターンに追加される。不正な正規表現は警告を出してスキップされる |
 | `SHOAL_TRACE` | `1` | ブラウザエージェントのセッションを Playwright trace として記録（`0` で無効化）。finding 保存時に区間 trace（`logs/traces/<run>/<findingId>.zip`）を切り出し、セッション全体は `logs/traces/<run>/<agentId>.zip` |
 | `REFRESH_SPEC` | — | `1` を設定するとプロダクト仕様を再探索する |
+| `SHOAL_RETENTION_DAYS` | `30` | `logs/screenshots/run_*` と `logs/traces/run_*` の保持日数。各 run の開始時に、これより古い run ディレクトリを削除する。`0` で無効化 |
 | `SHOAL_MAX_USD` | — | 1 run のコスト上限（推定 USD）。到達時点で以降の LLM 呼び出しを止め、残りのレーンをスキップする（それまでの findings は保存・レポートされる） |
 | `SHOAL_HOST` | `127.0.0.1` | ダッシュボードの bind アドレス。既定はループバックのみ。外部公開する場合に設定する（[ダッシュボードへのアクセス](#ダッシュボードへのアクセス)参照） |
 | `SHOAL_TOKEN` | — | ダッシュボードのトークン。`SHOAL_HOST` がループバック以外、または `SHOAL_ALLOWED_HOSTS` 設定時は必須。未設定なら起動時に自動生成して表示する |
@@ -281,8 +285,8 @@ shoal serve --env-file apps/shoal/.env
 
 **セーフティモード** — エージェントは探索中にデータを書き込むため、どこまで許可するかを選べる:
 
-- `read-only` — 一切書き込まない。ブラウザエージェントの mutation リクエスト（POST/PUT/PATCH/DELETE）をネットワーク層でブロックする。本番環境に向けても安全。
-- `safe`（デフォルト） — テストデータの作成・編集は許可するが、レコード削除・支払い・メールや招待の送信など不可逆な操作の直前で止まるようエージェントに指示する。
+- `read-only` — 対象アプリへの書き込みを一切行わない。ブラウザエージェントの mutation リクエスト（POST/PUT/PATCH/DELETE）をネットワーク層でブロックする。ただしこれは「アプリに書き込まない」だけの意味で、エージェントが読んだ内容（ページテキスト、アクセシビリティツリー、コンソール/ネットワーク出力、スクリーンショット）は設定した LLM プロバイダーには送信される。本番データに向ける前に [LLM プロバイダーに送信される内容](SECURITY.md#what-is-sent-to-the-llm-provider) を参照すること。
+- `safe`（デフォルト） — テストデータの作成・編集は許可するが、レコード削除・支払い・メールや招待の送信など不可逆な操作の直前で止まるようエージェントに指示する。破壊的クリック検出は英語・日本語の両方の言い回し（`削除`、`購入する`、`決済` など。`SHOAL_DESTRUCTIVE_PATTERNS` で追加可能）に対応し、該当するクリックをプログラム的にブロックする。
 - `full` — 制限なし。使い捨て環境でのみ使用すること。
 
 `safe` と `read-only` では、ターゲット設定で `destructive: true` を付けた API ツールがエージェントのツールセットから除外される。モードはダッシュボードの実行開始ダイアログでも run ごとに選択できる。
@@ -449,9 +453,13 @@ Detection rate: 5/7 (71%)
 
 `BENCH_RECORD=1` で記録したスコア（`bench/scores.json`）:
 
-| バリアント | モデル | 検出率 | Findings | 日付 | 設定 |
-|---|---|---:|---:|---|---|
-| store | claude-sonnet-4-20250514 | 71% | 11 | 2026-08-15 | MAX_BROWSERS=3, default prompts |
+| バリアント | モデル | 検出率 | 精度 | Findings | 不一致 | 日付 | 設定 |
+|---|---|---:|---:|---:|---:|---|---|
+| store | claude-sonnet-4-20250514 | 71% | —¹ | 11 | —¹ | 2026-08-15 | MAX_BROWSERS=3, default prompts |
+
+¹ 単語境界を要求する前のマッチャー（部分文字列マッチで "Although" 内の "alt" や
+"Totally" 内の "total" まで検出扱いにしていた）で採点されたスコアで、精度・不一致数も
+記録されていない。修正後の行とは比較できない。
 
 > **1 設定・1 回分のサンプルである。** ベンチマークとしてではなく、単一のサンプルとして読むこと。エージェントの探索は非決定的なので検出率は run ごとにぶれるし、`forms` バリアント・他モデル・他のエージェント数での挙動についてはこの表は何も語っていない。行が増えるまでは「この設定に対する回帰ベースライン」として扱うのが正しい。
 
@@ -505,9 +513,11 @@ BENCH_RECORD=1 npm run bench:forms    # forms バリアント
 | Groq | `LLM_PROVIDER=groq`, `LLM_API_KEY`, `LLM_MODEL` |
 | Gemini | `LLM_PROVIDER=gemini`, `LLM_API_KEY`, `LLM_MODEL` |
 | Codex（ChatGPT サブスク） | `npm run auth:codex` を一度実行後、`LLM_PROVIDER=codex` |
-| Claude CLI（Claude Code サブスク） | `npm run auth:claude` を一度実行後、`LLM_PROVIDER=claude-cli` |
+| Claude CLI（Claude Code サブスク） | `npm install @anthropic-ai/claude-agent-sdk`（オプションの peer dependency。デフォルトではインストールされない。下記注参照）を実行後、`npm run auth:claude` を一度実行し `LLM_PROVIDER=claude-cli` を設定 |
 | Ollama | `LLM_BASE_URL=http://localhost:11434/v1`, `LLM_MODEL` |
 | LM Studio | `LLM_BASE_URL=http://localhost:1234/v1`, `LLM_MODEL` |
+
+`claude-cli` だけ追加のインストール手順が必要: `@anthropic-ai/claude-agent-sdk` は約 200MB あり、Anthropic 独自のライセンス（OSI 承認済みではない — "SEE LICENSE IN README.md"）を持つため、必須の依存ではなくオプションの peer dependency として配布している。他のプロバイダは `npm install @m8i-51/shoal` だけで動く。
 
 ### Codex（ChatGPT サブスク）
 

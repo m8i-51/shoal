@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { BrowserContext } from "playwright";
+import { scrubTraceZipSafely } from "./trace-scrub";
 
 export function traceFindingZipPath(runId: string, findingId: string, cwd = process.cwd()): string {
   return path.join(cwd, "logs", "traces", runId, `${findingId}.zip`);
@@ -21,6 +22,7 @@ export async function saveFindingTraceChunk(
   try {
     fs.mkdirSync(path.dirname(tracePath), { recursive: true });
     await context.tracing.stop({ path: tracePath });
+    await scrubTraceZipSafely(tracePath, `finding trace ${findingId}`);
     await context.tracing.start({ screenshots: true, snapshots: true });
     return tracePath;
   } catch {
