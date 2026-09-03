@@ -84,6 +84,27 @@ describe("commentReturningUserReReports", () => {
     expect(remaining.map((f) => f.id)).toEqual(["f2"]);
   });
 
+  it("再報コメントの中の @mention を無害化する", async () => {
+    const tracker: IssueTracker = {
+      name: "fake",
+      isEmpty: false,
+      createIssue: vi.fn(),
+      fetchOpenIssues: vi.fn(),
+      fetchClosedIssues: vi.fn(),
+      commentOnIssue: vi.fn().mockResolvedValue(true),
+    };
+
+    await commentReturningUserReReports(
+      [makeFinding({ body: "still broken since last visit — cc @release-managers" })],
+      [{ number: 7, title: "Checkout still broken", labels: [] }],
+      tracker,
+    );
+
+    const [, body] = vi.mocked(tracker.commentOnIssue).mock.calls[0];
+    expect(body).toContain("`@release-managers`");
+    expect(body).not.toMatch(/[^`]@release-managers/);
+  });
+
   it("tracker が空または open issue がなければ何もしない", async () => {
     const tracker: IssueTracker = {
       name: "fake",

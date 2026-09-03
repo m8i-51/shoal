@@ -5,7 +5,8 @@ vi.mock("../llm-retry", () => ({ createMessageWithRetry: vi.fn(), sleep: vi.fn()
 
 import * as fs from "fs";
 import { createMessageWithRetry } from "../llm-retry";
-import { runTriageAgent, neutralizeMentions } from "../triage";
+import { runTriageAgent } from "../triage";
+import { neutralizeMentions } from "../mentions";
 import type { Finding } from "../types";
 import type { IssueTracker } from "../trackers/index";
 import type { LLMClient } from "../llm-client";

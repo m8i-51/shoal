@@ -8,6 +8,7 @@ import type { IssueTracker } from "./trackers/index";
 import { recordIssueLink } from "./adoption";
 import { commentReturningUserReReports } from "./triage-rereport";
 import { formatIssueRef } from "./issue-id";
+import { neutralizeMentions } from "./mentions";
 import {
   EDGE_RISK_LABEL,
   canCarryEdgeRisk,
@@ -16,17 +17,6 @@ import {
   normalizeEdgeRisk,
   type ProductEdge,
 } from "./product-edge";
-
-/**
- * Wraps `@word` in backticks so an LLM-written issue body can't ping a real
- * GitHub user or team by accident (or by an app it read prompting it to).
- * Skips anything already inside backticks, and anything preceded by a word
- * character — `user@example.com` stays intact rather than becoming
- * `user`@example`.com`.
- */
-export function neutralizeMentions(text: string): string {
-  return text.replace(/(^|[^\w`])@([\w-]+)/g, (_match, prefix: string, name: string) => `${prefix}\`@${name}\``);
-}
 
 function buildTriageTools(hasProductEdge: boolean): Anthropic.Tool[] {
   const tools: Anthropic.Tool[] = [
