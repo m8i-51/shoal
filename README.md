@@ -161,6 +161,13 @@ Opens at `http://localhost:4000`. From there you can:
 - **Declare the product edge** — name what the product is deliberately sharp about, so triage flags tickets whose fix would flatten it (see [Product Edge](#product-edge--findings-that-would-sand-the-product-down))
 - **Schedule a weekly run** — pick a day and time directly in the dashboard for automatic recurring runs (the `shoal serve` process must stay running; for a serverless alternative see [Scheduled runs](#scheduled-runs) below)
 
+<p align="center">
+  <img src="assets/dashboard.png" alt="shoal web dashboard — experience score, LLM cost, finding adoption, site-map coverage, and app goals" width="800">
+</p>
+<p align="center">
+  <img src="assets/dashboard-hall.png" alt="Hall of Issues — searchable findings across runs by category" width="800">
+</p>
+
 ### Dashboard access
 
 The dashboard can start runs against any URL your machine can reach, so it is
