@@ -25,11 +25,12 @@ export const activeSessions = new Map<string, Session>();
  * its process exits. `shoal serve` with the weekly scheduler enabled runs
  * for weeks at a time, and `Session.lines` holds every stdout/stderr line for
  * a run's entire lifetime — without eviction, `activeSessions` grows without
- * bound as runs accumulate. Every route that reads a session already falls
- * back to the persisted log file when it is missing from memory (the log,
- * diary, and `/api/runs` endpoints in server/index.ts), so eviction after a
- * generous grace period loses nothing but the in-memory fast path for a run
- * nobody is actively viewing any more.
+ * bound as runs accumulate. Routes that read historical output (`/api/runs`,
+ * `/api/runs/:id/log`, diary) already fall back to the persisted log file
+ * when the session is gone from memory. SSE (`/api/runs/:id/events`) does
+ * not — it 404s after eviction — so the grace period is sized for "nobody
+ * is still watching a finished run live", not "every consumer has a disk
+ * fallback".
  */
 export const SESSION_RETENTION_MS = 30 * 60 * 1000;
 

@@ -153,16 +153,39 @@ describe("fetchClosedIssues", () => {
     expect(result).toHaveLength(1000);
   });
 
-  it("途中のページが失敗したら、そこまでに集めた分だけ返す", async () => {
+  it("途中のページが失敗したら truncate を throw する（部分リストを完全扱いしない）", async () => {
     const page1 = Array.from({ length: 100 }, (_, i) => ({ number: i, title: "x", body: "", labels: [] }));
     vi.mocked(fetch)
       .mockResolvedValueOnce({ ok: true, json: async () => page1 } as Response)
       .mockResolvedValueOnce({ ok: false, status: 502, text: async () => "Bad Gateway" } as Response);
 
-    const result = await fetchClosedIssues({ token: "tok", repo: "owner/repo" });
-
+    await expect(fetchClosedIssues({ token: "tok", repo: "owner/repo" })).rejects.toThrow(/truncated/);
     expect(fetch).toHaveBeenCalledTimes(2);
-    expect(result).toHaveLength(100);
+  });
+
+  it("1 ページ目が失敗したら空配列を返す（ソフトフェイル）", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      text: async () => "Internal Server Error",
+    } as Response);
+
+    expect(await fetchClosedIssues({ token: "tok", repo: "owner/repo" })).toEqual([]);
+  });
+
+  it("labels が null / 欠落でも TypeError にせず空配列にフォールバックする", async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => [
+        { number: 1, title: "No labels key", body: "" },
+        { number: 2, title: "Null labels", body: "", labels: null },
+      ],
+    } as Response);
+    const result = await fetchClosedIssues({ token: "tok", repo: "owner/repo" });
+    expect(result).toEqual([
+      { number: 1, title: "No labels key", body: "", labels: [], url: undefined, stateReason: null },
+      { number: 2, title: "Null labels", body: "", labels: [], url: undefined, stateReason: null },
+    ]);
   });
 
   it("Authorization ヘッダは Bearer 形式を使う", async () => {
@@ -204,6 +227,15 @@ describe("fetchOpenIssues", () => {
 
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(result).toHaveLength(101);
+  });
+
+  it("labels が欠落していても TypeError にしない", async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => [{ number: 5, title: "UX issue" }],
+    } as Response);
+    const result = await fetchOpenIssues({ token: "tok", repo: "owner/repo" });
+    expect(result).toEqual([{ number: 5, title: "UX issue", labels: [] }]);
   });
 
   it("Authorization ヘッダは Bearer 形式を使う", async () => {

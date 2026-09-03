@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isRetryableLLMError, parseRetryAfterMs } from "../llm-retry";
+import { isRetryableLLMError, parseRetryAfterMs, MAX_RETRY_AFTER_MS } from "../llm-retry";
 
 describe("isRetryableLLMError", () => {
   it.each([429, 500, 502, 503, 504, 529])("status %i はリトライ対象", (status) => {
@@ -65,5 +65,14 @@ describe("parseRetryAfterMs", () => {
 
   it("数値でも日付でもない値は null を返す（NaN 待機を防ぐ）", () => {
     expect(parseRetryAfterMs("not-a-valid-value-at-all")).toBeNull();
+  });
+
+  it("極端に長い秒数は MAX_RETRY_AFTER_MS にクランプする（レーンが時間単位で止まらない）", () => {
+    expect(parseRetryAfterMs("3600")).toBe(MAX_RETRY_AFTER_MS);
+  });
+
+  it("遠い未来の HTTP-date も MAX_RETRY_AFTER_MS にクランプする", () => {
+    const far = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    expect(parseRetryAfterMs(far.toUTCString())).toBe(MAX_RETRY_AFTER_MS);
   });
 });

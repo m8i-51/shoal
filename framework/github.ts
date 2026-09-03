@@ -35,7 +35,12 @@ async function fetchAllPages(baseUrl: string, token: string): Promise<unknown[]>
     if (!res.ok) {
       const msg = await res.text().catch(() => "");
       console.error(`[github] failed to list issues (${res.status}): ${msg.slice(0, 200)}`);
-      break;
+      // First page soft-fails to [] (same as a missing token): callers treat
+      // an empty list as "nothing to dedupe against". Mid-list failure must
+      // not return a prefix — triage would treat a truncated history as
+      // complete and file duplicates for issues that lived on later pages.
+      if (all.length === 0) return [];
+      throw new Error(`[github] issue list truncated after ${all.length} items (${res.status})`);
     }
     const data = await safeJson(res);
     if (!Array.isArray(data) || data.length === 0) break;
@@ -43,6 +48,14 @@ async function fetchAllPages(baseUrl: string, token: string): Promise<unknown[]>
     if (data.length < PER_PAGE) break;
   }
   return all;
+}
+
+/** Pull label names off a GitHub issue payload without throwing on missing/null labels. */
+function labelNames(labels: unknown): string[] {
+  if (!Array.isArray(labels)) return [];
+  return labels
+    .map((l) => (l && typeof l === "object" && "name" in l ? String((l as { name: unknown }).name) : ""))
+    .filter(Boolean);
 }
 
 /** Parse a response body as JSON, treating a malformed body as "nothing" rather than throwing. */
@@ -89,12 +102,12 @@ export async function fetchClosedIssues({ token, repo }: GitHubOptions): Promise
     token,
   );
   return data.map((issue) => {
-    const i = issue as { number: number; title: string; body: string; labels: { name: string }[]; html_url?: string; state_reason?: string | null };
+    const i = issue as { number: number; title: string; body: string; labels?: { name: string }[]; html_url?: string; state_reason?: string | null };
     return {
       number: i.number,
       title: i.title,
       body: i.body ?? "",
-      labels: i.labels.map((l) => l.name),
+      labels: labelNames(i.labels),
       url: i.html_url,
       stateReason: i.state_reason ?? null,
     };
@@ -109,11 +122,11 @@ export async function fetchOpenIssues({ token, repo }: GitHubOptions): Promise<{
     token,
   );
   return data.map((issue) => {
-    const i = issue as { number: number; title: string; labels: { name: string }[] };
+    const i = issue as { number: number; title: string; labels?: { name: string }[] };
     return {
       number: i.number,
       title: i.title,
-      labels: i.labels.map((l) => l.name),
+      labels: labelNames(i.labels),
     };
   });
 }

@@ -52,20 +52,37 @@ export function isRetryableLLMError(e: unknown): boolean {
 }
 
 /**
+ * Upper bound on how long a single `retry-after` may stall a lane. Without
+ * one, a provider (or a caller-supplied `llmBaseUrl`) returning
+ * `Retry-After: 3600` — or an HTTP-date hours ahead — would park the agent
+ * for that long × remaining retries. Cap sits just above the longest
+ * exponential backoff (`backoffMs` at attempt 4 ≈ 50s) so an honest short
+ * delay is still honored.
+ */
+export const MAX_RETRY_AFTER_MS = 60_000;
+
+/**
  * Parse a `retry-after` header value into milliseconds. Per RFC 7231 it is
  * either a delay in seconds or an HTTP-date; `parseInt` on the date form
  * silently returns `NaN` (it starts with a weekday name, not a digit), which
  * used to make a date-form header retry immediately instead of waiting.
  * Returns null when the header is absent or unparseable either way, so the
- * caller falls back to its own backoff rather than waiting `NaN` ms.
+ * caller falls back to its own backoff rather than waiting `NaN` ms. Values
+ * above `MAX_RETRY_AFTER_MS` are clamped — see that constant.
  */
 export function parseRetryAfterMs(retryAfter: string | null | undefined): number | null {
   if (!retryAfter) return null;
   const trimmed = retryAfter.trim();
-  if (/^\d+$/.test(trimmed)) return Number(trimmed) * 1000;
-  const dateMs = Date.parse(trimmed);
-  if (!Number.isFinite(dateMs)) return null;
-  return Math.max(0, dateMs - Date.now());
+  let ms: number;
+  if (/^\d+$/.test(trimmed)) {
+    ms = Number(trimmed) * 1000;
+  } else {
+    const dateMs = Date.parse(trimmed);
+    if (!Number.isFinite(dateMs)) return null;
+    ms = Math.max(0, dateMs - Date.now());
+  }
+  if (!Number.isFinite(ms)) return null;
+  return Math.min(ms, MAX_RETRY_AFTER_MS);
 }
 
 /**
