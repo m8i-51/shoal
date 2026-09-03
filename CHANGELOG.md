@@ -61,7 +61,12 @@ to `0.1.20` or earlier, so those releases are not separately documented here.
   Fixed all of them — the same audit now reports zero violations on all three
   pages. Also removed five `outline: none` rules that left keyboard focus
   invisible on form controls with nothing in its place, replaced by one
-  `:focus-visible` rule.
+  `:focus-visible` rule. The standalone HTML report (`framework/report.ts`,
+  the artifact actually shared and opened outside the dashboard) had the
+  same white-on-badge contrast problem in every one of its badge colours —
+  category, finding/agent status, scenario/lens tags, and regression
+  outcomes — and is now darkened to match, reusing the dashboard's category
+  colours where the category is the same.
 - **Bench scoring matched keywords as bare substrings.** `findingMatchesLabel`
   used `text.includes(keyword)`, so an unrelated finding ("Although the page
   loads quickly... Totally fine otherwise.") was counted as detecting

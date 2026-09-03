@@ -164,8 +164,9 @@ describe("generateReport", () => {
   });
 
   it.each([
-    ["ux", "#f97316"],
-    ["feature-request", "#3b82f6"],
+    ["bug", "#dc2626"],
+    ["ux", "#c2410c"],
+    ["feature-request", "#2563eb"],
     ["goal-gap", "#6b7280"],
   ])("category=%s は対応する色を使う", (category, color) => {
     const finding = makeFinding({ category });
@@ -336,5 +337,109 @@ describe("generateReport", () => {
     const skippedPos = html.indexOf("Skipped Finding");
     expect(issuedPos).toBeLessThan(unprocessedPos);
     expect(unprocessedPos).toBeLessThan(skippedPos);
+  });
+});
+
+describe("generateReport — .badge の配色コントラスト", () => {
+  // WCAG 2.1 の相対輝度・コントラスト比の計算（色ライブラリなしで独立検証する）。
+  function contrastWithWhite(hex: string): number {
+    const n = parseInt(hex.slice(1), 16);
+    const [r, g, b] = [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
+    const lin = (c: number) => {
+      const v = c / 255;
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    };
+    const luminance = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+    return 1.05 / (luminance + 0.05); // white's own luminance is 1.0
+  }
+
+  it("コントラスト計算のセルフチェック（既知の値）", () => {
+    expect(contrastWithWhite("#000000")).toBeCloseTo(21, 0);
+    expect(contrastWithWhite("#ffffff")).toBeCloseTo(1, 0);
+  });
+
+  it("すべての .badge 背景色は白文字に対して WCAG AA (>=4.5:1) を満たす", () => {
+    // .badge の背景として使われるすべてのコードパスを踏む: カテゴリ別 finding、
+    // finding のステータス (issued/skipped/unprocessed)、シナリオ/レンズ/フォール
+    // バックのエージェント割り当て、エージェントの status (completed/error)、
+    // シナリオの達成/未達成、regression check の fixed/regressed。
+    const findings: Finding[] = [
+      makeFinding({ id: "f1", category: "bug" }),
+      makeFinding({ id: "f2", category: "ux" }),
+      makeFinding({ id: "f3", category: "feature-request" }),
+      makeFinding({ id: "f4", category: "goal-gap" }),
+    ];
+    const triage: TriageResult = {
+      issued: ["f1"],
+      skipped: ["f2"],
+      unprocessed: ["f3", "f4"],
+      issuesCreated: 1,
+      edgeRisks: [],
+      issues: [],
+      skips: [],
+    };
+    const scenario = { id: "s1", title: "New employee task", context: "", goal: "", constraints: "" };
+    const agents = [
+      makeAgentLog({ agentId: "a1", agentType: "browser", status: "completed" }),
+      makeAgentLog({ agentId: "a2", agentType: "browser", status: "error" }),
+      makeAgentLog({
+        agentId: "a3",
+        agentType: "regression",
+        regressionChecks: [
+          { issueNumber: 1, issueTitle: "Fixed one", status: "fixed", note: "", regressionUrl: null },
+          { issueNumber: 2, issueTitle: "Regressed one", status: "regressed", note: "", regressionUrl: null },
+        ],
+      }),
+    ];
+    const agentAssignments = new Map([
+      ["a1", { scenario }],
+      ["a2", { lens: "Accessibility: keyboard navigation" }],
+      // a3 gets neither → exercises the fallback agentType badge.
+    ]);
+    const outcomes: ScenarioOutcome[] = [
+      { scenarioId: "s1", scenarioTitle: "New employee task", agentId: "a1", agentName: "Alice", achieved: true, reason: "ok" },
+      { scenarioId: "s2", scenarioTitle: "Purchase flow", agentId: "a2", agentName: "Bob", achieved: false, reason: "blocked" },
+    ];
+
+    generateReport(
+      makeRunLog({ agents }),
+      findings,
+      triage,
+      makeProductSpec(),
+      [scenario],
+      agentAssignments,
+      outcomes,
+    );
+    const html = getSavedHtml();
+
+    const badgeColors = new Set<string>();
+    const badgeRe = /class="badge"\s+style="background:(#[0-9a-fA-F]{6})"/g;
+    for (const m of html.matchAll(badgeRe)) badgeColors.add(m[1].toLowerCase());
+
+    // Sanity check that this scenario actually produced a rich mix of badges,
+    // not just one or two — otherwise the assertion below would pass vacuously.
+    expect(badgeColors.size).toBeGreaterThanOrEqual(8);
+
+    for (const color of badgeColors) {
+      expect(contrastWithWhite(color), `${color} against #fff`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it("badge の色は web/src/utils/format.ts の CATEGORY_COLOR と一致する（bug/ux/feature-request）", () => {
+    // framework/report.ts はサーバーサイドで web/src からは import できないため、
+    // 値を手で同期している（categoryColor 関数のコメント参照）。ここでは
+    // web 側の値をハードコードして両者がドリフトしていないことを確認する。
+    const dashboardCategoryColor: Record<string, string> = {
+      bug: "#dc2626",
+      ux: "#c2410c",
+      "feature-request": "#2563eb",
+      "goal-gap": "#7c3aed",
+    };
+    for (const [category, color] of Object.entries(dashboardCategoryColor)) {
+      if (category === "goal-gap") continue; // report.ts has no goal-gap case; falls through to the shared gray default.
+      const finding = makeFinding({ category });
+      generateReport(makeRunLog(), [finding], emptyTriage, makeProductSpec(), [], new Map());
+      expect(getSavedHtml()).toContain(`background:${color}`);
+    }
   });
 });

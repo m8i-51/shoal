@@ -33,11 +33,18 @@ function formatDuration(startedAt: string, completedAt: string | null): string {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
+// Same hex values as web/src/utils/format.ts's CATEGORY_COLOR (bug/ux/feature-request)
+// — this file is a standalone server-side HTML generator and can't import
+// from web/src, so keep these in sync by hand. Darker than the naive
+// "500" shade of each hue: white text on top (see `.badge`, `.bar-segment
+// span`) needs >=4.5:1 contrast against the background, which the lighter
+// shade fails (2.8-3.8:1). See framework/__tests__/report.test.ts for the
+// pinned contrast ratios.
 function categoryColor(cat: string): string {
   switch (cat) {
-    case "bug": return "#ef4444";
-    case "ux": return "#f97316";
-    case "feature-request": return "#3b82f6";
+    case "bug": return "#dc2626";
+    case "ux": return "#c2410c";
+    case "feature-request": return "#2563eb";
     default: return "#6b7280";
   }
 }
@@ -82,7 +89,8 @@ export function generateReport(
   const findingCards = sortedFindings.map((f) => {
     const status = issuedSet.has(f.id) ? "issued" : skippedSet.has(f.id) ? "skipped" : "unprocessed";
     const statusLabel = { issued: "→ Issue", skipped: "skipped", unprocessed: "pending" }[status];
-    const statusColor = { issued: "#22c55e", skipped: "#9ca3af", unprocessed: "#f59e0b" }[status];
+    // Darkened for >=4.5:1 contrast against the white .badge text (see categoryColor above).
+    const statusColor = { issued: "#15803d", skipped: "#6b7280", unprocessed: "#b45309" }[status];
     const imgData = embedImage(f.screenshotPath);
     const assignment = agentAssignments.get(f.agentId);
     const assignmentTag = assignment?.scenario
@@ -112,12 +120,13 @@ export function generateReport(
 
   const agentRows = runLog.agents.map((a) => {
     const assignment = agentAssignments.get(a.agentId);
+    // Darkened for >=4.5:1 contrast against the white .badge text (see categoryColor above).
     const assignmentCell = assignment?.scenario
-      ? `<span class="badge" style="background:#8b5cf6">scenario</span>&nbsp;${esc(assignment.scenario.title)}`
+      ? `<span class="badge" style="background:#7c3aed">scenario</span>&nbsp;${esc(assignment.scenario.title)}`
       : assignment?.lens
-      ? `<span class="badge" style="background:#0ea5e9">lens</span>&nbsp;${esc(assignment.lens.split(":")[0].trim())}`
-      : `<span class="badge" style="background:#9ca3af">${esc(a.agentType)}</span>`;
-    const statusColor = a.status === "completed" ? "#22c55e" : "#ef4444";
+      ? `<span class="badge" style="background:#0369a1">lens</span>&nbsp;${esc(assignment.lens.split(":")[0].trim())}`
+      : `<span class="badge" style="background:#6b7280">${esc(a.agentType)}</span>`;
+    const statusColor = a.status === "completed" ? "#15803d" : "#dc2626";
     return `<tr>
   <td>${esc(a.agentName)}</td>
   <td><span class="badge" style="background:#475569">${esc(a.agentType)}</span></td>
@@ -140,7 +149,7 @@ export function generateReport(
     const rows = scenarioOutcomes.map((o) => `<tr>
   <td>${esc(o.scenarioTitle)}</td>
   <td>${esc(o.agentName)}</td>
-  <td><span class="badge" style="background:${o.achieved ? "#22c55e" : "#ef4444"}">${o.achieved ? "achieved" : "failed"}</span></td>
+  <td><span class="badge" style="background:${o.achieved ? "#15803d" : "#dc2626"}">${o.achieved ? "achieved" : "failed"}</span></td>
   <td style="font-size:.8rem;color:#475569">${esc(o.reason)}</td>
 </tr>`).join("\n");
     return `
@@ -276,7 +285,7 @@ export function generateReport(
         <tr>
           <td style="color:#94a3b8">${formatIssueRef(c.issueNumber)}</td>
           <td>${esc(c.issueTitle)}</td>
-          <td style="text-align:center">${c.status === "fixed" ? '<span class="badge" style="background:#22c55e">✓ fixed</span>' : '<span class="badge" style="background:#ef4444">⚠ regressed</span>'}</td>
+          <td style="text-align:center">${c.status === "fixed" ? '<span class="badge" style="background:#15803d">✓ fixed</span>' : '<span class="badge" style="background:#dc2626">⚠ regressed</span>'}</td>
         </tr>`).join("")}
       </tbody>
     </table>
