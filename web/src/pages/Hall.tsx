@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../api";
+import { CATEGORY_COLOR } from "../utils/format";
 
 interface HallFinding {
   id: string;
@@ -25,15 +26,6 @@ interface ExportBundle {
 }
 
 type CategoryFilter = "all" | "bug" | "ux" | "feature-request" | "goal-gap";
-
-// Darker than the "500" shade of each hue: used as a badge background under
-// white text, where the lighter shade fails WCAG AA contrast (2.8-4.2:1).
-const CAT_COLOR: Record<string, string> = {
-  bug: "#dc2626",
-  ux: "#c2410c",
-  "feature-request": "#2563eb",
-  "goal-gap": "#7c3aed",
-};
 
 export function Hall() {
   const { t } = useTranslation();
@@ -147,8 +139,8 @@ export function Hall() {
               style={{
                 ...styles.filterBtn,
                 ...(category === cat ? styles.filterBtnActive : {}),
-                ...(cat !== "all" && CAT_COLOR[cat]
-                  ? { borderColor: category === cat ? CAT_COLOR[cat] : "transparent", color: category === cat ? CAT_COLOR[cat] : "#64748b" }
+                ...(cat !== "all" && CATEGORY_COLOR[cat]
+                  ? { borderColor: category === cat ? CATEGORY_COLOR[cat] : "transparent", color: category === cat ? CATEGORY_COLOR[cat] : "#64748b" }
                   : {}),
               }}
               onClick={() => setCategory(cat)}
@@ -276,7 +268,7 @@ function FindingCard({
   onRunClick?: () => void;
 }) {
   const { t } = useTranslation();
-  const color = CAT_COLOR[finding.category] ?? "#6b7280";
+  const color = CATEGORY_COLOR[finding.category] ?? "#6b7280";
   const date = new Date(finding.timestamp).toLocaleDateString("ja-JP");
   const [expanded, setExpanded] = useState(false);
   const bodyPreview = finding.body.length > 160 ? finding.body.slice(0, 160) + "…" : finding.body;
