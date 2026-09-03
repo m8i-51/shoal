@@ -67,8 +67,17 @@ to `0.1.20` or earlier, so those releases are not separately documented here.
   loads quickly... Totally fine otherwise.") was counted as detecting
   `missing-alt-text` (`alt` ⊂ `Although`) and `cart-total-wrong` (`total` ⊂
   `Totally`). Matching now requires word boundaries around each keyword
-  (multi-word keywords like "no login" still match as a phrase). Added
-  `precision` (matched findings / total findings) alongside the existing
+  (multi-word keywords like "no login" still match as a phrase). That
+  boundary requirement in turn broke every keyword in `bench/labels.json`
+  and `bench/labels-forms.json` that was a deliberate word *stem* relying on
+  substring matching to catch several inflected forms at once —
+  `"miscalculat"` (meant to catch "miscalculated"/"miscalculation"),
+  `"auth"` ("authentication"), `"sum"` ("sums"), `"confirm"`
+  ("confirmation"), `"label"` ("labels"), and `"stack trace"` ("stack
+  traces") — so those labels are now spelled out as the actual word forms
+  instead. Added `precision` (matched findings / total findings, `null` —
+  printed as "n/a", omitted from `bench/scores.json` — for a run with zero
+  findings rather than a misleading 0%) alongside the existing
   `unmatchedFindings`, recorded in `bench/scores.json` entries and shown in
   the README's published-scores table; the one existing row predates both the
   boundary fix and these fields, so its new columns read "—" with a footnote.

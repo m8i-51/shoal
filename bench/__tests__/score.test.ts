@@ -82,6 +82,21 @@ describe("scoreFindings", () => {
     expect(result.unmatchedFindings).toBe(1);
   });
 
+  it("語幹キーワード（miscalculated 等）は実際の単語形として bench/labels.json に載っている（cart-total-wrong を検出できる）", () => {
+    const realLabels = loadLabels();
+    const cartTotalWrong = realLabels.find((l) => l.id === "cart-total-wrong");
+    expect(cartTotalWrong).toBeDefined();
+    // 単語境界マッチャーの下では "miscalculat" という語幹は決してマッチしない。
+    // 完全な単語形（miscalculated / miscalculation / miscalculating）で持つ必要がある。
+    expect(cartTotalWrong!.keywords).not.toContain("miscalculat");
+
+    const findings = [
+      makeFinding({ title: "Totals are wrong", body: "The order total is miscalculated for multi-item carts." }),
+    ];
+    const result = scoreFindings(findings, realLabels);
+    expect(result.detected.map((d) => d.id)).toContain("cart-total-wrong");
+  });
+
   it("複数単語のキーワード（フレーズ）はフレーズとしてマッチする", () => {
     const phraseLabels: BenchLabel[] = [
       { id: "no-login-required", description: "sensitive action without login", keywords: ["no login"] },
@@ -104,9 +119,9 @@ describe("scoreFindings", () => {
     expect(result.precision).toBe(0.5);
   });
 
-  it("findings ゼロなら precision は 0（NaN にならない）", () => {
+  it("findings ゼロなら precision は null（0%＝「全部誤検出」という意味にはしない）", () => {
     const result = scoreFindings([], labels);
-    expect(result.precision).toBe(0);
+    expect(result.precision).toBeNull();
   });
 });
 
@@ -117,6 +132,13 @@ describe("formatBenchResult", () => {
     expect(text).toContain("Detection rate: 1/2 (50%)");
     expect(text).toContain("✓ cart-total-wrong");
     expect(text).toContain("✗ missing-alt-text");
+  });
+
+  it("findings ゼロのとき Precision は 0% ではなく n/a と表示する", () => {
+    const result = scoreFindings([], labels);
+    const text = formatBenchResult(result);
+    expect(text).toContain("Precision: n/a (0/0 findings matched a seeded label)");
+    expect(text).not.toContain("Precision: 0%");
   });
 });
 
@@ -150,6 +172,17 @@ describe("formatPublishedScoresMarkdown", () => {
     const md = formatPublishedScoresMarkdown(scores);
     expect(md).toContain("| store | claude-sonnet-4-5 | 80% | 70% | 10 | 3 | 2026-09-03 | — |");
   });
+
+  it("precision が null のエントリ（手編集などで紛れ込んだ場合）は — を表示する（0% にはしない）", () => {
+    const scores: PublishedBenchScores = {
+      updatedAt: "2026-09-03",
+      entries: [
+        { variant: "store", model: "claude-sonnet-4-5", detectionRate: 0, totalFindings: 0, runDate: "2026-09-03", precision: null },
+      ],
+    };
+    const md = formatPublishedScoresMarkdown(scores);
+    expect(md).toContain("| store | claude-sonnet-4-5 | 0% | — | 0 | — | 2026-09-03 | — |");
+  });
 });
 
 describe("recordBenchScore", () => {
@@ -173,6 +206,31 @@ describe("recordBenchScore", () => {
 
     const persisted = JSON.parse(fs.readFileSync(scoresPath, "utf-8")) as PublishedBenchScores;
     expect(persisted.entries[0].precision).toBe(0.7);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("precision が null のとき、bench/scores.json には literal null を書かずキーごと省略する", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bench-score-"));
+    const scoresPath = path.join(dir, "scores.json");
+    const result = recordBenchScore(
+      {
+        variant: "store",
+        model: "claude-sonnet-4-5",
+        detectionRate: 0,
+        totalFindings: 0,
+        runDate: "2026-09-03",
+        precision: null,
+        unmatchedFindings: 0,
+      },
+      scoresPath,
+    );
+    expect(result.entries[0].precision).toBeUndefined();
+    expect("precision" in result.entries[0]).toBe(false);
+
+    const raw = fs.readFileSync(scoresPath, "utf-8");
+    expect(raw).not.toContain("null");
+    const persisted = JSON.parse(raw) as PublishedBenchScores;
+    expect("precision" in persisted.entries[0]).toBe(false);
     fs.rmSync(dir, { recursive: true, force: true });
   });
 });

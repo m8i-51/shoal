@@ -2,7 +2,7 @@
   {
     "id": "admin-unprotected",
     "description": "/admin is reachable without any authentication and exposes destructive controls",
-    "keywords": ["admin", "auth", "unauthorized", "unprotected", "no login", "without logging in", "permission", "access control"],
+    "keywords": ["admin", "auth", "authentication", "unauthorized", "unprotected", "no login", "without logging in", "permission", "access control"],
     "lens": "security",
     "path": "/admin",
     "category": "bug"
@@ -10,7 +10,7 @@
   {
     "id": "cart-total-wrong",
     "description": "/cart total ignores quantities — it sums unit prices only",
-    "keywords": ["total", "calculation", "quantity", "sum", "incorrect", "wrong amount", "does not match", "miscalculat"],
+    "keywords": ["total", "calculation", "quantity", "sum", "sums", "incorrect", "wrong amount", "does not match", "miscalculated", "miscalculation", "miscalculating"],
     "lens": "functional",
     "path": "/cart",
     "category": "bug"
@@ -42,7 +42,7 @@
   {
     "id": "delete-no-confirm",
     "description": "Delete happens immediately with no confirmation dialog and no undo",
-    "keywords": ["confirm", "undo", "accidental", "without warning", "immediately deleted", "no way to recover"],
+    "keywords": ["confirm", "confirmation", "undo", "accidental", "without warning", "immediately deleted", "no way to recover"],
     "lens": "usability",
     "path": "/items",
     "category": "ux"
