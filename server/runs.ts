@@ -15,6 +15,8 @@ export interface RunSummary {
   hasReport: boolean;
   isLive?: boolean;
   estimatedCostUSD: number | null;
+  inputTokens: number;
+  outputTokens: number;
   regressionChecked: number;
   regressionFailed: number;
 }
@@ -66,6 +68,8 @@ export function listRuns(): RunSummary[] {
             hasReport: false,
             isLive: true,
             estimatedCostUSD: null,
+            inputTokens: 0,
+            outputTokens: 0,
             regressionChecked: 0,
             regressionFailed: 0,
           });
@@ -95,6 +99,8 @@ export function listRuns(): RunSummary[] {
         findingsByCategory: byCategory,
         hasReport: fs.existsSync(reportPath),
         estimatedCostUSD: log.summary?.cost?.estimatedUSD ?? null,
+        inputTokens: log.summary?.cost?.inputTokens ?? 0,
+        outputTokens: log.summary?.cost?.outputTokens ?? 0,
         regressionChecked: log.summary?.regressionChecked ?? 0,
         regressionFailed: log.summary?.regressionFailed ?? 0,
       });

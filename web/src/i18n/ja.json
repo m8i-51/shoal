@@ -38,7 +38,8 @@
     "cancel": "中止",
     "cancelConfirmLabel": "中止しますか？",
     "cancelConfirmYes": "中止する",
-    "cancelConfirmNo": "やめる"
+    "cancelConfirmNo": "やめる",
+    "tabTriage": "トリアージ"
   },
   "startModal": {
     "title": "実行を開始",
@@ -78,7 +79,15 @@
     "disabled": "自動実行：オフ",
     "dayLabel": "曜日",
     "timeLabel": "時刻（サーバーのローカル時刻）",
-    "days": ["日", "月", "火", "水", "木", "金", "土"],
+    "days": [
+      "日",
+      "月",
+      "火",
+      "水",
+      "木",
+      "金",
+      "土"
+    ],
     "nextRun": "次回実行",
     "saved": "保存しました"
   },
@@ -185,5 +194,47 @@
       "reached": "reached",
       "explored": "explored"
     }
+  },
+  "triage": {
+    "loading": "読み込み中…",
+    "none": "この run のトリアージ結果はありません。まだ triage を通っていないか、すべての finding が既存 issue へのコメントとして処理されました。",
+    "legacy": "この run のトリアージ結果は、起票単位の記録が入る前の形式です。件数だけ表示できます — 次の run からは、どの finding が1件にまとまったかも残ります。",
+    "statIssues": "起票した issue",
+    "statIssued": "起票された finding",
+    "statSkipped": "スキップ",
+    "statUnprocessed": "未処理",
+    "statEdgeRisks": "尖りリスク",
+    "issuesTitle": "起票した issue",
+    "mergedFrom": "{{count}} 件の finding をまとめた",
+    "edgeAtStake": "鈍る恐れのある尖り",
+    "noTracker": "トラッカー未設定のため URL はありません（HTML レポートには含まれます）",
+    "skippedTitle": "起票しなかった finding",
+    "noReason": "理由の記録なし",
+    "unprocessedTitle": "未処理の finding",
+    "unprocessedHint": "triage が処理しきる前に終わった finding です。`shoal triage` で後から処理できます。"
+  },
+  "adoption": {
+    "title": "指摘の採用率",
+    "overall": "が実際に直された",
+    "pending": "未クローズ {{count}} 件",
+    "adopted": "採用 {{count}}",
+    "rejected": "不採用 {{count}}",
+    "awaiting": "起票済みの issue はまだクローズされていません。チームが close すると、直された（採用）か not planned（不採用）かを突き合わせて、次の run のペルソナ設計に反映されます。",
+    "hint": "採用率の高い観点はチームが動く指摘を出しています。低い観点は減らされますが、消えはしません — 不採用は「優先度が低いだけ」のこともあるためです。",
+    "byLens": "観点別",
+    "byCategory": "カテゴリ別",
+    "recent": "直近の判定",
+    "noLens": "観点別の実績はまだありません。",
+    "markAdopted": "修正済み",
+    "markRejected": "not planned"
+  },
+  "cost": {
+    "title": "LLM コスト",
+    "total": "累計（推計）",
+    "runCount": "{{count}} run 分",
+    "average": "1 run 平均",
+    "last30d": "直近 30 日",
+    "tokens": "入力 / 出力トークン",
+    "missing": "{{count}} 件の run はコスト推計がなく、累計に含まれていません。"
   }
 }

@@ -76,6 +76,33 @@ function buildTriageTools(hasProductEdge: boolean): Anthropic.Tool[] {
   return tools;
 }
 
+/**
+ * One issue as triage actually filed it.
+ *
+ * The ID lists above say *what happened to a finding*; this says *what the team
+ * received*. Without it the dashboard can only show raw findings, so the merge
+ * triage performed — several reports collapsed into one ticket — and the
+ * edge-risk call it made are invisible to the humans who have to act on them.
+ */
+export interface TriagedIssue {
+  /** Title as filed on the tracker, including the `[category]` prefix. */
+  title: string;
+  category: string;
+  /** Tracker URL, or null when no tracker is configured (report-only runs). */
+  url: string | null;
+  /** Findings merged into this one issue. */
+  mergedFindingIds: string[];
+  /** Set when acting on this issue as reported would blunt a declared edge. */
+  edgeRisk: { edge: string; why: string } | null;
+  createdAt: string;
+}
+
+/** A finding triage deliberately did not file, and why. */
+export interface TriagedSkip {
+  findingId: string;
+  reason: string;
+}
+
 export interface TriageResult {
   issued: string[];
   skipped: string[];
@@ -83,6 +110,35 @@ export interface TriageResult {
   issuesCreated: number;
   /** Finding IDs filed on issues whose fix would blunt a declared product edge. */
   edgeRisks: string[];
+  /** Issues as filed, in creation order. */
+  issues: TriagedIssue[];
+  /** Skip decisions with their reasons, in decision order. */
+  skips: TriagedSkip[];
+}
+
+/**
+ * A re-report is a skip with a cause worth keeping: the finding was not dropped,
+ * it was posted as a comment on the issue it re-reports.
+ */
+function reReportSkip(report: { findingId: string; issueNumber: number | string; issueTitle: string }): TriagedSkip {
+  return {
+    findingId: report.findingId,
+    reason: `re-reported as a comment on ${formatIssueRef(report.issueNumber)}: ${report.issueTitle}`,
+  };
+}
+
+/** The empty result, so every early return agrees on the shape. */
+function emptyTriageResult(overrides: Partial<TriageResult> = {}): TriageResult {
+  return {
+    issued: [],
+    skipped: [],
+    unprocessed: [],
+    issuesCreated: 0,
+    edgeRisks: [],
+    issues: [],
+    skips: [],
+    ...overrides,
+  };
 }
 
 export async function runTriageAgent(
@@ -97,7 +153,7 @@ export async function runTriageAgent(
 ): Promise<TriageResult> {
   if (findings.length === 0) {
     console.log("\n[triage] no findings, skipping");
-    return { issued: [], skipped: [], unprocessed: [], issuesCreated: 0, edgeRisks: [] };
+    return emptyTriageResult();
   }
 
   console.log(`\n[triage] starting (findings: ${findings.length})`);
@@ -116,19 +172,19 @@ export async function runTriageAgent(
 
   if (triageFindings.length === 0) {
     console.log("[triage] all findings handled via re-report comments");
-    return {
-      issued: [],
-      skipped: reReports.filter((r) => r.commented).map((r) => r.findingId),
-      unprocessed: [],
-      issuesCreated: 0,
-      edgeRisks: [],
-    };
+    const reReportSkips = reReports.filter((r) => r.commented).map(reReportSkip);
+    return emptyTriageResult({
+      skipped: reReportSkips.map((s) => s.findingId),
+      skips: reReportSkips,
+    });
   }
 
   const pendingIds = new Set(triageFindings.map((f) => f.id));
   const issuedIds: string[] = [];
-  const skippedIds: string[] = reReports.filter((r) => r.commented).map((r) => r.findingId);
+  const skips: TriagedSkip[] = reReports.filter((r) => r.commented).map(reReportSkip);
+  const skippedIds: string[] = skips.map((s) => s.findingId);
   const edgeRiskIds: string[] = [];
+  const issues: TriagedIssue[] = [];
   let issuesCreated = 0;
   let skipped = skippedIds.length;
 
@@ -229,6 +285,14 @@ Organize feedback collected by multiple agents and post it as issue tickets.
         }
         mergedIds.forEach((id) => { pendingIds.delete(id); issuedIds.push(id); });
         issuesCreated++;
+        issues.push({
+          title: `[${category}] ${cleanTitle}`,
+          category,
+          url,
+          mergedFindingIds: mergedIds,
+          edgeRisk,
+          createdAt: new Date().toISOString(),
+        });
         if (edgeRisk) {
           edgeRiskIds.push(...mergedIds);
           console.log(`  [triage] edge risk flagged: ${edgeRisk.edge}`);
@@ -262,6 +326,7 @@ Organize feedback collected by multiple agents and post it as issue tickets.
         }
         pendingIds.delete(finding_id);
         skippedIds.push(finding_id);
+        skips.push({ findingId: finding_id, reason: reason ?? "no reason given" });
         skipped++;
         console.log(`  [triage] skipped: ${finding_id} — ${reason}`);
         return JSON.stringify({ skipped: true });
@@ -282,30 +347,27 @@ Organize feedback collected by multiple agents and post it as issue tickets.
     maxTokens: 2048,
   });
 
+  const result = emptyTriageResult({
+    issued: issuedIds,
+    skipped: skippedIds,
+    unprocessed: Array.from(pendingIds),
+    issuesCreated,
+    edgeRisks: edgeRiskIds,
+    issues,
+    skips,
+  });
+
   if (findings.length > 0) {
     const runId = findings[0].runId;
     const findingsDir = path.join(process.cwd(), "findings", runId);
     fs.writeFileSync(
       path.join(findingsDir, "triage_result.json"),
-      JSON.stringify({
-        runId,
-        completedAt: new Date().toISOString(),
-        issued: issuedIds,
-        skipped: skippedIds,
-        unprocessed: Array.from(pendingIds),
-        edgeRisks: edgeRiskIds,
-      }, null, 2),
+      JSON.stringify({ runId, completedAt: new Date().toISOString(), ...result }, null, 2),
       "utf-8"
     );
   }
 
   const edgeRiskNote = edgeRiskIds.length > 0 ? ` / edge-risk: ${edgeRiskIds.length}` : "";
   console.log(`[triage] done (issues created: ${issuesCreated} / skipped: ${skipped}${edgeRiskNote})`);
-  return {
-    issued: issuedIds,
-    skipped: skippedIds,
-    unprocessed: Array.from(pendingIds),
-    issuesCreated,
-    edgeRisks: edgeRiskIds,
-  };
+  return result;
 }

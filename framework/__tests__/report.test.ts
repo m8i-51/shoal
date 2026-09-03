@@ -92,7 +92,7 @@ function makeFinding(overrides: Partial<Finding> = {}): Finding {
   };
 }
 
-const emptyTriage: TriageResult = { issued: [], skipped: [], unprocessed: [], issuesCreated: 0, edgeRisks: [] };
+const emptyTriage: TriageResult = { issued: [], skipped: [], unprocessed: [], issuesCreated: 0, edgeRisks: [], issues: [], skips: [] };
 
 describe("generateReport", () => {
   beforeEach(() => {
@@ -207,14 +207,14 @@ describe("generateReport", () => {
 
   it("issued finding に → Issue バッジが付く", () => {
     const finding = makeFinding({ id: "f1" });
-    const triage: TriageResult = { issued: ["f1"], skipped: [], unprocessed: [], issuesCreated: 1, edgeRisks: [] };
+    const triage: TriageResult = { issued: ["f1"], skipped: [], unprocessed: [], issuesCreated: 1, edgeRisks: [], issues: [], skips: [] };
     generateReport(makeRunLog(), [finding], triage, makeProductSpec(), [], new Map());
     expect(getSavedHtml()).toContain("→ Issue");
   });
 
   it("skipped finding に skipped バッジが付く", () => {
     const finding = makeFinding({ id: "f1" });
-    const triage: TriageResult = { issued: [], skipped: ["f1"], unprocessed: [], issuesCreated: 0, edgeRisks: [] };
+    const triage: TriageResult = { issued: [], skipped: ["f1"], unprocessed: [], issuesCreated: 0, edgeRisks: [], issues: [], skips: [] };
     generateReport(makeRunLog(), [finding], triage, makeProductSpec(), [], new Map());
     expect(getSavedHtml()).toContain("skipped");
   });
@@ -328,7 +328,7 @@ describe("generateReport", () => {
     const f1 = makeFinding({ id: "f1", title: "Issued Finding" });
     const f2 = makeFinding({ id: "f2", title: "Skipped Finding" });
     const f3 = makeFinding({ id: "f3", title: "Unprocessed Finding" });
-    const triage: TriageResult = { issued: ["f1"], skipped: ["f2"], unprocessed: ["f3"], issuesCreated: 1, edgeRisks: [] };
+    const triage: TriageResult = { issued: ["f1"], skipped: ["f2"], unprocessed: ["f3"], issuesCreated: 1, edgeRisks: [], issues: [], skips: [] };
     generateReport(makeRunLog(), [f2, f3, f1], triage, makeProductSpec(), [], new Map());
     const html = getSavedHtml();
     const issuedPos = html.indexOf("Issued Finding");

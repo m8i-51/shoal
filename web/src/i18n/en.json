@@ -38,7 +38,8 @@
     "cancel": "Cancel run",
     "cancelConfirmLabel": "Stop this run?",
     "cancelConfirmYes": "Stop",
-    "cancelConfirmNo": "Keep going"
+    "cancelConfirmNo": "Keep going",
+    "tabTriage": "Triage"
   },
   "startModal": {
     "title": "Start Run",
@@ -78,7 +79,15 @@
     "disabled": "Auto-run disabled",
     "dayLabel": "Day",
     "timeLabel": "Time (server local)",
-    "days": ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+    "days": [
+      "Sun",
+      "Mon",
+      "Tue",
+      "Wed",
+      "Thu",
+      "Fri",
+      "Sat"
+    ],
     "nextRun": "Next run",
     "saved": "Saved"
   },
@@ -185,5 +194,47 @@
       "reached": "reached",
       "explored": "explored"
     }
+  },
+  "triage": {
+    "loading": "Loading…",
+    "none": "No triage result for this run — it never reached triage, or every finding was handled as a comment on an existing issue.",
+    "legacy": "This run's triage result predates per-issue records, so only the counts are available. From the next run on, which findings merged into which issue is kept too.",
+    "statIssues": "Issues filed",
+    "statIssued": "Findings filed",
+    "statSkipped": "Skipped",
+    "statUnprocessed": "Unprocessed",
+    "statEdgeRisks": "Edge risks",
+    "issuesTitle": "Issues filed",
+    "mergedFrom": "Merged from {{count}} finding(s)",
+    "edgeAtStake": "Edge at stake",
+    "noTracker": "No tracker configured, so there is no URL (the HTML report still has it)",
+    "skippedTitle": "Findings not filed",
+    "noReason": "no reason recorded",
+    "unprocessedTitle": "Unprocessed findings",
+    "unprocessedHint": "Triage ended before reaching these. Run `shoal triage` to process them later."
+  },
+  "adoption": {
+    "title": "Finding adoption",
+    "overall": "were actually fixed",
+    "pending": "{{count}} still open",
+    "adopted": "{{count}} adopted",
+    "rejected": "{{count}} rejected",
+    "awaiting": "No filed issue has been closed yet. Once the team closes them, shoal reconciles fixed (adopted) against not planned (rejected) and feeds that back into the next run's persona design.",
+    "hint": "Lenses with high adoption produce findings the team acts on. Low-adoption lenses are dialled back but never removed — a rejected finding may just be low priority.",
+    "byLens": "By lens",
+    "byCategory": "By category",
+    "recent": "Recently resolved",
+    "noLens": "No per-lens history yet.",
+    "markAdopted": "fixed",
+    "markRejected": "not planned"
+  },
+  "cost": {
+    "title": "LLM cost",
+    "total": "estimated total",
+    "runCount": "across {{count}} run(s)",
+    "average": "Per run",
+    "last30d": "Last 30 days",
+    "tokens": "Input / output tokens",
+    "missing": "{{count}} run(s) have no cost estimate and are not in the total."
   }
 }

@@ -55,7 +55,7 @@ describe("runTriageAgent", () => {
   it("findings が空なら LLM を呼ばずに空の結果を返す", async () => {
     const tracker = makeTracker();
     const result = await runTriageAgent([], {} as LLMClient, "m", tracker);
-    expect(result).toEqual({ issued: [], skipped: [], unprocessed: [], issuesCreated: 0, edgeRisks: [] });
+    expect(result).toEqual({ issued: [], skipped: [], unprocessed: [], issuesCreated: 0, edgeRisks: [], issues: [], skips: [] });
     expect(createMessageWithRetry).not.toHaveBeenCalled();
   });
 
@@ -328,5 +328,74 @@ describe("runTriageAgent", () => {
     const saved = JSON.parse(content as string);
     expect(saved.runId).toBe("run_xyz");
     expect(saved.unprocessed).toEqual(["f1"]);
+  });
+
+  // ダッシュボードは triage_result.json しか読まないので、
+  // 「何がどう1件にまとまったか」はここに残らないと永久に見えない。
+  describe("起票の記録", () => {
+    it("マージした finding・トラッカー URL・カテゴリを issues に残す", async () => {
+      const tracker = makeTracker({ createIssue: vi.fn().mockResolvedValue("https://example.com/issue/7") });
+      vi.mocked(createMessageWithRetry)
+        .mockResolvedValueOnce(toolUseResponse("create_issue", {
+          title: "[bug] Login broken", body: "details", category: "bug", merged_finding_ids: ["f1", "f2"],
+        }) as never)
+        .mockResolvedValueOnce(endTurn() as never);
+      const result = await runTriageAgent(
+        [makeFinding({ id: "f1" }), makeFinding({ id: "f2" })],
+        {} as LLMClient, "m", tracker,
+      );
+      expect(result.issues).toHaveLength(1);
+      expect(result.issues[0]).toMatchObject({
+        title: "[bug] Login broken",
+        category: "bug",
+        url: "https://example.com/issue/7",
+        mergedFindingIds: ["f1", "f2"],
+        edgeRisk: null,
+      });
+      const saved = JSON.parse(vi.mocked(fs.writeFileSync).mock.calls[0][1] as string);
+      expect(saved.issues[0].mergedFindingIds).toEqual(["f1", "f2"]);
+    });
+
+    it("edge-risk の中身（尖りと理由）を issues に残す", async () => {
+      const edge: ProductEdge = {
+        sharpEdges: ["Keyboard-only"],
+        tradeoffs: ["No onboarding"],
+        source: "human",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      };
+      vi.mocked(createMessageWithRetry)
+        .mockResolvedValueOnce(toolUseResponse("create_issue", {
+          title: "[ux] Add a mouse path", body: "details", category: "ux", merged_finding_ids: ["f1"],
+          edge_risk: { edge: "Keyboard-only", why: "Adding mouse affordances blunts it" },
+        }) as never)
+        .mockResolvedValueOnce(endTurn() as never);
+      const result = await runTriageAgent([makeFinding()], {} as LLMClient, "m", makeTracker(), undefined, edge);
+      expect(result.issues[0].edgeRisk).toEqual({
+        edge: "Keyboard-only",
+        why: "Adding mouse affordances blunts it",
+      });
+    });
+
+    it("skip の理由を skips に残す", async () => {
+      vi.mocked(createMessageWithRetry)
+        .mockResolvedValueOnce(toolUseResponse("skip_finding", { finding_id: "f1", reason: "duplicate of #3" }) as never)
+        .mockResolvedValueOnce(endTurn() as never);
+      const result = await runTriageAgent([makeFinding()], {} as LLMClient, "m", makeTracker());
+      expect(result.skips).toEqual([{ findingId: "f1", reason: "duplicate of #3" }]);
+      expect(result.skipped).toEqual(["f1"]);
+    });
+
+    it("再訪 re-report もコメント先の issue を理由として skips に残す", async () => {
+      const tracker = makeTracker({
+        fetchOpenIssues: vi.fn().mockResolvedValue([{ number: 9, title: "Checkout still broken", labels: [] }]),
+      });
+      const result = await runTriageAgent(
+        [makeFinding({ id: "f1", title: "Checkout still broken", body: "Still broken since last visit." })],
+        {} as LLMClient, "m", tracker,
+      );
+      expect(result.skips).toHaveLength(1);
+      expect(result.skips[0].findingId).toBe("f1");
+      expect(result.skips[0].reason).toContain("Checkout still broken");
+    });
   });
 });

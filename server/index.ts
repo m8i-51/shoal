@@ -6,6 +6,8 @@ import { fileURLToPath } from "url";
 import { dirname, join, resolve } from "path";
 import { existsSync, readFileSync, writeFileSync, readdirSync } from "fs";
 import { listRuns, getReportPath } from "./runs.js";
+import { buildTriageView } from "./triage-view.js";
+import { buildAdoptionView } from "./adoption-view.js";
 import { activeSessions, spawnRun, cancelSession } from "./runner.js";
 import { loadSchedule, saveSchedule, startScheduler, type ScheduleConfig } from "./scheduler.js";
 import { generateDiary, getDiaryPath } from "../framework/diary.js";
@@ -280,6 +282,19 @@ app.get("/api/experience", (_req, res) => {
 });
 
 // ----------------------------------------------------------------
+// API: adoption — how the team acted on issues filed in past runs
+// ----------------------------------------------------------------
+app.get("/api/adoption", (_req, res) => {
+  try {
+    const view = buildAdoptionView();
+    if (!view) { res.status(404).json({ error: "no adoption data yet" }); return; }
+    res.json(view);
+  } catch {
+    res.status(500).json({ error: "failed to read adoption data" });
+  }
+});
+
+// ----------------------------------------------------------------
 // API: site map — path coverage for dashboard
 // ----------------------------------------------------------------
 app.get("/api/site-map", (_req, res) => {
@@ -402,6 +417,27 @@ app.post("/api/findings/proxy-url", async (req, res) => {
     res.json(data);
   } catch {
     res.status(502).json({ error: "failed to fetch url" });
+  }
+});
+
+// ----------------------------------------------------------------
+// API: triage result — what triage did with this run's findings
+// ----------------------------------------------------------------
+app.get("/api/runs/:runId/triage", (req, res) => {
+  const { runId } = req.params;
+  if (!isValidRunId(runId)) {
+    res.status(400).json({ error: "invalid run id" });
+    return;
+  }
+  try {
+    const view = buildTriageView(runId);
+    if (!view) {
+      res.status(404).json({ error: "no triage result for this run" });
+      return;
+    }
+    res.json(view);
+  } catch {
+    res.status(500).json({ error: "failed to read triage result" });
   }
 });
 

@@ -46,6 +46,8 @@ function makeRunSummary(overrides: Partial<RunSummary> = {}): RunSummary {
     findingsByCategory: { bug: 3, ux: 2 },
     hasReport: true,
     estimatedCostUSD: null,
+    inputTokens: 0,
+    outputTokens: 0,
     regressionChecked: 2,
     regressionFailed: 1,
     ...overrides,
