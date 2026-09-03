@@ -6,17 +6,20 @@
  */
 import * as fs from "fs";
 import * as path from "path";
+import { positiveIntFromEnv } from "./run-config";
 
 export const DEFAULT_RETENTION_DAYS = 30;
 
 const RUN_DIR_RE = /^run_(\d+)$/;
 
+/**
+ * `0` is a documented valid value ("disable pruning"), not an error, so it's
+ * passed as `min: 0` rather than handled as a special case — anything below
+ * that, or unparseable, is a genuine typo and warns before falling back to
+ * the 30-day default (see `positiveIntFromEnv` in run-config.ts).
+ */
 export function getRetentionDays(env: NodeJS.ProcessEnv = process.env): number {
-  const raw = env.SHOAL_RETENTION_DAYS;
-  if (raw === undefined || raw.trim() === "") return DEFAULT_RETENTION_DAYS;
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_RETENTION_DAYS;
-  return parsed;
+  return positiveIntFromEnv("SHOAL_RETENTION_DAYS", DEFAULT_RETENTION_DAYS, { min: 0, env });
 }
 
 function pruneDir(dir: string, cutoffMs: number): number {

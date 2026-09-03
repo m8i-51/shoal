@@ -17,7 +17,8 @@ to `0.1.20` or earlier, so those releases are not separately documented here.
 - **Retention for run artifacts.** `logs/screenshots/run_*` and
   `logs/traces/run_*` accumulated one directory per run forever, with nothing
   to clean them up. Every run now prunes directories older than
-  `SHOAL_RETENTION_DAYS` (default 30, `0` disables it) at startup and logs how
+  `SHOAL_RETENTION_DAYS` (default 30, `0` disables it — a typo or
+  out-of-range value warns and falls back to 30) at startup and logs how
   many it removed. Findings JSON, report HTML, and run logs are untouched.
 
 ### Fixed

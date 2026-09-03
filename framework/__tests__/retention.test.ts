@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, beforeEach } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -7,18 +7,31 @@ import { pruneRunArtifacts, getRetentionDays, DEFAULT_RETENTION_DAYS } from "../
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 describe("getRetentionDays", () => {
-  it("未設定ならデフォルト30日を返す", () => {
+  it("未設定ならデフォルト30日を返す（警告なし）", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     expect(getRetentionDays({})).toBe(DEFAULT_RETENTION_DAYS);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 
   it("SHOAL_RETENTION_DAYS を数値として読む", () => {
     expect(getRetentionDays({ SHOAL_RETENTION_DAYS: "7" })).toBe(7);
-    expect(getRetentionDays({ SHOAL_RETENTION_DAYS: "0" })).toBe(0);
   });
 
-  it("不正な値はデフォルトにフォールバックする", () => {
+  it("0（保持なし＝プルーニング無効）は正規の値として警告なしで受け入れる", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(getRetentionDays({ SHOAL_RETENTION_DAYS: "0" })).toBe(0);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("不正な値はデフォルトにフォールバックしつつ警告する", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     expect(getRetentionDays({ SHOAL_RETENTION_DAYS: "not-a-number" })).toBe(DEFAULT_RETENTION_DAYS);
     expect(getRetentionDays({ SHOAL_RETENTION_DAYS: "-5" })).toBe(DEFAULT_RETENTION_DAYS);
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(warn.mock.calls[0][0]).toContain("SHOAL_RETENTION_DAYS");
+    warn.mockRestore();
   });
 });
 
