@@ -1,8 +1,8 @@
 {
   "name": "@m8i-51/shoal",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
-  "description": "Multi-agent web exploration framework \u2014 finds bugs, UX issues, and missing features by running AI agents against your app",
+  "description": "Multi-agent web exploration framework — finds bugs, UX issues, and missing features by running AI agents against your app",
   "license": "MIT",
   "author": "m8i-51",
   "homepage": "https://github.com/m8i-51/shoal#readme",
