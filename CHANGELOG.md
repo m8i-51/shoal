@@ -97,7 +97,11 @@ to `0.1.20` or earlier, so those releases are not separately documented here.
 - **Starting a second run while one was already in progress** silently
   spawned a second `run.ts` child process competing for the same browser and
   `logs/`/`findings/` files. `POST /api/runs/start` now returns 409, and the
-  `start_run` MCP tool now throws, while another run is still active.
+  `start_run` MCP tool now throws, while another run is still active. The
+  weekly scheduler had the same gap — it fires unattended, so it is the
+  likeliest way to hit this — and now skips the scheduled run with a log
+  line when one is already active, leaving `lastRunDate` unset so it is
+  retried rather than skipped for the whole week.
 - **An LLM-written issue body could `@mention` a real GitHub user or team.**
   `framework/triage.ts` now wraps `@word` in backticks before filing, so a
   mention embedded in a finding's text (whether written by the model or

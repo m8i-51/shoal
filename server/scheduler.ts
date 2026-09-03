@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
-import { spawnRun } from "./runner.js";
+import { spawnRun, hasActiveRun } from "./runner.js";
 
 export interface ScheduleConfig {
   enabled: boolean;
@@ -50,6 +50,18 @@ export function startScheduler(): void {
     const diff = nowMin - targetMin;
 
     if (diff >= 0 && diff < 2 && config.lastRunDate !== today) {
+      // Never spawn a scheduled run on top of one already in flight — two
+      // runs read-modify-writing agents.json/coverage/cache in the same cwd
+      // concurrently is exactly what hasActiveRun() exists to prevent, and
+      // the scheduler fires unattended so there is nobody to hit the 409
+      // that a manual /api/runs/start would get instead. Leave lastRunDate
+      // unset (rather than recording today as "ran") so a still-active run
+      // that finishes before the ±1 minute window closes gets picked up by
+      // the next tick instead of silently skipping the whole week.
+      if (hasActiveRun()) {
+        console.log(`[scheduler] skipping scheduled run (${today}) — a run is already in progress`);
+        return;
+      }
       console.log(`[scheduler] triggering scheduled run (${today})`);
       spawnRun({});
       saveSchedule({ ...config, lastRunDate: today });

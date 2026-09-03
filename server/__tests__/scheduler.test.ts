@@ -6,10 +6,10 @@ vi.mock("path", async (importOriginal) => {
   const actual = await importOriginal<typeof import("path")>();
   return { ...actual, join: (...args: string[]) => args.join("/") };
 });
-vi.mock("../runner.js", () => ({ spawnRun: vi.fn() }));
+vi.mock("../runner.js", () => ({ spawnRun: vi.fn(), hasActiveRun: vi.fn().mockReturnValue(false) }));
 
 import { loadSchedule, saveSchedule, type ScheduleConfig } from "../scheduler";
-import { spawnRun } from "../runner.js";
+import { spawnRun, hasActiveRun } from "../runner.js";
 
 const DEFAULT: ScheduleConfig = {
   enabled: false,
@@ -23,6 +23,7 @@ beforeEach(() => {
   vi.mocked(fs.existsSync).mockReturnValue(false);
   vi.mocked(fs.readFileSync).mockReturnValue("{}");
   vi.mocked(fs.writeFileSync).mockReturnValue(undefined);
+  vi.mocked(hasActiveRun).mockReturnValue(false);
 });
 
 afterEach(() => {
@@ -105,6 +106,36 @@ describe("scheduler — 時刻判定ロジック", () => {
 
     await vi.advanceTimersByTimeAsync(61_000);
     expect(spawnRun).toHaveBeenCalledOnce();
+    vi.useRealTimers();
+  });
+
+  it("既に実行中の run があるときは spawnRun を呼ばず、lastRunDate も更新しない（次の tick でリトライされる）", async () => {
+    vi.useFakeTimers();
+
+    const monday9am = new Date("2026-05-11T09:00:00.000Z");
+    vi.setSystemTime(monday9am);
+    const now = new Date();
+
+    const config: ScheduleConfig = {
+      enabled: true,
+      dayOfWeek: now.getDay(),
+      hour: now.getHours(),
+      minute: now.getMinutes(),
+      lastRunDate: null,
+    };
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(config));
+    vi.mocked(hasActiveRun).mockReturnValue(true);
+
+    vi.resetModules();
+    const { startScheduler: start } = await import("../scheduler");
+    start();
+
+    await vi.advanceTimersByTimeAsync(61_000);
+    expect(spawnRun).not.toHaveBeenCalled();
+    // lastRunDate must stay unset — a run skipped because another was in
+    // progress was not "run today" and must be retried, not swallowed.
+    expect(fs.writeFileSync).not.toHaveBeenCalled();
     vi.useRealTimers();
   });
 
