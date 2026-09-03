@@ -5,6 +5,7 @@ import { StartModal } from "../components/StartModal";
 import { ExperiencePanel } from "../components/ExperiencePanel";
 import { SiteMapPanel } from "../components/SiteMapPanel";
 import { GoalsPanel } from "../components/GoalsPanel";
+import { EdgePanel } from "../components/EdgePanel";
 import { PersonasPanel } from "../components/PersonasPanel";
 import { SchedulePanel } from "../components/SchedulePanel";
 import { formatDuration, formatDate, formatCostUSD, CATEGORY_COLOR } from "../utils/format";
@@ -83,6 +84,7 @@ export function Dashboard() {
       <ExperiencePanel />
       <SiteMapPanel />
       <GoalsPanel />
+      <EdgePanel />
       <PersonasPanel />
       <SchedulePanel />
 

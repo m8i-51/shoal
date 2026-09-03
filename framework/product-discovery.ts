@@ -1,12 +1,14 @@
 import type { LLMClient } from "./llm-client";
 import { runToolSession } from "./tool-session";
 import { normalizeThresholdCandidates, type ThresholdCandidate } from "./threshold";
+import { normalizeProductEdge, type ProductEdge } from "./product-edge";
 import type { Page } from "playwright";
 import * as fs from "fs";
 import * as path from "path";
 import Anthropic from "@anthropic-ai/sdk";
 
 export type { ThresholdCandidate } from "./threshold";
+export type { ProductEdge } from "./product-edge";
 
 // ================================================================
 // Documentation gathering (local or GitHub)
@@ -95,6 +97,8 @@ export interface ProductSpec {
   loginPath?: string;
   /** Inferred boundaries for the threshold agent lane (empty when unknown / cached old specs). */
   thresholdCandidates?: ThresholdCandidate[];
+  /** What the product is deliberately sharp about (undefined when nothing was declared or inferred). */
+  productEdge?: ProductEdge;
 }
 
 const LOGIN_SEGMENT = /^(?:log[-_]?in|sign[-_]?in|sign[-_]?on|logon)$/i;
@@ -202,9 +206,11 @@ export function loadCachedSpec(baseUrl: string): ProductSpec | null {
   if (!fs.existsSync(filePath)) return null;
   try {
     const parsed = JSON.parse(fs.readFileSync(filePath, "utf-8")) as ProductSpec;
+    const productEdge = normalizeProductEdge(parsed.productEdge);
     return {
       ...parsed,
       thresholdCandidates: normalizeThresholdCandidates(parsed.thresholdCandidates),
+      ...(productEdge ? { productEdge } : {}),
     };
   } catch {
     return null;
@@ -232,6 +238,12 @@ function printSpec(spec: ProductSpec): void {
   console.log(`  users: ${spec.targetUsers}`);
   console.log(`  features:\n${spec.features.split("\n").map((l) => `    ${l}`).join("\n")}`);
   console.log(`  confidence: ${spec.confidence} / sources: ${spec.sources.join(", ")}`);
+  if (spec.productEdge) {
+    const edge = spec.productEdge;
+    console.log(`  product edge (${edge.source}):`);
+    for (const item of edge.sharpEdges) console.log(`    sharp: ${item}`);
+    for (const item of edge.tradeoffs) console.log(`    trade-off: ${item}`);
+  }
   if (spec.loginPath) console.log(`  login: ${spec.loginPath}`);
   const thresholds = spec.thresholdCandidates ?? [];
   if (thresholds.length > 0) {
@@ -306,6 +318,23 @@ const DISCOVERY_TOOLS: Anthropic.Tool[] = [
           items: { type: "string" },
           description: "Sources used (e.g. ['/ (top page)', '/tasks (UI)', 'README'])",
         },
+        productEdge: {
+          type: "object",
+          description:
+            "What this product is deliberately sharp about, and what it deliberately gives up to stay that way. A draft for the team to correct — infer only from real evidence (README positioning, product copy, an unusual-but-consistent interaction), never from what an app of this type usually does. Leave both arrays empty when the app gives no signal.",
+          properties: {
+            sharpEdges: {
+              type: "array",
+              items: { type: "string" },
+              description: "0–4 things this product does differently or more strongly than the conventional version of its category, and that look intentional. One sentence each, e.g. 'Every screen is one keyboard flow — no mouse path is provided, on purpose'.",
+            },
+            tradeoffs: {
+              type: "array",
+              items: { type: "string" },
+              description: "0–4 things it deliberately does NOT do, accepted as a cost of the edges above. e.g. 'No onboarding wizard — the product assumes a trained operator'.",
+            },
+          },
+        },
         thresholdCandidates: {
           type: "array",
           description:
@@ -350,6 +379,11 @@ export async function discoverProduct(
 ): Promise<ProductSpec> {
   console.log("\n[product-discovery] starting...");
 
+  // 宣言された product edge はチームの判断なので、再ディスカバリの推論で上書きしない
+  const cachedEdge = loadCachedSpec(baseUrl)?.productEdge;
+  const declaredEdge = cachedEdge?.source === "human" ? cachedEdge : undefined;
+  if (declaredEdge) console.log("  [product-discovery] keeping the team-declared product edge");
+
   const systemPrompt = `You are a product discovery agent.
 Observe the given web app and infer what it is.
 
@@ -372,6 +406,7 @@ Guidelines for output_spec:
 - loginPath: if you saw a login / sign-in form or a link to one, record that path (e.g. /login)
 - confidence: high if README/official docs obtained, medium if mixed, low if UI observation only
 - appGoals: 3–6 outcome sentences from user + business perspective. Write results ("can complete X without training"), never widget names ("using search and filter"). Agents use these as goal-gap criteria, so UI checklists create false visual-regression findings.
+- productEdge: only when the app itself shows it — a deliberate choice a competitor would call a flaw (sharpEdges) and what it gives up for that (tradeoffs). Omit or leave empty rather than guessing; the team corrects this draft in the dashboard, and triage uses it to flag tickets whose fix would flatten the product
 - thresholdCandidates: infer 8–12 (or fewer) probe-worthy boundaries from UI copy, forms (maxlength, required), plan/billing/permission wording, empty/heavy states. Kinds: input | business | experience. priority 1–3 (business edges usually 1). Empty array if unclear — do not invent limits.
 - When evidence is UI observation only: set confidence to low; write at most 2–3 high-level outcome drafts (no control names); treat them as Hall-editable drafts, not verified product goals`
 
@@ -434,6 +469,7 @@ Guidelines for output_spec:
           ?? (fromLlm && fromLlm !== "/" ? fromLlm : undefined)
           ?? observedLinkPath;
         const thresholdCandidates = normalizeThresholdCandidates(input.thresholdCandidates);
+        const productEdge = declaredEdge ?? normalizeProductEdge(input.productEdge);
         spec = {
           appName: String(input.appName),
           appDescription: String(input.appDescription),
@@ -445,6 +481,7 @@ Guidelines for output_spec:
           confidence: input.confidence as ProductSpec["confidence"],
           sources: Array.isArray(input.sources) ? input.sources.map(String) : [],
           thresholdCandidates,
+          ...(productEdge ? { productEdge } : {}),
           ...(loginPath ? { loginPath } : {}),
         };
         console.log(`  [product-discovery] spec confirmed (confidence: ${spec.confidence})`);
@@ -480,6 +517,7 @@ Guidelines for output_spec:
       confidence: "low",
       sources: [],
       thresholdCandidates: [],
+      ...(declaredEdge ? { productEdge: declaredEdge } : {}),
       ...(loginPath ? { loginPath } : {}),
     };
   }

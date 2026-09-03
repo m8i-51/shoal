@@ -29,6 +29,7 @@ import {
   PersonaGenerationError,
 } from "../framework/persona-from-seed.js";
 import type { ProductSpec } from "../framework/product-discovery.js";
+import { normalizeProductEdge } from "../framework/product-edge.js";
 
 function specFilePath(baseUrl: string): string {
   try {
@@ -66,7 +67,7 @@ app.use(issueSessionCookie(auth.token));
 app.use("/api", requireToken(auth.token));
 
 // ----------------------------------------------------------------
-// API: product spec (goals)
+// API: product spec (goals / product edge)
 // ----------------------------------------------------------------
 app.get("/api/spec", (_req, res) => {
   const baseUrl = process.env.BASE_URL ?? "http://localhost:3000";
@@ -99,6 +100,37 @@ app.patch("/api/spec/goals", (req, res) => {
     spec.appGoals = goals;
     writeFileSync(filePath, JSON.stringify(spec, null, 2), "utf-8");
     res.json({ ok: true });
+  } catch {
+    res.status(500).json({ error: "failed to update spec" });
+  }
+});
+
+// The declared product edge — what the app is deliberately sharp about. Triage
+// marks tickets whose fix would blunt it, so this is a team decision, not a
+// discovery artifact: saving here stamps source "human" and re-discovery keeps it.
+app.patch("/api/spec/edge", (req, res) => {
+  const baseUrl = process.env.BASE_URL ?? "http://localhost:3000";
+  const filePath = specFilePath(baseUrl);
+  if (!filePath || !existsSync(filePath)) {
+    res.status(404).json({ error: "spec not found" });
+    return;
+  }
+  const { sharpEdges, tradeoffs } = req.body as { sharpEdges?: unknown; tradeoffs?: unknown };
+  const isStringList = (v: unknown) => Array.isArray(v) && v.every((item) => typeof item === "string");
+  if (!isStringList(sharpEdges) || !isStringList(tradeoffs)) {
+    res.status(400).json({ error: "sharpEdges and tradeoffs must be arrays of strings" });
+    return;
+  }
+  const productEdge = normalizeProductEdge(
+    { sharpEdges, tradeoffs, source: "human", updatedAt: new Date().toISOString() },
+    "human",
+  );
+  try {
+    const spec = JSON.parse(readFileSync(filePath, "utf-8")) as Record<string, unknown>;
+    if (productEdge) spec.productEdge = productEdge;
+    else delete spec.productEdge;
+    writeFileSync(filePath, JSON.stringify(spec, null, 2), "utf-8");
+    res.json({ ok: true, productEdge: productEdge ?? null });
   } catch {
     res.status(500).json({ error: "failed to update spec" });
   }

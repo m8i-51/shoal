@@ -10,6 +10,23 @@ entries for `0.1.20` and earlier live in the commit log only.
 
 ## [Unreleased]
 
+### Added
+
+- **Product Edge — a declared answer to "fix everything and the product goes
+  flat".** A product can now state what it is deliberately sharp about
+  (`sharpEdges`) and what it gives up to stay that way (`tradeoffs`). Product
+  discovery drafts it from the app; the dashboard's Product Edge panel and
+  `PATCH /api/spec/edge` let the team declare their own, and a declared edge is
+  kept when discovery runs again instead of being overwritten by a fresh
+  inference.
+- **`edge-risk` tickets.** With an edge declared, triage still files every
+  finding — nothing is dropped or softened — but labels an issue `edge-risk`
+  when the obvious fix would blunt a declared edge, and writes the edge at stake
+  and what would be lost into the ticket body. Flagged findings are reported in
+  `TriageResult.edgeRisks` and `triage_result.json`. Findings categorised as
+  `bug` can never be marked this way, and with no edge declared the mechanism
+  stays off entirely.
+
 ## [0.2.0] — 2026-09-02
 
 ### Security

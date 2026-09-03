@@ -116,6 +116,23 @@
     "hint": "Write outcome success conditions only — not UI widgets (search, filters, badges belong in features). Edit UI-only drafts here in Hall.",
     "goalGapHint": "Agents report \"goal-gap\" only when an outcome is blocked — not for missing UI controls."
   },
+  "edge": {
+    "title": "Product Edge",
+    "noSpec": "No product spec yet. Start a run to draft the product edge.",
+    "none": "No edge declared. Triage treats every finding as equally worth acting on until you name one.",
+    "empty": "—",
+    "draft": "Draft inferred from the app — review and make it yours.",
+    "sharpEdges": "Sharp edges (protect these)",
+    "tradeoffs": "Deliberate trade-offs (accepted costs)",
+    "sharpEdgesPlaceholder": "e.g. Every flow is keyboard-first — no mouse path is provided, on purpose",
+    "tradeoffsPlaceholder": "e.g. No onboarding wizard — the product assumes a trained operator",
+    "edit": "Edit",
+    "save": "Save",
+    "cancel": "Cancel",
+    "add": "+ Add",
+    "hint": "Name what this product is deliberately sharp about, and what it gives up to stay that way.",
+    "triageHint": "Triage still files every finding, but labels an issue \"edge-risk\" when the obvious fix would blunt one of these — so a human decides instead of the product drifting toward average."
+  },
   "personas": {
     "title": "Fixed Personas",
     "hint": "Type a short seed (e.g. \"first-time user\"). AI expands it using the app's product spec. Fixed members always join runs.",
