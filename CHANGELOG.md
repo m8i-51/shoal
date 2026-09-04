@@ -46,11 +46,13 @@ to `0.1.20` or earlier, so those releases are not separately documented here.
   browser it launched — running with nobody watching it, and its
   `running_<id>.json` behind, which `listRuns()` took at face value and kept
   reporting that run as live forever after. The server now forwards
-  `SIGTERM`/`SIGINT` to every unfinished session's child before exiting, the
-  child's pid is recorded in `running_<id>.json`, and `listRuns()` checks
-  that pid's liveness — a dead pid is unlinked and no longer reported as
-  running. `running_<id>.json` files from before this fix have no pid and
-  keep the previous behaviour.
+  `SIGTERM`/`SIGINT` to every unfinished session's child and waits up to 5s
+  for those children to exit (SIGKILL after 4s) before `process.exit`, so
+  the kill timer is not cancelled out from under the swarm. The child's pid
+  is recorded in `running_<id>.json`, and `listRuns()` checks that pid's
+  liveness — a dead pid is unlinked and no longer reported as running.
+  `running_<id>.json` files from before this fix have no pid and keep the
+  previous behaviour.
 - **The dashboard failed shoal's own accessibility audit.** Running
   `framework/a11y-audit.ts` against the served dashboard found 11 violation
   types across `/`, `/hall`, and `/runs/:id`: unlabelled schedule hour/minute
@@ -100,11 +102,11 @@ to `0.1.20` or earlier, so those releases are not separately documented here.
   `gpt-4o-mini-2024-07-18` (a dated snapshot) matched nothing and was priced
   as unknown (excluded from `SHOAL_MAX_USD` accounting) instead of falling
   back to `gpt-4o-mini`, the way the Anthropic pricing table already falls
-  back for dated Claude model IDs. Both tables now share one longest-prefix
-  lookup, so the most specific matching entry always wins regardless of key
-  order (this also fixes a latent bug where a shorter, unrelated prefix could
-  outrank a more specific one depending on where it happened to sit in the
-  table).
+  back for dated Claude model IDs. OpenAI, Anthropic, and Bedrock now share
+  one longest-prefix lookup, so the most specific matching entry always wins
+  regardless of key order. Bedrock previously used the first table key that
+  *either* prefixed or was prefixed by the model id, so a short id like
+  `anthropic.claude-opus-4` could steal `anthropic.claude-opus-4-8` pricing.
 - **A browser agent's system prompt said "finish after 8-10 actions" no
   matter what `SHOAL_BROWSER_ITERATIONS` / `SHOAL_THRESHOLD_ITERATIONS` were
   actually set to** (default 12). Both prompts now interpolate the real turn
@@ -115,12 +117,18 @@ to `0.1.20` or earlier, so those releases are not separately documented here.
   `start_run` MCP tool now throws, while another run is still active. The
   weekly scheduler had the same gap — it fires unattended, so it is the
   likeliest way to hit this — and now skips the scheduled run with a log
-  line when one is already active, leaving `lastRunDate` unset so it is
-  retried rather than skipped for the whole week.
-- **An LLM-written issue body could `@mention` a real GitHub user or team.**
-  `framework/triage.ts` now wraps `@word` in backticks before filing, so a
-  mention embedded in a finding's text (whether written by the model or
-  echoed from something the target app displayed) can't ping anyone.
+  line when one is already active, recording `pendingDate` for today so a
+  later tick the same day retries once the in-flight run finishes, rather
+  than missing the week because a swarm outlasts the two-minute fire window.
+- **An LLM-written issue body or comment could `@mention` a real GitHub user
+  or team.** Every path that hands model-written text to a tracker now wraps
+  `@word` in backticks: triage `create_issue` (the body *and* the `edge_risk`
+  edge/why fields), returning-user re-report comments, and the regression
+  agent's `report_regression` / `mark_verified` (issue body, comment, and
+  the original issue title interpolated into the new issue body). A mention
+  in a comment on an existing issue notifies every subscriber of that issue,
+  not just the mentioned account. Issue titles themselves are left alone —
+  GitHub renders them as plain text and does not notify on a mention there.
 - `schedule.json` (written by the dashboard scheduler to the working
   directory) is now gitignored.
 
@@ -141,9 +149,11 @@ to `0.1.20` or earlier, so those releases are not separately documented here.
   `llmBaseUrl` at an attacker-controlled server leaked the operator's real
   key. `llmBaseUrl` without `llmApiKey` is now rejected with 400, and
   whenever `llmBaseUrl` is set, the spawned run's environment has the
-  server's own `LLM_API_KEY`, `OPENAI_API_KEY`, `LLM_BASE_URL`, and
-  `LLM_PROVIDER` stripped before the caller's own values are applied, so only
-  the caller's key can ever reach the caller's URL.
+  server's own `LLM_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+  `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN`,
+  `LLM_BASE_URL`, and `LLM_PROVIDER` stripped before the caller's own
+  values are applied, so only the caller's key can ever reach the caller's
+  URL. Tracker tokens stay — the child still has to file issues.
 - **The run-detail report `<iframe>` had no `sandbox`.** `framework/report.ts`
   generates plain HTML with no `<script>`, so the frame now gets `sandbox=""`
   — no script capability, and critically, never `allow-same-origin`.

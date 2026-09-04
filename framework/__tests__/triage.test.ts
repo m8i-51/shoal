@@ -278,6 +278,22 @@ describe("runTriageAgent", () => {
       expect(properties.edge_risk).toBeDefined();
     });
 
+    it("edge_risk の edge / why に書かれた @mention も無害化する", async () => {
+      const tracker = makeTracker();
+      vi.mocked(createMessageWithRetry)
+        .mockResolvedValueOnce(toolUseResponse("create_issue", {
+          title: "Add a mouse path", body: "b", category: "ux", merged_finding_ids: ["f1"],
+          edge_risk: { edge: "Ask @security-team", why: "Paging @alice makes the keyboard flow optional" },
+        }) as never)
+        .mockResolvedValueOnce(endTurn() as never);
+      await runTriageAgent([makeFinding({ id: "f1" })], {} as LLMClient, "m", tracker, undefined, edge);
+      const [, body] = vi.mocked(tracker.createIssue).mock.calls[0];
+      expect(body).toContain("`@security-team`");
+      expect(body).toContain("`@alice`");
+      expect(body).not.toMatch(/[^`]@security-team/);
+      expect(body).not.toMatch(/[^`]@alice/);
+    });
+
     it("edge_risk 付きの issue は edge-risk ラベルと判断材料セクションを持つ", async () => {
       const tracker = makeTracker();
       vi.mocked(createMessageWithRetry)

@@ -101,12 +101,8 @@ function lookupBedrockPricing(model: string): { input: number; output: number } 
   const candidates = [model, stripBedrockRegionPrefix(model)];
 
   for (const id of candidates) {
-    if (BEDROCK_PRICING[id]) return BEDROCK_PRICING[id];
-  }
-
-  for (const id of candidates) {
-    const key = Object.keys(BEDROCK_PRICING).find((k) => id.startsWith(k) || k.startsWith(id));
-    if (key) return BEDROCK_PRICING[key];
+    const pricing = longestPrefixMatch(BEDROCK_PRICING, id);
+    if (pricing) return pricing;
   }
 
   for (const id of candidates) {

@@ -7,6 +7,8 @@
  * 指摘そのものは決して握りつぶさない — 判断材料を可視化するだけ。
  */
 
+import { neutralizeMentions } from "./mentions";
+
 export type ProductEdgeSource = "discovered" | "human";
 
 export interface ProductEdge {
@@ -134,8 +136,8 @@ export function formatEdgeRiskSection(risk: EdgeRisk): string {
     "---",
     "**⚠️ Edge risk — decide before fixing**",
     "",
-    `- **Edge at stake:** ${risk.edge}`,
-    `- **Why the obvious fix would blunt it:** ${risk.why}`,
+    `- **Edge at stake:** ${neutralizeMentions(risk.edge)}`,
+    `- **Why the obvious fix would blunt it:** ${neutralizeMentions(risk.why)}`,
     "",
     "Fixing this as reported moves the product toward the conventional version of itself.",
     "Keep the edge, adapt the fix, or accept the finding — but make it a decision, not a default.",

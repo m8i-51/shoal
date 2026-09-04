@@ -8,6 +8,8 @@ export interface ScheduleConfig {
   hour: number;
   minute: number;
   lastRunDate: string | null;  // YYYY-MM-DD — prevents double-trigger
+  /** YYYY-MM-DD — a scheduled fire that was skipped because a run was already in progress. */
+  pendingDate: string | null;
 }
 
 const DEFAULT_CONFIG: ScheduleConfig = {
@@ -16,6 +18,7 @@ const DEFAULT_CONFIG: ScheduleConfig = {
   hour: 9,
   minute: 0,
   lastRunDate: null,
+  pendingDate: null,
 };
 
 function configPath(): string {
@@ -49,22 +52,24 @@ export function startScheduler(): void {
     const targetMin = config.dayOfWeek * 1440 + config.hour * 60 + config.minute;
     const diff = nowMin - targetMin;
 
-    if (diff >= 0 && diff < 2 && config.lastRunDate !== today) {
-      // Never spawn a scheduled run on top of one already in flight — two
-      // runs read-modify-writing agents.json/coverage/cache in the same cwd
-      // concurrently is exactly what hasActiveRun() exists to prevent, and
-      // the scheduler fires unattended so there is nobody to hit the 409
-      // that a manual /api/runs/start would get instead. Leave lastRunDate
-      // unset (rather than recording today as "ran") so a still-active run
-      // that finishes before the ±1 minute window closes gets picked up by
-      // the next tick instead of silently skipping the whole week.
+    // The ±1 minute window is the first opportunity to fire. If that tick
+    // finds a run already in flight, we record pendingDate=today and keep
+    // retrying on later ticks the same day — a swarm routinely outlasts
+    // two minutes, so leaving lastRunDate unset inside the window alone
+    // would skip the week.
+    const inWindow = diff >= 0 && diff < 2;
+    const deferred = config.pendingDate === today;
+    if ((inWindow || deferred) && config.lastRunDate !== today) {
       if (hasActiveRun()) {
         console.log(`[scheduler] skipping scheduled run (${today}) — a run is already in progress`);
+        if (config.pendingDate !== today) {
+          saveSchedule({ ...config, pendingDate: today });
+        }
         return;
       }
       console.log(`[scheduler] triggering scheduled run (${today})`);
       spawnRun({});
-      saveSchedule({ ...config, lastRunDate: today });
+      saveSchedule({ ...config, lastRunDate: today, pendingDate: null });
     }
   };
 

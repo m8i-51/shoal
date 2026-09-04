@@ -11,7 +11,7 @@ vi.mock("../runner.js", () => ({ activeSessions: new Map(), spawnRun: vi.fn(), c
 vi.mock("../runs.js", () => ({ listRuns: vi.fn(() => []), getReportPath: vi.fn(() => null) }));
 vi.mock("../triage-view.js", () => ({ buildTriageView: vi.fn(() => null) }));
 vi.mock("../adoption-view.js", () => ({ buildAdoptionView: vi.fn(() => null) }));
-vi.mock("../scheduler.js", () => ({ loadSchedule: vi.fn(() => ({ enabled: false, dayOfWeek: 1, hour: 9, minute: 0, lastRunDate: null })), saveSchedule: vi.fn(), startScheduler: vi.fn() }));
+vi.mock("../scheduler.js", () => ({ loadSchedule: vi.fn(() => ({ enabled: false, dayOfWeek: 1, hour: 9, minute: 0, lastRunDate: null, pendingDate: null })), saveSchedule: vi.fn(), startScheduler: vi.fn() }));
 vi.mock("../../framework/diary.js", () => ({ generateDiary: vi.fn(), getDiaryPath: vi.fn(() => null) }));
 vi.mock("../../framework/experience-score.js", () => ({ computeExperienceScore: vi.fn(() => null) }));
 vi.mock("../../framework/site-map.js", () => ({
@@ -475,7 +475,7 @@ describe("POST /api/findings/proxy-url", () => {
 describe("PATCH /api/schedule", () => {
   it("範囲外の dayOfWeek（-1, 7）は無視してデフォルト値を維持する", async () => {
     const { loadSchedule } = await import("../scheduler.js");
-    vi.mocked(loadSchedule).mockReturnValue({ enabled: false, dayOfWeek: 1, hour: 9, minute: 0, lastRunDate: null });
+    vi.mocked(loadSchedule).mockReturnValue({ enabled: false, dayOfWeek: 1, hour: 9, minute: 0, lastRunDate: null, pendingDate: null });
     const res = await request(app).patch("/api/schedule").send({ dayOfWeek: -1 });
     expect(res.status).toBe(200);
     expect(res.body.dayOfWeek).toBe(1); // デフォルト値を維持
@@ -483,15 +483,37 @@ describe("PATCH /api/schedule", () => {
 
   it("範囲外の hour（24）は無視する", async () => {
     const { loadSchedule } = await import("../scheduler.js");
-    vi.mocked(loadSchedule).mockReturnValue({ enabled: false, dayOfWeek: 1, hour: 9, minute: 0, lastRunDate: null });
+    vi.mocked(loadSchedule).mockReturnValue({ enabled: false, dayOfWeek: 1, hour: 9, minute: 0, lastRunDate: null, pendingDate: null });
     const res = await request(app).patch("/api/schedule").send({ hour: 24 });
     expect(res.status).toBe(200);
     expect(res.body.hour).toBe(9);
   });
 
+  it("時刻を変えると pendingDate を捨てる", async () => {
+    const { loadSchedule } = await import("../scheduler.js");
+    vi.mocked(loadSchedule).mockReturnValue({
+      enabled: true, dayOfWeek: 1, hour: 9, minute: 0, lastRunDate: null, pendingDate: "2026-05-11",
+    });
+    const res = await request(app).patch("/api/schedule").send({ hour: 10 });
+    expect(res.status).toBe(200);
+    expect(res.body.hour).toBe(10);
+    expect(res.body.pendingDate).toBeNull();
+  });
+
+  it("enabled だけ変えても pendingDate は残す", async () => {
+    const { loadSchedule } = await import("../scheduler.js");
+    vi.mocked(loadSchedule).mockReturnValue({
+      enabled: false, dayOfWeek: 1, hour: 9, minute: 0, lastRunDate: null, pendingDate: "2026-05-11",
+    });
+    const res = await request(app).patch("/api/schedule").send({ enabled: true });
+    expect(res.status).toBe(200);
+    expect(res.body.enabled).toBe(true);
+    expect(res.body.pendingDate).toBe("2026-05-11");
+  });
+
   it("enabled に数値を渡すと Boolean 変換される", async () => {
     const { loadSchedule } = await import("../scheduler.js");
-    vi.mocked(loadSchedule).mockReturnValue({ enabled: false, dayOfWeek: 1, hour: 9, minute: 0, lastRunDate: null });
+    vi.mocked(loadSchedule).mockReturnValue({ enabled: false, dayOfWeek: 1, hour: 9, minute: 0, lastRunDate: null, pendingDate: null });
     const res = await request(app).patch("/api/schedule").send({ enabled: 1 });
     expect(res.status).toBe(200);
     expect(res.body.enabled).toBe(true);
@@ -503,10 +525,10 @@ describe("PATCH /api/schedule", () => {
 // ================================================================
 describe("GET /api/schedule", () => {
   it("loadSchedule の結果を返す", async () => {
-    vi.mocked(loadSchedule).mockReturnValue({ enabled: true, dayOfWeek: 3, hour: 10, minute: 30, lastRunDate: null });
+    vi.mocked(loadSchedule).mockReturnValue({ enabled: true, dayOfWeek: 3, hour: 10, minute: 30, lastRunDate: null, pendingDate: null });
     const res = await request(app).get("/api/schedule");
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ enabled: true, dayOfWeek: 3, hour: 10, minute: 30, lastRunDate: null });
+    expect(res.body).toEqual({ enabled: true, dayOfWeek: 3, hour: 10, minute: 30, lastRunDate: null, pendingDate: null });
   });
 });
 

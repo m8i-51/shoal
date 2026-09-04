@@ -76,13 +76,20 @@ export function spawnRun(opts: {
   const baseEnv: NodeJS.ProcessEnv = { ...process.env };
   if (opts.llmBaseUrl) {
     // A caller-supplied llmBaseUrl must never be able to see the operator's
-    // own LLM credentials — without this, the child would inherit
-    // LLM_API_KEY/OPENAI_API_KEY from the server's own environment and send
-    // it as a Bearer token to whatever URL the caller supplied. Strip the
-    // server's own provider config so only the caller's own key (validated
-    // as required alongside llmBaseUrl by the caller) reaches the caller's URL.
+    // own LLM credentials. Without this, the child would inherit the server's
+    // keys and — for the OpenAI-compat path — send LLM_API_KEY/OPENAI_API_KEY
+    // as a Bearer token to whatever URL the caller supplied. Strip every
+    // provider credential the child could use, not just the two OpenAI-compat
+    // keys: ANTHROPIC_API_KEY is the default-provider secret, and AWS_* are
+    // what Bedrock reads from the environment. Tracker tokens stay; the child
+    // still has to file issues. Only the caller's own key (required alongside
+    // llmBaseUrl by the caller) is then written back below.
     delete baseEnv.LLM_API_KEY;
     delete baseEnv.OPENAI_API_KEY;
+    delete baseEnv.ANTHROPIC_API_KEY;
+    delete baseEnv.AWS_ACCESS_KEY_ID;
+    delete baseEnv.AWS_SECRET_ACCESS_KEY;
+    delete baseEnv.AWS_SESSION_TOKEN;
     delete baseEnv.LLM_BASE_URL;
     delete baseEnv.LLM_PROVIDER;
   }
@@ -173,4 +180,40 @@ export function cancelSession(sessionId: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** SIGTERM every unfinished session. Returns the ones we actually signalled. */
+export function cancelAllSessions(): Session[] {
+  const waiting: Session[] = [];
+  for (const [sessionId, session] of activeSessions) {
+    if (session.done) continue;
+    if (cancelSession(sessionId)) waiting.push(session);
+  }
+  return waiting;
+}
+
+/**
+ * Resolves when every session has exited, or `timeoutMs` elapses — whichever
+ * comes first. Used by `shoal serve` shutdown so `process.exit` doesn't
+ * cancel the SIGKILL timer in `cancelSession` and leave the swarm running.
+ */
+export function waitForSessionsToExit(sessions: Session[], timeoutMs = 5000): Promise<void> {
+  if (sessions.length === 0) return Promise.resolve();
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(done, timeoutMs);
+    const onDone = () => {
+      if (sessions.every((s) => s.done)) done();
+    };
+    for (const session of sessions) {
+      if (!session.done) session.doneListeners.push(onDone);
+    }
+    onDone();
+  });
 }

@@ -323,6 +323,21 @@ describe("regression tools", () => {
     expect(runLog.summary.regressionFailed).toBe(0);
   });
 
+  it("report_regression は original_issue_title に埋め込まれた @mention も無害化する", async () => {
+    const ctx = makeContext({ closedIssues: [{ number: 42, title: "old bug", body: "", labels: [] }] });
+    await executeBrowserTool(
+      "report_regression",
+      { original_issue_number: "42", original_issue_title: "cc @victim", title: "back again", body: "still broken" },
+      ctx,
+    );
+
+    const [, issueBody] = vi.mocked(ctx.trackers.createIssue).mock.calls[0];
+    const [, commentBody] = vi.mocked(ctx.trackers.commentOnIssue).mock.calls[0];
+    expect(issueBody).toContain("`@victim`");
+    expect(issueBody).not.toMatch(/[^`]@victim/);
+    expect(commentBody).not.toContain("`@victim`");
+  });
+
   it("report_regression は issue 本文とコメントの両方で @mention を無害化する", async () => {
     const ctx = makeContext({ closedIssues: [{ number: 42, title: "old bug", body: "", labels: [] }] });
     await executeBrowserTool(

@@ -159,6 +159,13 @@ describe("estimateCost — Bedrock", () => {
   it("不明モデルは null", async () => {
     expect(await estimateCost("anthropic.claude-unknown-v99:0", "bedrock", 1000, 500)).toBeNull();
   });
+
+  it("短いモデル ID はより長い表のキーを盗まない（opus-4 ≠ opus-4-8）", async () => {
+    // 旧実装は `k.startsWith(id)` だったので anthropic.claude-opus-4 が
+    // anthropic.claude-opus-4-8-v1（input $5）に先に当たっていた。
+    const cost = await estimateCost("anthropic.claude-opus-4", "bedrock", 1_000_000, 0);
+    expect(cost).toBeCloseTo(15, 5);
+  });
 });
 
 describe("estimateCost — OpenAI", () => {
