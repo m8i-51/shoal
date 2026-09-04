@@ -1,5 +1,6 @@
 import type { Finding } from "./types";
 import type { OpenIssue, IssueTracker } from "./trackers/index";
+import { neutralizeMentions } from "./mentions";
 
 const RereportPattern =
   /still broken|hasn't changed|has not changed|not changed since|unchanged since|前回から|変わっていない|改善されていない|not fixed since/i;
@@ -36,7 +37,7 @@ export function formatReReportComment(finding: Finding): string {
   return [
     "**Returning-user re-report** (still unresolved)",
     "",
-    finding.body,
+    neutralizeMentions(finding.body),
     "",
     `— ${finding.agentName} (${finding.role}), run \`${finding.runId}\``,
   ].join("\n");

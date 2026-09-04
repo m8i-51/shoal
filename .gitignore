@@ -10,6 +10,7 @@ coverage/
 .claude/
 .cursor/
 shoal.config.ts
+schedule.json
 test-accounts/
 cache/
 docs/superpowers/

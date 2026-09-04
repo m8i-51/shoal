@@ -152,7 +152,7 @@ export function RunDetail() {
         <button onClick={() => navigate("/")} style={styles.backBtn}>
           {t("detail.back")}
         </button>
-        <span style={styles.runId}>{runId}</span>
+        <h1 style={styles.runId}>{runId}</h1>
         {isLive && <span style={styles.liveBadge}>● LIVE</span>}
         {isLive && !confirmingCancel && (
           <button onClick={() => setConfirmingCancel(true)} style={styles.cancelBtn} disabled={cancelling}>
@@ -239,6 +239,11 @@ export function RunDetail() {
           src={`/api/runs/${runId}/report`}
           style={styles.frame}
           title={`Report for ${runId}`}
+          // framework/report.ts's generated HTML has no <script> tags, so the
+          // report needs no script capability at all — never allow-same-origin
+          // (that would let framed content read/modify the dashboard's own
+          // origin, cookies included).
+          sandbox=""
         />
       )}
 
@@ -290,19 +295,20 @@ const styles = {
   },
   runId: {
     fontSize: "0.75rem",
-    color: "#94a3b8",
+    fontWeight: "normal",
+    color: "#64748b",
     fontFamily: "monospace",
   },
   liveBadge: {
     fontSize: "0.7rem",
     fontWeight: 700,
-    color: "#22c55e",
+    color: "#15803d",
     letterSpacing: "0.05em",
   },
   cancelBtn: {
     background: "transparent",
-    border: "1px solid #ef4444",
-    color: "#ef4444",
+    border: "1px solid #dc2626",
+    color: "#dc2626",
     borderRadius: "6px",
     padding: "3px 10px",
     fontSize: "0.75rem",
@@ -322,7 +328,7 @@ const styles = {
     fontWeight: 600,
   },
   cancelConfirmYes: {
-    background: "#ef4444",
+    background: "#dc2626",
     border: "none",
     color: "#fff",
     borderRadius: "6px",
@@ -355,7 +361,7 @@ const styles = {
     padding: "0.625rem 1rem",
     fontSize: "0.8rem",
     fontWeight: 600,
-    color: "#94a3b8",
+    color: "#475569",
     cursor: "pointer",
     marginBottom: "-1px",
   },
@@ -377,7 +383,10 @@ const styles = {
     lineHeight: 1.7,
   },
   logEmpty: {
-    color: "#475569",
+    // Rendered on the dark log background (log.background), not the page's
+    // light background — #475569 fails contrast there; #94a3b8 (same as
+    // logLine/logDone below) is the muted tone that actually reads on dark.
+    color: "#94a3b8",
   },
   logLine: {
     color: "#94a3b8",
@@ -388,7 +397,7 @@ const styles = {
     color: "#22c55e",
   },
   logDone: {
-    color: "#475569",
+    color: "#94a3b8",
     marginTop: "1rem",
     textAlign: "center" as const,
     fontSize: "0.75rem",
@@ -421,7 +430,7 @@ const styles = {
   },
   diaryErrMsg: {
     fontSize: "0.8rem",
-    color: "#ef4444",
+    color: "#dc2626",
   },
   generateBtn: {
     background: "#1e293b",

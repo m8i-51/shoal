@@ -17,6 +17,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { findBestByRole, roleAffinity } from "./role-match";
 import { clickDescribedElement, clickToolHasTarget } from "./click-target";
 import { formatToolCallLog, isPasswordLabel, redactFillResultText, REDACTED_SECRET } from "./redact";
+import { registerSecret } from "./trace-scrub";
 
 export interface TestAccount {
   email: string;
@@ -531,7 +532,7 @@ async function performLogin(
   for (const url of urls) {
     triedUrls.push(url);
     try {
-      await page.goto(url, { waitUntil: "networkidle" });
+      await page.goto(url, { waitUntil: "load", timeout: 15000 });
       await page.waitForTimeout(1000);
       lastUrl = await currentPageUrl(page, url);
       if (!await fillLoginForm(page, credentials)) continue;
@@ -783,7 +784,7 @@ If user management is not accessible from this account, or the app has no role s
             const navPath = input.path as string | undefined;
             if (!navPath) { resultText = "navigate: missing path"; break; }
             await saveSnapshotBeforeAction(page, observation);
-            await page.goto(`${baseUrl}${navPath}`, { waitUntil: "networkidle" });
+            await page.goto(`${baseUrl}${navPath}`, { waitUntil: "load", timeout: 15000 });
             await page.waitForTimeout(500);
             screenshot = await takeScreenshot(page, `nav_${navPath}`);
             resultText = `Navigated to ${navPath}`;
@@ -825,6 +826,7 @@ If user management is not accessible from this account, or the app has no role s
               } catch { /* next */ }
             }
             if (!filled) throw new Error(`No input matching: ${label}`);
+            if (passwordField) registerSecret(value);
             if (passwordField) input.value = REDACTED_SECRET;
             resultText = redactFillResultText(label, value, passwordField);
             break;

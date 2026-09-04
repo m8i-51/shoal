@@ -21,6 +21,16 @@ export interface RunSummary {
   regressionFailed: number;
 }
 
+/** pid が生きているか確認する。ESRCH（存在しない）なら false、権限エラー等はまだ生きているとみなす。 */
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code !== "ESRCH";
+  }
+}
+
 function countFindings(runId: string): { total: number; byCategory: Record<string, number> } {
   const dir = path.join(process.cwd(), "findings", runId);
   if (!fs.existsSync(dir)) return { total: 0, byCategory: {} };
@@ -51,8 +61,17 @@ export function listRuns(): RunSummary[] {
     // 実行中の pending ファイル（running_*.json）
     if (file.startsWith("running_") && file.endsWith(".json")) {
       try {
-        const raw = fs.readFileSync(path.join(logsDir, file), "utf-8");
-        const { runId, startedAt } = JSON.parse(raw);
+        const filePath = path.join(logsDir, file);
+        const raw = fs.readFileSync(filePath, "utf-8");
+        const { runId, startedAt, pid } = JSON.parse(raw);
+        // shoal serve が SIGKILL/クラッシュなどで正常終了せず running_*.json が
+        // 残った場合、pid が分かればその生死を確認する。死んでいれば「実行中」と
+        // 偽報告せず、孤児ファイルを片付ける。pid が無い（旧フォーマット）ものは
+        // 従来どおり実行中として扱う。
+        if (typeof pid === "number" && !isPidAlive(pid)) {
+          try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+          continue;
+        }
         if (!seenRunIds.has(runId)) {
           seenRunIds.add(runId);
           summaries.push({

@@ -62,10 +62,55 @@ const DESTRUCTIVE_CLICK_PATTERNS = [
   /\btransfer\s+funds\b/i,
 ];
 
-export function isDestructiveBrowserAction(text: string): boolean {
+/**
+ * 日本語 UI 向けの破壊的操作パターン。
+ * 「送信」単体はマッチさせない（通常のフォーム送信まで全てブロックしてしまうため）。
+ */
+const DESTRUCTIVE_CLICK_PATTERNS_JA = [
+  /削除/,
+  /消去/,
+  /破棄/,
+  /退会/,
+  /解約/,
+  /購入(する|を確定)?/,
+  /注文を確定/,
+  /決済/,
+  /支払(い|う)/,
+  /送金/,
+  /招待を送信/,
+  /メールを送信/,
+  /完全に削除/,
+  /取り消せません/,
+  /元に戻せません/,
+];
+
+/**
+ * SHOAL_DESTRUCTIVE_PATTERNS で運用者が追加した正規表現（カンマ区切り、大文字小文字を無視）を読み込む。
+ * 不正な正規表現は無視して console.warn するだけで、実行を止めない。
+ */
+function loadEnvDestructivePatterns(env: NodeJS.ProcessEnv = process.env): RegExp[] {
+  const raw = env.SHOAL_DESTRUCTIVE_PATTERNS;
+  if (!raw || !raw.trim()) return [];
+  const sources = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const patterns: RegExp[] = [];
+  for (const source of sources) {
+    try {
+      patterns.push(new RegExp(source, "i"));
+    } catch {
+      console.warn(`[guardrails] invalid SHOAL_DESTRUCTIVE_PATTERNS entry, skipping: ${source}`);
+    }
+  }
+  return patterns;
+}
+
+export function isDestructiveBrowserAction(text: string, env: NodeJS.ProcessEnv = process.env): boolean {
   const normalized = text.trim();
   if (!normalized) return false;
-  return DESTRUCTIVE_CLICK_PATTERNS.some((pattern) => pattern.test(normalized));
+  const allPatterns = [...DESTRUCTIVE_CLICK_PATTERNS, ...DESTRUCTIVE_CLICK_PATTERNS_JA, ...loadEnvDestructivePatterns(env)];
+  return allPatterns.some((pattern) => pattern.test(normalized));
 }
 
 async function resolveClickTargetText(page: Page, description: string, ref?: string): Promise<string> {

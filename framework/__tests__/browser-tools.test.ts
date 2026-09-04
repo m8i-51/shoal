@@ -207,6 +207,22 @@ describe("fill", () => {
     const result = await executeBrowserTool("fill", { label: "Email", value: "a@b.c" }, makeContext());
     expect(result.text).toBe('Filled "Email" with "a@b.c"');
   });
+
+  it("パスワード欄に入力した値は trace scrub 用レジストリに登録する", async () => {
+    const { clearKnownSecrets, getKnownSecrets } = await import("../trace-scrub");
+    clearKnownSecrets();
+    const ctx = makeContext();
+    await executeBrowserTool("fill", { label: "Password", value: SAMPLE_SECRET }, ctx);
+    expect(getKnownSecrets()).toContain(SAMPLE_SECRET);
+    clearKnownSecrets();
+  });
+
+  it("通常の欄に入力した値は trace scrub 用レジストリに登録しない", async () => {
+    const { clearKnownSecrets, getKnownSecrets } = await import("../trace-scrub");
+    clearKnownSecrets();
+    await executeBrowserTool("fill", { label: "Email", value: "a@b.c" }, makeContext());
+    expect(getKnownSecrets()).toEqual([]);
+  });
 });
 
 describe("untrusted content fencing", () => {
@@ -305,6 +321,50 @@ describe("regression tools", () => {
     expect(ctx.agentLog.regressionChecks[0].status).toBe("fixed");
     expect(runLog.summary.regressionChecked).toBe(1);
     expect(runLog.summary.regressionFailed).toBe(0);
+  });
+
+  it("report_regression は original_issue_title に埋め込まれた @mention も無害化する", async () => {
+    const ctx = makeContext({ closedIssues: [{ number: 42, title: "old bug", body: "", labels: [] }] });
+    await executeBrowserTool(
+      "report_regression",
+      { original_issue_number: "42", original_issue_title: "cc @victim", title: "back again", body: "still broken" },
+      ctx,
+    );
+
+    const [, issueBody] = vi.mocked(ctx.trackers.createIssue).mock.calls[0];
+    const [, commentBody] = vi.mocked(ctx.trackers.commentOnIssue).mock.calls[0];
+    expect(issueBody).toContain("`@victim`");
+    expect(issueBody).not.toMatch(/[^`]@victim/);
+    expect(commentBody).not.toContain("`@victim`");
+  });
+
+  it("report_regression は issue 本文とコメントの両方で @mention を無害化する", async () => {
+    const ctx = makeContext({ closedIssues: [{ number: 42, title: "old bug", body: "", labels: [] }] });
+    await executeBrowserTool(
+      "report_regression",
+      { original_issue_number: "42", original_issue_title: "old bug", title: "back again", body: "cc @security-team" },
+      ctx,
+    );
+
+    const [, issueBody] = vi.mocked(ctx.trackers.createIssue).mock.calls[0];
+    const [, commentBody] = vi.mocked(ctx.trackers.commentOnIssue).mock.calls[0];
+    expect(issueBody).toContain("`@security-team`");
+    expect(issueBody).not.toMatch(/[^`]@security-team/);
+    expect(commentBody).toContain("`@security-team`");
+    expect(commentBody).not.toMatch(/[^`]@security-team/);
+  });
+
+  it("mark_verified のコメントでも @mention を無害化する", async () => {
+    const ctx = makeContext({ closedIssues: [{ number: 42, title: "old bug", body: "", labels: [] }] });
+    await executeBrowserTool(
+      "mark_verified",
+      { original_issue_number: "42", original_issue_title: "old bug", note: "confirmed by @alice" },
+      ctx,
+    );
+
+    const [, commentBody] = vi.mocked(ctx.trackers.commentOnIssue).mock.calls[0];
+    expect(commentBody).toContain("`@alice`");
+    expect(commentBody).not.toMatch(/[^`]@alice/);
   });
 });
 

@@ -29,11 +29,14 @@ interface AdoptionView {
 
 type Tab = "lens" | "category" | "recent";
 
-const ADOPTED_COLOR = "#22c55e";
+// Darker than the plain "500" shade of green — this doubles as text color
+// (the ✓ mark below) on a white background, where the lighter green fails
+// WCAG AA contrast (2.3:1, need 4.5:1). Still reads fine as a bar/dot fill.
+const ADOPTED_COLOR = "#15803d";
 const REJECTED_COLOR = "#cbd5e1";
 
 function rateColor(rate: number): string {
-  return rate >= 0.7 ? "#22c55e" : rate >= 0.4 ? "#f59e0b" : "#ef4444";
+  return rate >= 0.7 ? "#15803d" : rate >= 0.4 ? "#b45309" : "#dc2626";
 }
 
 function pct(rate: number): string {
@@ -151,7 +154,7 @@ export function AdoptionPanel() {
                 <span
                   style={{
                     ...styles.mark,
-                    color: issue.resolution === "adopted" ? ADOPTED_COLOR : "#94a3b8",
+                    color: issue.resolution === "adopted" ? ADOPTED_COLOR : "#475569",
                   }}
                 >
                   {issue.resolution === "adopted" ? "✓" : "✕"}
@@ -198,7 +201,7 @@ const styles = {
   },
   pending: {
     fontSize: "0.7rem",
-    color: "#94a3b8",
+    color: "#475569",
   },
   awaiting: {
     fontSize: "0.8rem",
@@ -224,7 +227,7 @@ const styles = {
   },
   overallLabel: {
     fontSize: "0.75rem",
-    color: "#94a3b8",
+    color: "#475569",
   },
   counts: {
     display: "flex",
@@ -247,7 +250,7 @@ const styles = {
   },
   hint: {
     fontSize: "0.72rem",
-    color: "#94a3b8",
+    color: "#475569",
     lineHeight: 1.6,
     margin: "0.7rem 0 0.9rem",
   },
@@ -272,7 +275,7 @@ const styles = {
     fontWeight: 600,
   },
   tabCount: {
-    color: "#94a3b8",
+    color: "#475569",
     marginLeft: "0.2rem",
   },
   list: {
@@ -282,7 +285,7 @@ const styles = {
   },
   empty: {
     fontSize: "0.75rem",
-    color: "#94a3b8",
+    color: "#475569",
     margin: 0,
   },
   row: {
@@ -303,7 +306,7 @@ const styles = {
     textAlign: "right" as const,
   },
   rowCount: {
-    color: "#94a3b8",
+    color: "#475569",
     fontSize: "0.72rem",
     textAlign: "right" as const,
   },
@@ -334,7 +337,7 @@ const styles = {
     whiteSpace: "nowrap" as const,
   },
   recentState: {
-    color: "#94a3b8",
+    color: "#475569",
     fontSize: "0.72rem",
     marginLeft: "auto",
     whiteSpace: "nowrap" as const,

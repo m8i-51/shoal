@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 /**
  * run.ts used to call `main().catch(...)` unconditionally at module scope,
@@ -13,4 +13,31 @@ describe("run.ts import safety", () => {
     const mod = await import("../run");
     expect(typeof mod.main).toBe("function");
   }, 5000);
+});
+
+describe("handleFatalRunError", () => {
+  const originalExitCode = process.exitCode;
+
+  beforeEach(() => {
+    process.exitCode = undefined;
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    process.exitCode = originalExitCode;
+    vi.restoreAllMocks();
+  });
+
+  it("a run that never started (e.g. a browser-launch failure) exits non-zero", async () => {
+    const { handleFatalRunError } = await import("../run");
+    handleFatalRunError(new Error("Executable doesn't exist"));
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("BudgetExceededError also exits non-zero", async () => {
+    const { handleFatalRunError } = await import("../run");
+    const { BudgetExceededError } = await import("../framework/budget");
+    handleFatalRunError(new BudgetExceededError(5, 4));
+    expect(process.exitCode).toBe(1);
+  });
 });

@@ -6,6 +6,7 @@ vi.mock("../llm-retry", () => ({ createMessageWithRetry: vi.fn(), sleep: vi.fn()
 import * as fs from "fs";
 import { createMessageWithRetry } from "../llm-retry";
 import { runTriageAgent } from "../triage";
+import { neutralizeMentions } from "../mentions";
 import type { Finding } from "../types";
 import type { IssueTracker } from "../trackers/index";
 import type { LLMClient } from "../llm-client";
@@ -142,6 +143,25 @@ describe("runTriageAgent", () => {
       expect(body).toContain("/tmp/shot.png");
     });
 
+    it("LLM が書いた body 中の @mention をバッククォートで無害化する", async () => {
+      const tracker = makeTracker();
+      vi.mocked(createMessageWithRetry)
+        .mockResolvedValueOnce(toolUseResponse("create_issue", {
+          title: "t",
+          body: "cc @someone please review, also see @some-team and user@example.com",
+          category: "bug",
+          merged_finding_ids: ["f1"],
+        }) as never)
+        .mockResolvedValueOnce(endTurn() as never);
+      await runTriageAgent([makeFinding({ id: "f1" })], {} as LLMClient, "m", tracker);
+      const [, body] = vi.mocked(tracker.createIssue).mock.calls[0];
+      expect(body).toContain("cc `@someone` please review");
+      expect(body).toContain("also see `@some-team`");
+      // preceded by a word char — not a mention, must stay intact
+      expect(body).toContain("user@example.com");
+      expect(body).not.toContain("`@example`");
+    });
+
     it("title/body/category が欠けている場合はエラーを返しスキップする", async () => {
       const tracker = makeTracker();
       vi.mocked(createMessageWithRetry)
@@ -256,6 +276,22 @@ describe("runTriageAgent", () => {
       const createIssue = params.tools?.find((t) => t.name === "create_issue");
       const properties = (createIssue?.input_schema as { properties: Record<string, unknown> }).properties;
       expect(properties.edge_risk).toBeDefined();
+    });
+
+    it("edge_risk の edge / why に書かれた @mention も無害化する", async () => {
+      const tracker = makeTracker();
+      vi.mocked(createMessageWithRetry)
+        .mockResolvedValueOnce(toolUseResponse("create_issue", {
+          title: "Add a mouse path", body: "b", category: "ux", merged_finding_ids: ["f1"],
+          edge_risk: { edge: "Ask @security-team", why: "Paging @alice makes the keyboard flow optional" },
+        }) as never)
+        .mockResolvedValueOnce(endTurn() as never);
+      await runTriageAgent([makeFinding({ id: "f1" })], {} as LLMClient, "m", tracker, undefined, edge);
+      const [, body] = vi.mocked(tracker.createIssue).mock.calls[0];
+      expect(body).toContain("`@security-team`");
+      expect(body).toContain("`@alice`");
+      expect(body).not.toMatch(/[^`]@security-team/);
+      expect(body).not.toMatch(/[^`]@alice/);
     });
 
     it("edge_risk 付きの issue は edge-risk ラベルと判断材料セクションを持つ", async () => {
@@ -397,5 +433,31 @@ describe("runTriageAgent", () => {
       expect(result.skips[0].findingId).toBe("f1");
       expect(result.skips[0].reason).toContain("Checkout still broken");
     });
+  });
+});
+
+describe("neutralizeMentions", () => {
+  it("@word をバッククォートで囲む", () => {
+    expect(neutralizeMentions("hey @alice check this")).toBe("hey `@alice` check this");
+  });
+
+  it("文頭の @mention も検出する", () => {
+    expect(neutralizeMentions("@bob take a look")).toBe("`@bob` take a look");
+  });
+
+  it("ハイフンやアンダースコアを含む GitHub チームメンションにも対応する", () => {
+    expect(neutralizeMentions("cc @some_team and @some-team")).toBe("cc `@some_team` and `@some-team`");
+  });
+
+  it("メールアドレスの @ は無視する（直前が単語文字）", () => {
+    expect(neutralizeMentions("contact user@example.com for help")).toBe("contact user@example.com for help");
+  });
+
+  it("既にバッククォートで囲まれた @mention は二重に囲まない", () => {
+    expect(neutralizeMentions("see `@already`")).toBe("see `@already`");
+  });
+
+  it("@ を含まない文字列はそのまま返す", () => {
+    expect(neutralizeMentions("no mentions here")).toBe("no mentions here");
   });
 });

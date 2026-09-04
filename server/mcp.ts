@@ -16,7 +16,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { spawn } from "child_process";
 import { fileURLToPath } from "url";
-import { spawnRun, activeSessions } from "./runner.js";
+import { spawnRun, activeSessions, hasActiveRun } from "./runner.js";
 import { listRuns } from "./runs.js";
 import { computeExperienceScore } from "../framework/experience-score.js";
 import { isFinding, type Finding } from "../framework/types.js";
@@ -39,6 +39,9 @@ export function handleStartRun(input: {
 }): { runId: string; note: string } {
   if (input.mode !== undefined && !["read-only", "safe", "full"].includes(input.mode)) {
     throw new Error("mode must be one of: read-only, safe, full");
+  }
+  if (hasActiveRun()) {
+    throw new Error("a run is already in progress");
   }
   const runId = spawnRun(input);
   return {

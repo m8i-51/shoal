@@ -428,7 +428,7 @@ Guidelines for output_spec:
         const pathArg = input.path as string | undefined;
         if (!pathArg) return "navigate_and_read: missing path";
         try {
-          await page.goto(`${baseUrl}${pathArg}`, { waitUntil: "networkidle", timeout: 10000 });
+          await page.goto(`${baseUrl}${pathArg}`, { waitUntil: "load", timeout: 10000 });
           await page.waitForTimeout(500);
           const [text, aria] = await Promise.all([
             page.evaluate(() => document.body.innerText.slice(0, 1500)),

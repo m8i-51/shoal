@@ -76,14 +76,26 @@ export function SchedulePanel() {
         </button>
       </div>
 
-      <div style={{ ...styles.fields, opacity: config.enabled ? 1 : 0.4, pointerEvents: config.enabled ? "auto" : "none" }}>
+      {/*
+        Dimming the whole group via opacity used to leave keyboard-focusable,
+        screen-reader-visible controls — and their labels — with unreadable
+        (sub-2:1) contrast while disabled. `disabled` on each control does
+        what opacity+pointerEvents couldn't: it pulls the control out of the
+        tab order and screen-reader interaction (which is also why native
+        disabled controls are exempt from the contrast check they were
+        failing) and lets the browser render its own disabled affordance.
+        Opacity now only dims the controls themselves, never the field labels,
+        so "Day" / "Time" stay fully readable even while the schedule is off.
+      */}
+      <div style={styles.fields}>
         <div style={styles.field}>
           <label style={styles.label}>{t("schedule.dayLabel")}</label>
-          <div style={styles.dayRow}>
+          <div style={{ ...styles.dayRow, opacity: config.enabled ? 1 : 0.5 }}>
             {days.map((d, i) => (
               <button
                 key={i}
                 onClick={() => patch({ dayOfWeek: i })}
+                disabled={!config.enabled}
                 style={{ ...styles.dayBtn, background: config.dayOfWeek === i ? "#6366f1" : "#1f2937" }}
               >
                 {d}
@@ -94,14 +106,16 @@ export function SchedulePanel() {
 
         <div style={styles.field}>
           <label style={styles.label}>{t("schedule.timeLabel")}</label>
-          <div style={styles.timeRow}>
+          <div style={{ ...styles.timeRow, opacity: config.enabled ? 1 : 0.5 }}>
             <input
               type="number"
               min={0}
               max={23}
               value={config.hour}
               onChange={(e) => patch({ hour: parseInt(e.target.value) || 0 })}
+              disabled={!config.enabled}
               style={styles.timeInput}
+              aria-label={t("schedule.hourLabel")}
             />
             <span style={styles.colon}>:</span>
             <input
@@ -110,7 +124,9 @@ export function SchedulePanel() {
               max={59}
               value={String(config.minute).padStart(2, "0")}
               onChange={(e) => patch({ minute: parseInt(e.target.value) || 0 })}
+              disabled={!config.enabled}
               style={styles.timeInput}
+              aria-label={t("schedule.minuteLabel")}
             />
           </div>
         </div>

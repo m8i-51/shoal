@@ -159,6 +159,13 @@ describe("estimateCost — Bedrock", () => {
   it("不明モデルは null", async () => {
     expect(await estimateCost("anthropic.claude-unknown-v99:0", "bedrock", 1000, 500)).toBeNull();
   });
+
+  it("短いモデル ID はより長い表のキーを盗まない（opus-4 ≠ opus-4-8）", async () => {
+    // 旧実装は `k.startsWith(id)` だったので anthropic.claude-opus-4 が
+    // anthropic.claude-opus-4-8-v1（input $5）に先に当たっていた。
+    const cost = await estimateCost("anthropic.claude-opus-4", "bedrock", 1_000_000, 0);
+    expect(cost).toBeCloseTo(15, 5);
+  });
 });
 
 describe("estimateCost — OpenAI", () => {
@@ -175,6 +182,18 @@ describe("estimateCost — OpenAI", () => {
 
   it("不明モデルは null", async () => {
     expect(await estimateCost("gpt-unknown", "openai", 1000, 500)).toBeNull();
+  });
+
+  it("最長一致 — gpt-4o-mini-2024-07-18 は gpt-4o ではなく gpt-4o-mini の料金になる", async () => {
+    // gpt-4o-mini-2024-07-18 は "gpt-4o" にも "gpt-4o-mini" にも前方一致するが、
+    // より長く一致する gpt-4o-mini（安い方）が優先されるべき
+    const cost = await estimateCost("gpt-4o-mini-2024-07-18", "openai", 1_000_000, 1_000_000);
+    expect(cost).toBeCloseTo(0.75, 5); // gpt-4o-mini の料金（gpt-4o の 20 ではない）
+  });
+
+  it("o1-mini-2024-09-12 は o1 ではなく o1-mini の料金になる", async () => {
+    const cost = await estimateCost("o1-mini-2024-09-12", "openai", 1_000_000, 1_000_000);
+    expect(cost).toBeCloseTo(15, 5); // o1-mini: 3 + 12 = 15（o1 の 75 ではない）
   });
 });
 

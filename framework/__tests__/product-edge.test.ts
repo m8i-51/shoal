@@ -118,6 +118,17 @@ describe("formatEdgeRiskSection", () => {
     expect(section).toContain("**Edge at stake:** Keyboard-first");
     expect(section).toContain("A mouse path would blunt it");
   });
+
+  it("LLM が書いた edge / why の @mention を無害化する", () => {
+    const section = formatEdgeRiskSection({
+      edge: "Ask @security-team first",
+      why: "Paging @alice would blunt the edge",
+    });
+    expect(section).toContain("`@security-team`");
+    expect(section).toContain("`@alice`");
+    expect(section).not.toMatch(/[^`]@security-team/);
+    expect(section).not.toMatch(/[^`]@alice/);
+  });
 });
 
 describe("EDGE_RISK_LABEL", () => {

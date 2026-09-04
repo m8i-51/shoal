@@ -17,7 +17,8 @@
     "findings": "Findings",
     "agents": "Agents",
     "cost": "Cost",
-    "actions": ""
+    "actions": "",
+    "actionsLabel": "Actions"
   },
   "status": {
     "completed": "Completed",
@@ -55,6 +56,7 @@
     "close": "Close",
     "advanced": "Advanced",
     "llmBaseUrl": "LLM Base URL",
+    "llmBaseUrlHint": "API Key is required when a custom endpoint is set — it is sent only to this URL, never to your own configured provider.",
     "llmModel": "Model",
     "llmApiKey": "API Key",
     "mode": "Safety mode",
@@ -62,7 +64,7 @@
     "modeSafe": "safe — test data only (recommended)",
     "modeFull": "full — no restrictions",
     "modeHint": {
-      "read-only": "All writes are blocked at the network layer. For observing production.",
+      "read-only": "All writes are blocked at the network layer. Only means shoal won't write to your app — everything agents read is still sent to the LLM provider.",
       "safe": "Creating/editing data is allowed; irreversible actions (delete / pay / send) are avoided.",
       "full": "No restrictions. Use only against disposable environments."
     },
@@ -79,6 +81,8 @@
     "disabled": "Auto-run disabled",
     "dayLabel": "Day",
     "timeLabel": "Time (server local)",
+    "hourLabel": "Hour",
+    "minuteLabel": "Minute",
     "days": [
       "Sun",
       "Mon",

@@ -12,6 +12,185 @@ to `0.1.20` or earlier, so those releases are not separately documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **Retention for run artifacts.** `logs/screenshots/run_*` and
+  `logs/traces/run_*` accumulated one directory per run forever, with nothing
+  to clean them up. Every run now prunes directories older than
+  `SHOAL_RETENTION_DAYS` (default 30, `0` disables it — a typo or
+  out-of-range value warns and falls back to 30) at startup and logs how
+  many it removed. Findings JSON, report HTML, and run logs are untouched.
+
+### Fixed
+
+- **Every navigation could hang for 30s on a page holding an open
+  SSE/WebSocket connection.** Every `page.goto()` shoal issues — the
+  `navigate` browser tool, agent session start, account-manager login/nav,
+  product discovery — waited for `networkidle`, which never fires while a
+  long-lived connection (an `EventSource`, a live-updating dashboard) keeps at
+  least one network exchange open. Switched all of them to `waitUntil: "load"`
+  with a 15s timeout (product discovery keeps its existing 10s timeout); the
+  settle delays after each navigation (`RUN_TIMINGS.afterNavigateMs`, etc.)
+  are unchanged.
+- **A fatally failed run exited with code 0.** `main().catch(...)` in `run.ts`
+  only set a non-zero exit code for `BudgetExceededError`; any other error
+  (a browser-launch failure, a config error — anything that meant the run
+  never actually started) was logged and the process still exited 0. That
+  made the run indistinguishable from success to anything watching the exit
+  code — the weekly workflow and `SHOAL_BENCH_MIN` gate previously could not
+  detect a run that never started. `triage-only.ts` had the same gap.
+  Both now set `process.exitCode = 1` on any fatal error.
+- **`shoal serve` dying left orphaned swarms and "ghost" running runs.** The
+  server had no `SIGTERM`/`SIGINT` handler, so killing it (a container
+  restart, a deploy) left the spawned `run.ts` child process — and the real
+  browser it launched — running with nobody watching it, and its
+  `running_<id>.json` behind, which `listRuns()` took at face value and kept
+  reporting that run as live forever after. The server now forwards
+  `SIGTERM`/`SIGINT` to every unfinished session's child and waits up to 5s
+  for those children to exit (SIGKILL after 4s) before `process.exit`, so
+  the kill timer is not cancelled out from under the swarm. The child's pid
+  is recorded in `running_<id>.json`, and `listRuns()` checks that pid's
+  liveness — a dead pid is unlinked and no longer reported as running.
+  `running_<id>.json` files from before this fix have no pid and keep the
+  previous behaviour.
+- **The dashboard failed shoal's own accessibility audit.** Running
+  `framework/a11y-audit.ts` against the served dashboard found 11 violation
+  types across `/`, `/hall`, and `/runs/:id`: unlabelled schedule hour/minute
+  inputs, an empty table header, missing `<main>`/heading structure (no `<h1>`
+  on the run detail page, a heading level skipped on the Hall page), and
+  widespread text failing WCAG AA contrast (the muted secondary-text colour,
+  several category/status badges, and disabled schedule controls that stayed
+  focusable and readable at 40% opacity instead of being marked `disabled`).
+  Fixed all of them — the same audit now reports zero violations on all three
+  pages. Also removed five `outline: none` rules that left keyboard focus
+  invisible on form controls with nothing in its place, replaced by one
+  `:focus-visible` rule. The standalone HTML report (`framework/report.ts`,
+  the artifact actually shared and opened outside the dashboard) had the
+  same white-on-badge contrast problem in every one of its badge colours —
+  category, finding/agent status, scenario/lens tags, and regression
+  outcomes — and is now darkened to match, reusing the dashboard's category
+  colours where the category is the same. Its foreground text colours had
+  the identical problem — muted gray captions, the amber/green/red status and
+  score text, and the violet scenario-ID label all fell below 4.5:1 against
+  the backgrounds they actually render on (white cards, the light table
+  header, the dark category bar) — and are now darkened the same way,
+  checked pair-by-pair against their real background rather than assumed
+  against plain white. `header .meta`, already correct as light text on the
+  report's dark header bar, is untouched. Text inside a skipped finding card
+  stays as-is: `.finding.skipped`'s reduced opacity is a deliberate
+  de-emphasis this audit doesn't try to override.
+- **Bench scoring matched keywords as bare substrings.** `findingMatchesLabel`
+  used `text.includes(keyword)`, so an unrelated finding ("Although the page
+  loads quickly... Totally fine otherwise.") was counted as detecting
+  `missing-alt-text` (`alt` ⊂ `Although`) and `cart-total-wrong` (`total` ⊂
+  `Totally`). Matching now requires word boundaries around each keyword
+  (multi-word keywords like "no login" still match as a phrase). That
+  boundary requirement in turn broke every keyword in `bench/labels.json`
+  and `bench/labels-forms.json` that was a deliberate word *stem* relying on
+  substring matching to catch several inflected forms at once —
+  `"miscalculat"` (meant to catch "miscalculated"/"miscalculation"),
+  `"auth"` ("authentication"), `"sum"` ("sums"), `"confirm"`
+  ("confirmation"), `"label"` ("labels"), and `"stack trace"` ("stack
+  traces") — so those labels are now spelled out as the actual word forms
+  instead. Added `precision` (matched findings / total findings, `null` —
+  printed as "n/a", omitted from `bench/scores.json` — for a run with zero
+  findings rather than a misleading 0%) alongside the existing
+  `unmatchedFindings`, recorded in `bench/scores.json` entries and shown in
+  the README's published-scores table; the one existing row predates both the
+  boundary fix and these fields, so its new columns read "—" with a footnote.
+- **`framework/cost.ts` priced OpenAI models by exact match only.**
+  `gpt-4o-mini-2024-07-18` (a dated snapshot) matched nothing and was priced
+  as unknown (excluded from `SHOAL_MAX_USD` accounting) instead of falling
+  back to `gpt-4o-mini`, the way the Anthropic pricing table already falls
+  back for dated Claude model IDs. OpenAI, Anthropic, and Bedrock now share
+  one longest-prefix lookup, so the most specific matching entry always wins
+  regardless of key order. Bedrock previously used the first table key that
+  *either* prefixed or was prefixed by the model id, so a short id like
+  `anthropic.claude-opus-4` could steal `anthropic.claude-opus-4-8` pricing.
+- **A browser agent's system prompt said "finish after 8-10 actions" no
+  matter what `SHOAL_BROWSER_ITERATIONS` / `SHOAL_THRESHOLD_ITERATIONS` were
+  actually set to** (default 12). Both prompts now interpolate the real turn
+  budget.
+- **Starting a second run while one was already in progress** silently
+  spawned a second `run.ts` child process competing for the same browser and
+  `logs/`/`findings/` files. `POST /api/runs/start` now returns 409, and the
+  `start_run` MCP tool now throws, while another run is still active. The
+  weekly scheduler had the same gap — it fires unattended, so it is the
+  likeliest way to hit this — and now skips the scheduled run with a log
+  line when one is already active, recording `pendingDate` for today so a
+  later tick the same day retries once the in-flight run finishes, rather
+  than missing the week because a swarm outlasts the two-minute fire window.
+- **An LLM-written issue body or comment could `@mention` a real GitHub user
+  or team.** Every path that hands model-written text to a tracker now wraps
+  `@word` in backticks: triage `create_issue` (the body *and* the `edge_risk`
+  edge/why fields), returning-user re-report comments, and the regression
+  agent's `report_regression` / `mark_verified` (issue body, comment, and
+  the original issue title interpolated into the new issue body). A mention
+  in a comment on an existing issue notifies every subscriber of that issue,
+  not just the mentioned account. Issue titles themselves are left alone —
+  GitHub renders them as plain text and does not notify on a mention there.
+- `schedule.json` (written by the dashboard scheduler to the working
+  directory) is now gitignored.
+
+### Security
+
+- **`safe` mode's destructive-click guard was English-only.** `DESTRUCTIVE_CLICK_PATTERNS`
+  only matched English phrasing, so a Japanese UI (`削除`, `購入する`) passed straight
+  through the click-level guard in `safe` mode. Added a matching set of Japanese
+  patterns (delete, purchase, payment, cancellation, unrecoverable actions, etc.,
+  deliberately excluding a bare `送信` so ordinary form submits still work), plus
+  `SHOAL_DESTRUCTIVE_PATTERNS` so operators can append their own regexes — invalid
+  entries are skipped with a warning rather than crashing the run.
+- **A dashboard token holder could exfiltrate the operator's LLM API key.**
+  `POST /api/runs/start` accepted a caller-supplied `llmBaseUrl` while the
+  spawned run inherited the server's own `LLM_API_KEY`/`OPENAI_API_KEY` from
+  its environment, and the OpenAI-compatible client sent that inherited key
+  as a Bearer token to whatever URL the caller supplied — pointing
+  `llmBaseUrl` at an attacker-controlled server leaked the operator's real
+  key. `llmBaseUrl` without `llmApiKey` is now rejected with 400, and
+  whenever `llmBaseUrl` is set, the spawned run's environment has the
+  server's own `LLM_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+  `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN`,
+  `LLM_BASE_URL`, and `LLM_PROVIDER` stripped before the caller's own
+  values are applied, so only the caller's key can ever reach the caller's
+  URL. Tracker tokens stay — the child still has to file issues.
+- **The run-detail report `<iframe>` had no `sandbox`.** `framework/report.ts`
+  generates plain HTML with no `<script>`, so the frame now gets `sandbox=""`
+  — no script capability, and critically, never `allow-same-origin`.
+- **Playwright traces held typed passwords in plaintext.** `tracing.start({
+  snapshots: true })` records every value a `fill()` writes into the page —
+  including a password typed during login — inside `trace.trace` /
+  `*.network` entries of the saved zip, even though redact.ts already masked
+  the same value in console output, run JSON, and the HTML report. Every
+  trace zip (each lane's full-session trace and each finding's trace chunk)
+  is now scrubbed in place immediately after it is written: known test-account
+  passwords and target credentials are registered up front, and any value
+  typed into a field detected as a password is added as it happens. A scrub
+  failure only logs a warning and never fails the run.
+- **"read-only — safe to point at production" undersold what still leaves the
+  machine.** `SHOAL_MODE=read-only` only blocks writes to the target app —
+  everything agents read (page text, accessibility tree, console/network
+  output, screenshots) is still sent to the configured LLM provider. Reworded
+  the safety-mode docs (README, README_JA, SECURITY.md, `.env.example`, the
+  dashboard's start-dialog hint) to say so, and added a
+  [What is sent to the LLM provider](SECURITY.md#what-is-sent-to-the-llm-provider)
+  section spelling out exactly what leaves the machine and what controls
+  where it goes.
+
+### Changed
+
+- **`@anthropic-ai/claude-agent-sdk` was a hard dependency for everyone, used
+  only by `LLM_PROVIDER=claude-cli`.** It is ~200MB of a ~378MB production
+  install (measured with `npm pack` + `npm install --omit=dev`) and carries
+  Anthropic's own licence, not an OSI-approved one ("SEE LICENSE IN
+  README.md"). It is now an optional `peerDependency` (kept in
+  `devDependencies` too, so tests and local dev are unaffected) and is
+  imported dynamically only when `runClaudeCliSession` actually runs; every
+  other provider now installs without it. A measured production install
+  dropped from 378MB to 168MB. Using `claude-cli` without the package
+  installed now fails with a clear message telling you to
+  `npm install @anthropic-ai/claude-agent-sdk`.
+
 ## [0.2.1] — 2026-09-03
 
 ### Added

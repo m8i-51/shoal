@@ -35,7 +35,9 @@ interface SiteMapDashboardView {
 type Tab = "unvisited" | "thin" | "all";
 
 function exploredColor(rate: number): string {
-  return rate >= 0.7 ? "#22c55e" : rate >= 0.4 ? "#f59e0b" : "#ef4444";
+  // Darker than the plain "500" shade — this is text color on a white
+  // background, where the lighter shades fail WCAG AA contrast.
+  return rate >= 0.7 ? "#15803d" : rate >= 0.4 ? "#b45309" : "#dc2626";
 }
 
 function statusColor(status: PathStatus): string {
@@ -247,7 +249,7 @@ const styles = {
   },
   updatedAt: {
     fontSize: "0.7rem",
-    color: "#94a3b8",
+    color: "#475569",
   },
   empty: {
     padding: "0.5rem 0",
@@ -260,7 +262,7 @@ const styles = {
   },
   emptyHint: {
     fontSize: "0.8rem",
-    color: "#94a3b8",
+    color: "#475569",
     margin: 0,
   },
   summaryRow: {
@@ -355,7 +357,7 @@ const styles = {
   },
   meta: {
     fontSize: "0.72rem",
-    color: "#94a3b8",
+    color: "#475569",
     whiteSpace: "nowrap" as const,
   },
   badge: {
@@ -371,6 +373,6 @@ const styles = {
     padding: "0.75rem",
     margin: 0,
     fontSize: "0.8rem",
-    color: "#94a3b8",
+    color: "#475569",
   },
 } as const;

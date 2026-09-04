@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../api";
+import { CATEGORY_COLOR } from "../utils/format";
 
 interface HallFinding {
   id: string;
@@ -25,13 +26,6 @@ interface ExportBundle {
 }
 
 type CategoryFilter = "all" | "bug" | "ux" | "feature-request" | "goal-gap";
-
-const CAT_COLOR: Record<string, string> = {
-  bug: "#ef4444",
-  ux: "#f97316",
-  "feature-request": "#3b82f6",
-  "goal-gap": "#8b5cf6",
-};
 
 export function Hall() {
   const { t } = useTranslation();
@@ -145,8 +139,8 @@ export function Hall() {
               style={{
                 ...styles.filterBtn,
                 ...(category === cat ? styles.filterBtnActive : {}),
-                ...(cat !== "all" && CAT_COLOR[cat]
-                  ? { borderColor: category === cat ? CAT_COLOR[cat] : "transparent", color: category === cat ? CAT_COLOR[cat] : "#64748b" }
+                ...(cat !== "all" && CATEGORY_COLOR[cat]
+                  ? { borderColor: category === cat ? CATEGORY_COLOR[cat] : "transparent", color: category === cat ? CATEGORY_COLOR[cat] : "#64748b" }
                   : {}),
               }}
               onClick={() => setCategory(cat)}
@@ -274,7 +268,7 @@ function FindingCard({
   onRunClick?: () => void;
 }) {
   const { t } = useTranslation();
-  const color = CAT_COLOR[finding.category] ?? "#6b7280";
+  const color = CATEGORY_COLOR[finding.category] ?? "#6b7280";
   const date = new Date(finding.timestamp).toLocaleDateString("ja-JP");
   const [expanded, setExpanded] = useState(false);
   const bodyPreview = finding.body.length > 160 ? finding.body.slice(0, 160) + "…" : finding.body;
@@ -298,7 +292,7 @@ function FindingCard({
           <span style={styles.metaDate}>{date}</span>
         </div>
       </div>
-      <h3 style={styles.cardTitle}>{finding.title}</h3>
+      <h2 style={styles.cardTitle}>{finding.title}</h2>
       <p style={styles.cardBody}>{expanded ? finding.body : bodyPreview}</p>
       {finding.body.length > 160 && (
         <span style={styles.expandHint}>{expanded ? "▲" : "▼"}</span>
@@ -352,7 +346,7 @@ const styles = {
   },
   subtitle: {
     fontSize: "0.75rem",
-    color: "#94a3b8",
+    color: "#475569",
   },
   headerActions: {
     display: "flex",
@@ -361,7 +355,7 @@ const styles = {
   },
   totalCount: {
     fontSize: "0.75rem",
-    color: "#94a3b8",
+    color: "#475569",
     fontFamily: "monospace",
   },
   exportBtn: {
@@ -389,7 +383,6 @@ const styles = {
     borderRadius: "8px",
     padding: "6px 12px",
     fontSize: "0.875rem",
-    outline: "none",
     color: "#1e293b",
     background: "#f8fafc",
   },
@@ -428,7 +421,6 @@ const styles = {
     borderRadius: "6px",
     padding: "5px 10px",
     fontSize: "0.8rem",
-    outline: "none",
     color: "#475569",
     background: "#fff",
     fontFamily: "monospace",
@@ -445,12 +437,12 @@ const styles = {
   },
   importError: {
     fontSize: "0.75rem",
-    color: "#ef4444",
+    color: "#dc2626",
   },
   importedBadge: {
     fontSize: "0.7rem",
     fontWeight: 700,
-    color: "#8b5cf6",
+    color: "#7c3aed",
     background: "#ede9fe",
     borderRadius: "10px",
     padding: "2px 8px",
@@ -465,7 +457,7 @@ const styles = {
   },
   empty: {
     textAlign: "center" as const,
-    color: "#94a3b8",
+    color: "#475569",
     fontSize: "0.875rem",
     padding: "3rem 0",
   },
@@ -501,7 +493,7 @@ const styles = {
   runLink: {
     background: "transparent",
     border: "none",
-    color: "#3b82f6",
+    color: "#2563eb",
     fontSize: "0.7rem",
     fontFamily: "monospace",
     cursor: "pointer",
@@ -510,7 +502,7 @@ const styles = {
   },
   importedTag: {
     fontSize: "0.65rem",
-    color: "#8b5cf6",
+    color: "#7c3aed",
     fontFamily: "monospace",
   },
   metaSep: {
@@ -519,7 +511,7 @@ const styles = {
   },
   metaDate: {
     fontSize: "0.7rem",
-    color: "#94a3b8",
+    color: "#475569",
   },
   cardTitle: {
     fontSize: "0.9rem",
@@ -564,12 +556,12 @@ const styles = {
   },
   duplicatesSubtitle: {
     fontSize: "0.75rem",
-    color: "#94a3b8",
+    color: "#475569",
     flex: 1,
   },
   duplicatesHint: {
     fontSize: "0.75rem",
-    color: "#94a3b8",
+    color: "#475569",
   },
   duplicatesList: {
     display: "flex",

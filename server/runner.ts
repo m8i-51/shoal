@@ -68,14 +68,34 @@ export function spawnRun(opts: {
 
   // running_*.json で実行中フラグをディスクに残す
   const pendingPath = join(logsDir, `running_${sessionId}.json`);
-  writeFileSync(pendingPath, JSON.stringify({ runId: sessionId, startedAt: session.startedAt }));
 
   const tsxBin = join(packageRoot, "node_modules", ".bin", "tsx");
   const bin = existsSync(tsxBin) ? tsxBin : "tsx";
   const script = join(packageRoot, "run.ts");
 
+  const baseEnv: NodeJS.ProcessEnv = { ...process.env };
+  if (opts.llmBaseUrl) {
+    // A caller-supplied llmBaseUrl must never be able to see the operator's
+    // own LLM credentials. Without this, the child would inherit the server's
+    // keys and — for the OpenAI-compat path — send LLM_API_KEY/OPENAI_API_KEY
+    // as a Bearer token to whatever URL the caller supplied. Strip every
+    // provider credential the child could use, not just the two OpenAI-compat
+    // keys: ANTHROPIC_API_KEY is the default-provider secret, and AWS_* are
+    // what Bedrock reads from the environment. Tracker tokens stay; the child
+    // still has to file issues. Only the caller's own key (required alongside
+    // llmBaseUrl by the caller) is then written back below.
+    delete baseEnv.LLM_API_KEY;
+    delete baseEnv.OPENAI_API_KEY;
+    delete baseEnv.ANTHROPIC_API_KEY;
+    delete baseEnv.AWS_ACCESS_KEY_ID;
+    delete baseEnv.AWS_SECRET_ACCESS_KEY;
+    delete baseEnv.AWS_SESSION_TOKEN;
+    delete baseEnv.LLM_BASE_URL;
+    delete baseEnv.LLM_PROVIDER;
+  }
+
   const env: NodeJS.ProcessEnv = {
-    ...process.env,
+    ...baseEnv,
     SHOAL_RUN_ID: sessionId,
     ...(opts.baseUrl ? { BASE_URL: opts.baseUrl } : {}),
     ...(opts.maxBrowsers != null ? { MAX_BROWSERS: String(opts.maxBrowsers) } : {}),
@@ -93,6 +113,10 @@ export function spawnRun(opts: {
     stdio: ["ignore", "pipe", "pipe"],
   });
   session.child = child;
+
+  // pid を残しておくと、サーバー再起動後に listRuns() がこの pid の生死を確認して
+  // 死んでいる run を「実行中」と誤報告しないようにできる（server/runs.ts 参照）
+  writeFileSync(pendingPath, JSON.stringify({ runId: sessionId, startedAt: session.startedAt, pid: child.pid }));
 
   const emit = (line: string) => {
     session.lines.push(line);
@@ -134,6 +158,14 @@ export function spawnRun(opts: {
   return sessionId;
 }
 
+/** Whether a spawned run is still in flight — used to refuse starting a second one concurrently. */
+export function hasActiveRun(): boolean {
+  for (const session of activeSessions.values()) {
+    if (!session.done) return true;
+  }
+  return false;
+}
+
 export function cancelSession(sessionId: string): boolean {
   const session = activeSessions.get(sessionId);
   if (!session || session.done || !session.child) return false;
@@ -148,4 +180,40 @@ export function cancelSession(sessionId: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** SIGTERM every unfinished session. Returns the ones we actually signalled. */
+export function cancelAllSessions(): Session[] {
+  const waiting: Session[] = [];
+  for (const [sessionId, session] of activeSessions) {
+    if (session.done) continue;
+    if (cancelSession(sessionId)) waiting.push(session);
+  }
+  return waiting;
+}
+
+/**
+ * Resolves when every session has exited, or `timeoutMs` elapses — whichever
+ * comes first. Used by `shoal serve` shutdown so `process.exit` doesn't
+ * cancel the SIGKILL timer in `cancelSession` and leave the swarm running.
+ */
+export function waitForSessionsToExit(sessions: Session[], timeoutMs = 5000): Promise<void> {
+  if (sessions.length === 0) return Promise.resolve();
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(done, timeoutMs);
+    const onDone = () => {
+      if (sessions.every((s) => s.done)) done();
+    };
+    for (const session of sessions) {
+      if (!session.done) session.doneListeners.push(onDone);
+    }
+    onDone();
+  });
 }

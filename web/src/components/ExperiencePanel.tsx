@@ -18,7 +18,10 @@ interface ExperienceScore {
 }
 
 function scoreColor(score: number): string {
-  return score >= 70 ? "#22c55e" : score >= 40 ? "#f59e0b" : "#ef4444";
+  // Darker than the usual green/amber/red "500" shade — this is used as text
+  // color on a white background, where the lighter shades fail WCAG AA
+  // contrast (2.2-2.6:1, need 4.5:1).
+  return score >= 70 ? "#15803d" : score >= 40 ? "#b45309" : "#dc2626";
 }
 
 function Sparkline({ trend }: { trend: RunExperience[] }) {
@@ -74,7 +77,7 @@ export function ExperiencePanel() {
           <span style={{ ...styles.score, color: scoreColor(latest.score) }}>{latest.score}</span>
           <span style={styles.scoreMax}>/100</span>
           {delta != null && (
-            <span style={{ ...styles.delta, color: delta > 0 ? "#22c55e" : delta < 0 ? "#ef4444" : "#94a3b8" }}>
+            <span style={{ ...styles.delta, color: delta > 0 ? "#15803d" : delta < 0 ? "#dc2626" : "#475569" }}>
               {delta > 0 ? `▲${delta}` : delta < 0 ? `▼${Math.abs(delta)}` : "±0"}
             </span>
           )}
@@ -125,7 +128,7 @@ const styles = {
   },
   runCount: {
     fontSize: "0.7rem",
-    color: "#94a3b8",
+    color: "#475569",
   },
   body: {
     display: "flex",
@@ -145,7 +148,7 @@ const styles = {
   },
   scoreMax: {
     fontSize: "0.8rem",
-    color: "#94a3b8",
+    color: "#475569",
   },
   delta: {
     fontSize: "0.85rem",

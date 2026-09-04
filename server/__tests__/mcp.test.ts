@@ -6,7 +6,17 @@ vi.mock("path", async (importOriginal) => {
   const actual = await importOriginal<typeof import("path")>();
   return { ...actual, join: (...args: string[]) => args.join("/"), resolve: (...args: string[]) => args.join("/"), dirname: (p: string) => p };
 });
-vi.mock("../runner.js", () => ({ activeSessions: new Map(), spawnRun: vi.fn(() => "run_123") }));
+vi.mock("../runner.js", () => {
+  const activeSessions = new Map<string, { done: boolean }>();
+  return {
+    activeSessions,
+    spawnRun: vi.fn(() => "run_123"),
+    hasActiveRun: vi.fn(() => {
+      for (const s of activeSessions.values()) if (!s.done) return true;
+      return false;
+    }),
+  };
+});
 vi.mock("../runs.js", () => ({ listRuns: vi.fn(() => []) }));
 vi.mock("../../framework/experience-score.js", () => ({ computeExperienceScore: vi.fn(() => null) }));
 
@@ -69,6 +79,13 @@ describe("handleStartRun", () => {
 
   it("不正な mode は例外を投げる", () => {
     expect(() => handleStartRun({ mode: "yolo" })).toThrow(/mode must be/);
+  });
+
+  it("既に実行中の run があれば例外を投げ spawnRun を呼ばない", () => {
+    activeSessions.set("run_running", makeSession({ sessionId: "run_running", done: false }));
+    vi.mocked(spawnRun).mockClear();
+    expect(() => handleStartRun({ baseUrl: "http://localhost:3000" })).toThrow(/already in progress/);
+    expect(spawnRun).not.toHaveBeenCalled();
   });
 });
 

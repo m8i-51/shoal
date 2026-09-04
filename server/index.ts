@@ -8,7 +8,7 @@ import { existsSync, readFileSync, writeFileSync, readdirSync } from "fs";
 import { listRuns, getReportPath } from "./runs.js";
 import { buildTriageView } from "./triage-view.js";
 import { buildAdoptionView } from "./adoption-view.js";
-import { activeSessions, spawnRun, cancelSession } from "./runner.js";
+import { activeSessions, spawnRun, cancelSession, hasActiveRun, cancelAllSessions, waitForSessionsToExit } from "./runner.js";
 import { loadSchedule, saveSchedule, startScheduler, type ScheduleConfig } from "./scheduler.js";
 import { generateDiary, getDiaryPath } from "../framework/diary.js";
 import { findCrossRunDuplicates } from "../framework/cross-run-dedup.js";
@@ -494,6 +494,19 @@ app.post("/api/runs/start", (req, res) => {
     res.status(400).json({ error: "maxBrowsers, maxExplorers, and maxThresholds must be integers between 0 and 8" });
     return;
   }
+  if (hasActiveRun()) {
+    res.status(409).json({ error: "a run is already in progress" });
+    return;
+  }
+  if (llmBaseUrl && !llmApiKey) {
+    // Without this, the child process would fall back to the server's own
+    // inherited LLM_API_KEY/OPENAI_API_KEY and send it as a Bearer token to
+    // whatever URL the caller supplied — a dashboard token holder could
+    // exfiltrate the operator's API key by pointing llmBaseUrl at their own
+    // server. Require the caller to bring their own key with a custom endpoint.
+    res.status(400).json({ error: "llmApiKey is required when llmBaseUrl is set" });
+    return;
+  }
   const sessionId = spawnRun({ baseUrl, maxBrowsers, maxExplorers, maxThresholds, mode, llmBaseUrl, llmApiKey, llmModel });
   res.json({ sessionId });
 });
@@ -603,12 +616,19 @@ app.get("/api/schedule", (_req, res) => {
 app.patch("/api/schedule", (req, res) => {
   const current = loadSchedule();
   const { enabled, dayOfWeek, hour, minute } = req.body as Partial<ScheduleConfig>;
+  const nextDay = dayOfWeek != null && Number.isInteger(dayOfWeek) && dayOfWeek >= 0 && dayOfWeek <= 6 ? dayOfWeek : current.dayOfWeek;
+  const nextHour = hour != null && Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : current.hour;
+  const nextMinute = minute != null && Number.isInteger(minute) && minute >= 0 && minute <= 59 ? minute : current.minute;
+  const clockChanged = nextDay !== current.dayOfWeek || nextHour !== current.hour || nextMinute !== current.minute;
   const updated: ScheduleConfig = {
     ...current,
     ...(enabled != null ? { enabled: Boolean(enabled) } : {}),
-    ...(dayOfWeek != null && Number.isInteger(dayOfWeek) && dayOfWeek >= 0 && dayOfWeek <= 6 ? { dayOfWeek } : {}),
-    ...(hour != null && Number.isInteger(hour) && hour >= 0 && hour <= 23 ? { hour } : {}),
-    ...(minute != null && Number.isInteger(minute) && minute >= 0 && minute <= 59 ? { minute } : {}),
+    dayOfWeek: nextDay,
+    hour: nextHour,
+    minute: nextMinute,
+    // A pending retry was scheduled against the old clock; drop it so a
+    // reschedule doesn't fire the leftover at the new time's next tick.
+    ...(clockChanged ? { pendingDate: null } : {}),
   };
   saveSchedule(updated);
   res.json(updated);
@@ -670,4 +690,22 @@ if (process.env.NODE_ENV !== "test") {
     console.log("");
     startScheduler();
   });
+
+  // shoal serve dying without forwarding the signal orphaned any in-flight
+  // swarm's browser/tsx process, and left its running_*.json behind so
+  // listRuns() kept reporting it as "running" forever after. Forward the
+  // signal to every unfinished session's child, then wait for them to exit
+  // (cancelSession SIGKILLs after 4s) so process.exit doesn't cancel that
+  // timer and leave the swarm running.
+  let shuttingDown = false;
+  const shutdown = async (signal: NodeJS.Signals) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    const pending = cancelAllSessions();
+    console.log(`\n[server] received ${signal}, cancelling ${pending.length} unfinished session(s)...`);
+    await waitForSessionsToExit(pending, 5000);
+    process.exit(0);
+  };
+  process.on("SIGTERM", () => { void shutdown("SIGTERM"); });
+  process.on("SIGINT", () => { void shutdown("SIGINT"); });
 }

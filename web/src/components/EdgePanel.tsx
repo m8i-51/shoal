@@ -235,12 +235,12 @@ const styles = {
   },
   hint: {
     fontSize: "0.8rem",
-    color: "#94a3b8",
+    color: "#475569",
     margin: "0 0 0.4rem",
   },
   subHint: {
     fontSize: "0.75rem",
-    color: "#94a3b8",
+    color: "#475569",
     margin: "0.5rem 0 0",
   },
   editArea: {
@@ -261,12 +261,11 @@ const styles = {
     border: "1px solid #cbd5e1",
     borderRadius: "5px",
     color: "#1e293b",
-    outline: "none",
   },
   removeBtn: {
     background: "transparent",
     border: "none",
-    color: "#94a3b8",
+    color: "#475569",
     fontSize: "1rem",
     cursor: "pointer",
     padding: "0 4px",
@@ -276,7 +275,7 @@ const styles = {
     alignSelf: "flex-start",
     background: "transparent",
     border: "none",
-    color: "#3b82f6",
+    color: "#2563eb",
     fontSize: "0.8rem",
     fontWeight: 600,
     cursor: "pointer",

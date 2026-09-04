@@ -192,7 +192,7 @@ const styles = {
   notice: {
     flex: 1,
     padding: "2.5rem 2rem",
-    color: "#94a3b8",
+    color: "#475569",
     fontSize: "0.85rem",
     textAlign: "center" as const,
   },
@@ -243,7 +243,7 @@ const styles = {
   },
   sectionHint: {
     fontSize: "0.75rem",
-    color: "#94a3b8",
+    color: "#475569",
     margin: "0 0 0.6rem",
   },
   issue: {
@@ -314,7 +314,7 @@ const styles = {
   },
   mergedHead: {
     fontSize: "0.7rem",
-    color: "#94a3b8",
+    color: "#475569",
     marginTop: "0.7rem",
   },
   mergedList: {
@@ -331,12 +331,12 @@ const styles = {
     marginRight: "0.4rem",
   },
   mergedAgent: {
-    color: "#94a3b8",
+    color: "#475569",
     fontSize: "0.75rem",
   },
   noTracker: {
     fontSize: "0.7rem",
-    color: "#94a3b8",
+    color: "#475569",
     marginTop: "0.5rem",
   },
   plainList: {
@@ -360,7 +360,7 @@ const styles = {
     color: "#334155",
   },
   plainReason: {
-    color: "#94a3b8",
+    color: "#475569",
     fontSize: "0.75rem",
   },
 } as const;

@@ -7,11 +7,11 @@ vi.mock("path", async (importOriginal) => {
   const actual = await importOriginal<typeof import("path")>();
   return { ...actual, join: (...args: string[]) => args.join("/"), resolve: (...args: string[]) => args.join("/"), dirname: (p: string) => p };
 });
-vi.mock("../runner.js", () => ({ activeSessions: new Map(), spawnRun: vi.fn(), cancelSession: vi.fn() }));
+vi.mock("../runner.js", () => ({ activeSessions: new Map(), spawnRun: vi.fn(), cancelSession: vi.fn(), hasActiveRun: vi.fn(() => false) }));
 vi.mock("../runs.js", () => ({ listRuns: vi.fn(() => []), getReportPath: vi.fn(() => null) }));
 vi.mock("../triage-view.js", () => ({ buildTriageView: vi.fn(() => null) }));
 vi.mock("../adoption-view.js", () => ({ buildAdoptionView: vi.fn(() => null) }));
-vi.mock("../scheduler.js", () => ({ loadSchedule: vi.fn(() => ({ enabled: false, dayOfWeek: 1, hour: 9, minute: 0, lastRunDate: null })), saveSchedule: vi.fn(), startScheduler: vi.fn() }));
+vi.mock("../scheduler.js", () => ({ loadSchedule: vi.fn(() => ({ enabled: false, dayOfWeek: 1, hour: 9, minute: 0, lastRunDate: null, pendingDate: null })), saveSchedule: vi.fn(), startScheduler: vi.fn() }));
 vi.mock("../../framework/diary.js", () => ({ generateDiary: vi.fn(), getDiaryPath: vi.fn(() => null) }));
 vi.mock("../../framework/experience-score.js", () => ({ computeExperienceScore: vi.fn(() => null) }));
 vi.mock("../../framework/site-map.js", () => ({
@@ -58,7 +58,7 @@ import {
   listFixedPersonas,
   loadAgents,
 } from "../../framework/agent-store.js";
-import { activeSessions, spawnRun, cancelSession } from "../runner.js";
+import { activeSessions, spawnRun, cancelSession, hasActiveRun } from "../runner.js";
 import { listRuns, getReportPath } from "../runs.js";
 import { buildTriageView } from "../triage-view.js";
 import { buildAdoptionView } from "../adoption-view.js";
@@ -475,7 +475,7 @@ describe("POST /api/findings/proxy-url", () => {
 describe("PATCH /api/schedule", () => {
   it("範囲外の dayOfWeek（-1, 7）は無視してデフォルト値を維持する", async () => {
     const { loadSchedule } = await import("../scheduler.js");
-    vi.mocked(loadSchedule).mockReturnValue({ enabled: false, dayOfWeek: 1, hour: 9, minute: 0, lastRunDate: null });
+    vi.mocked(loadSchedule).mockReturnValue({ enabled: false, dayOfWeek: 1, hour: 9, minute: 0, lastRunDate: null, pendingDate: null });
     const res = await request(app).patch("/api/schedule").send({ dayOfWeek: -1 });
     expect(res.status).toBe(200);
     expect(res.body.dayOfWeek).toBe(1); // デフォルト値を維持
@@ -483,15 +483,37 @@ describe("PATCH /api/schedule", () => {
 
   it("範囲外の hour（24）は無視する", async () => {
     const { loadSchedule } = await import("../scheduler.js");
-    vi.mocked(loadSchedule).mockReturnValue({ enabled: false, dayOfWeek: 1, hour: 9, minute: 0, lastRunDate: null });
+    vi.mocked(loadSchedule).mockReturnValue({ enabled: false, dayOfWeek: 1, hour: 9, minute: 0, lastRunDate: null, pendingDate: null });
     const res = await request(app).patch("/api/schedule").send({ hour: 24 });
     expect(res.status).toBe(200);
     expect(res.body.hour).toBe(9);
   });
 
+  it("時刻を変えると pendingDate を捨てる", async () => {
+    const { loadSchedule } = await import("../scheduler.js");
+    vi.mocked(loadSchedule).mockReturnValue({
+      enabled: true, dayOfWeek: 1, hour: 9, minute: 0, lastRunDate: null, pendingDate: "2026-05-11",
+    });
+    const res = await request(app).patch("/api/schedule").send({ hour: 10 });
+    expect(res.status).toBe(200);
+    expect(res.body.hour).toBe(10);
+    expect(res.body.pendingDate).toBeNull();
+  });
+
+  it("enabled だけ変えても pendingDate は残す", async () => {
+    const { loadSchedule } = await import("../scheduler.js");
+    vi.mocked(loadSchedule).mockReturnValue({
+      enabled: false, dayOfWeek: 1, hour: 9, minute: 0, lastRunDate: null, pendingDate: "2026-05-11",
+    });
+    const res = await request(app).patch("/api/schedule").send({ enabled: true });
+    expect(res.status).toBe(200);
+    expect(res.body.enabled).toBe(true);
+    expect(res.body.pendingDate).toBe("2026-05-11");
+  });
+
   it("enabled に数値を渡すと Boolean 変換される", async () => {
     const { loadSchedule } = await import("../scheduler.js");
-    vi.mocked(loadSchedule).mockReturnValue({ enabled: false, dayOfWeek: 1, hour: 9, minute: 0, lastRunDate: null });
+    vi.mocked(loadSchedule).mockReturnValue({ enabled: false, dayOfWeek: 1, hour: 9, minute: 0, lastRunDate: null, pendingDate: null });
     const res = await request(app).patch("/api/schedule").send({ enabled: 1 });
     expect(res.status).toBe(200);
     expect(res.body.enabled).toBe(true);
@@ -503,10 +525,10 @@ describe("PATCH /api/schedule", () => {
 // ================================================================
 describe("GET /api/schedule", () => {
   it("loadSchedule の結果を返す", async () => {
-    vi.mocked(loadSchedule).mockReturnValue({ enabled: true, dayOfWeek: 3, hour: 10, minute: 30, lastRunDate: null });
+    vi.mocked(loadSchedule).mockReturnValue({ enabled: true, dayOfWeek: 3, hour: 10, minute: 30, lastRunDate: null, pendingDate: null });
     const res = await request(app).get("/api/schedule");
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ enabled: true, dayOfWeek: 3, hour: 10, minute: 30, lastRunDate: null });
+    expect(res.body).toEqual({ enabled: true, dayOfWeek: 3, hour: 10, minute: 30, lastRunDate: null, pendingDate: null });
   });
 });
 
@@ -675,6 +697,15 @@ describe("POST /api/runs/start", () => {
   // not.toHaveBeenCalled() 系の assertion が誤って失敗するのを防ぐ）。
   beforeEach(() => {
     vi.mocked(spawnRun).mockClear();
+    vi.mocked(hasActiveRun).mockReturnValue(false);
+  });
+
+  it("既に run が実行中なら 409 を返し spawnRun を呼ばない", async () => {
+    vi.mocked(hasActiveRun).mockReturnValue(true);
+    const res = await request(app).post("/api/runs/start").send({ baseUrl: "https://example.com" });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe("a run is already in progress");
+    expect(spawnRun).not.toHaveBeenCalled();
   });
 
   it("spawnRun を呼んで sessionId を返す", async () => {
@@ -732,6 +763,33 @@ describe("POST /api/runs/start", () => {
     expect(spawnRun).toHaveBeenCalledWith(
       expect.objectContaining({ maxBrowsers: undefined, maxExplorers: undefined, maxThresholds: undefined }),
     );
+  });
+
+  it("llmBaseUrl だけ指定して llmApiKey が無いと 400（spawnRun は呼ばれない）", async () => {
+    const res = await request(app)
+      .post("/api/runs/start")
+      .send({ llmBaseUrl: "https://attacker.example.com/v1" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("llmApiKey is required when llmBaseUrl is set");
+    expect(spawnRun).not.toHaveBeenCalled();
+  });
+
+  it("llmBaseUrl と llmApiKey を両方指定すれば通る", async () => {
+    vi.mocked(spawnRun).mockReturnValue("run_999");
+    const res = await request(app)
+      .post("/api/runs/start")
+      .send({ llmBaseUrl: "https://my-provider.example.com/v1", llmApiKey: "sk-mykey" });
+    expect(res.status).toBe(200);
+    expect(spawnRun).toHaveBeenCalledWith(
+      expect.objectContaining({ llmBaseUrl: "https://my-provider.example.com/v1", llmApiKey: "sk-mykey" }),
+    );
+  });
+
+  it("llmBaseUrl が無ければ llmApiKey 無しでも通る", async () => {
+    vi.mocked(spawnRun).mockReturnValue("run_999");
+    const res = await request(app).post("/api/runs/start").send({ baseUrl: "https://example.com" });
+    expect(res.status).toBe(200);
+    expect(spawnRun).toHaveBeenCalled();
   });
 });
 

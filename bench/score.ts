@@ -26,6 +26,16 @@ export interface BenchScoreEntry {
   totalFindings: number;
   runDate: string;
   config?: string;
+  /**
+   * matched findings / total findings, 0..1, or `null` when the run produced
+   * zero findings (precision is undefined then, not zero — a run that found
+   * nothing didn't report anything wrong either). `recordBenchScore` omits
+   * this field entirely rather than persisting a literal `null`. Absent on
+   * entries scored before this field existed.
+   */
+  precision?: number | null;
+  /** Findings that matched no seeded label. Absent on entries scored before this field existed. */
+  unmatchedFindings?: number;
 }
 
 export interface PublishedBenchScores {
@@ -45,6 +55,13 @@ export interface BenchResult {
   detectionRate: number; // 0..1
   totalFindings: number;
   unmatchedFindings: number; // どのラベルにも一致しなかった findings（誤検出とは限らない）
+  /**
+   * 0..1 — (totalFindings - unmatchedFindings) / totalFindings, or `null`
+   * when there were zero findings. A run with no findings has undefined
+   * precision, not 0% precision — 0% would misleadingly read as "everything
+   * it reported was wrong" when it reported nothing at all.
+   */
+  precision: number | null;
 }
 
 export function loadLabels(labelsPath = path.join(benchDir, "labels.json")): BenchLabel[] {
@@ -65,9 +82,22 @@ export function loadRunFindings(runId: string, cwd = process.cwd()): Finding[] {
   return findings;
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * A keyword must match on word boundaries, not as a bare substring — "alt"
+ * must not match inside "Although", nor "total" inside "Totally". A
+ * multi-word keyword (e.g. "no login") still matches as a phrase since the
+ * space between words is kept literal; only the two ends are boundary-checked.
+ */
 function findingMatchesLabel(finding: Finding, label: BenchLabel): boolean {
-  const text = `${finding.title} ${finding.body}`.toLowerCase();
-  return label.keywords.some((k) => text.includes(k.toLowerCase()));
+  const text = `${finding.title} ${finding.body}`;
+  return label.keywords.some((k) => {
+    const pattern = new RegExp(`(^|[^a-z0-9])${escapeRegExp(k)}([^a-z0-9]|$)`, "i");
+    return pattern.test(text);
+  });
 }
 
 export function scoreFindings(findings: Finding[], labels: BenchLabel[]): BenchResult {
@@ -85,20 +115,25 @@ export function scoreFindings(findings: Finding[], labels: BenchLabel[]): BenchR
     }
   }
 
+  const unmatchedFindings = findings.filter((f) => !matchedFindingIds.has(f.id)).length;
+
   return {
     detected,
     missed,
     detectionRate: labels.length > 0 ? detected.length / labels.length : 0,
     totalFindings: findings.length,
-    unmatchedFindings: findings.filter((f) => !matchedFindingIds.has(f.id)).length,
+    unmatchedFindings,
+    precision: findings.length > 0 ? (findings.length - unmatchedFindings) / findings.length : null,
   };
 }
 
 export function formatBenchResult(result: BenchResult, variantId = "store"): string {
+  const precisionText = result.precision === null ? "n/a" : `${Math.round(result.precision * 100)}%`;
   const lines = [
     `shoal-bench result (${variantId})`,
     "==================",
     `Detection rate: ${result.detected.length}/${result.detected.length + result.missed.length} (${Math.round(result.detectionRate * 100)}%)`,
+    `Precision: ${precisionText} (${result.totalFindings - result.unmatchedFindings}/${result.totalFindings} findings matched a seeded label)`,
     `Findings: ${result.totalFindings} total, ${result.unmatchedFindings} not matching any seeded bug`,
     "",
   ];
@@ -128,10 +163,16 @@ export function recordBenchScore(
   const withoutDuplicate = published.entries.filter(
     (e) => !(e.variant === entry.variant && e.model === entry.model && e.runDate === entry.runDate),
   );
+  // `precision: null` means "zero findings, precision is undefined" — drop
+  // the key entirely rather than persist a literal `null`, which would read
+  // as 0% to any consumer of bench/scores.json that doesn't special-case it
+  // (the same field is `undefined`/absent for entries scored before it existed).
+  const { precision, ...rest } = entry;
+  const storedEntry: BenchScoreEntry = precision == null ? rest : { ...rest, precision };
   const next: PublishedBenchScores = {
     updatedAt: new Date().toISOString().slice(0, 10),
     note: published.note,
-    entries: [entry, ...withoutDuplicate],
+    entries: [storedEntry, ...withoutDuplicate],
   };
   fs.writeFileSync(scoresPath, JSON.stringify(next, null, 2) + "\n", "utf-8");
   return next;
@@ -142,12 +183,14 @@ export function formatPublishedScoresMarkdown(scores: PublishedBenchScores): str
     return "_No published scores yet. Run `BENCH_RECORD=1 npm run bench` to append results to `bench/scores.json`._";
   }
   const lines = [
-    "| Variant | Model | Detection | Findings | Date | Config |",
-    "|---|---|---:|---:|---|---|",
+    "| Variant | Model | Detection | Precision | Findings | Unmatched | Date | Config |",
+    "|---|---|---:|---:|---:|---:|---|---|",
   ];
   for (const entry of scores.entries) {
+    const precision = entry.precision != null ? `${Math.round(entry.precision * 100)}%` : "—";
+    const unmatched = entry.unmatchedFindings !== undefined ? String(entry.unmatchedFindings) : "—";
     lines.push(
-      `| ${entry.variant} | ${entry.model} | ${entry.detectionRate}% | ${entry.totalFindings} | ${entry.runDate} | ${entry.config ?? "—"} |`,
+      `| ${entry.variant} | ${entry.model} | ${entry.detectionRate}% | ${precision} | ${entry.totalFindings} | ${unmatched} | ${entry.runDate} | ${entry.config ?? "—"} |`,
     );
   }
   return lines.join("\n");

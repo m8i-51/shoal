@@ -17,7 +17,8 @@
     "findings": "Findings",
     "agents": "エージェント",
     "cost": "コスト",
-    "actions": ""
+    "actions": "",
+    "actionsLabel": "操作"
   },
   "status": {
     "completed": "完了",
@@ -55,6 +56,7 @@
     "close": "閉じる",
     "advanced": "詳細設定",
     "llmBaseUrl": "LLM Base URL",
+    "llmBaseUrlHint": "カスタムエンドポイントを指定する場合は API キーが必須です。入力したキーはこの URL にのみ送信され、サーバー側の設定済みプロバイダーには送られません。",
     "llmModel": "モデル",
     "llmApiKey": "API キー",
     "mode": "セーフティモード",
@@ -62,7 +64,7 @@
     "modeSafe": "safe — テストデータのみ（推奨）",
     "modeFull": "full — 制限なし",
     "modeHint": {
-      "read-only": "全ての書き込みをネットワーク層でブロックします。本番環境の観察に。",
+      "read-only": "全ての書き込みをネットワーク層でブロックします。「書き込まない」だけの意味で、エージェントが読んだ内容は LLM プロバイダーに送信されます。",
       "safe": "データ作成・編集は許可し、削除・支払い・送信などの不可逆操作を抑止します。",
       "full": "制限なし。使い捨て環境でのみ使用してください。"
     },
@@ -79,6 +81,8 @@
     "disabled": "自動実行：オフ",
     "dayLabel": "曜日",
     "timeLabel": "時刻（サーバーのローカル時刻）",
+    "hourLabel": "時",
+    "minuteLabel": "分",
     "days": [
       "日",
       "月",

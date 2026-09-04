@@ -164,9 +164,11 @@ Opens at `http://localhost:4000`. From there you can:
 <p align="center">
   <img src="assets/dashboard.png" alt="shoal web dashboard — experience score, LLM cost, finding adoption, site-map coverage, and app goals" width="800">
 </p>
+<p align="center"><em>Sample data seeded from the bench store (<code>scripts/seed-dashboard-demo.mjs</code>), not a live run.</em></p>
 <p align="center">
   <img src="assets/dashboard-hall.png" alt="Hall of Issues — searchable findings across runs by category" width="800">
 </p>
+<p align="center"><em>Same seeded sample data — not a live run.</em></p>
 
 ### Dashboard access
 
@@ -288,8 +290,10 @@ shoal serve --env-file apps/shoal/.env
 | `ANTHROPIC_API_KEY` | — | Required |
 | `ISSUE_TRACKERS` | — | Comma-separated list of active trackers: `github`, `jira`, `notion`, `backlog`, `asana` |
 | `SHOAL_MODE` | `safe` | Safety mode: `read-only` \| `safe` \| `full` (see below) |
+| `SHOAL_DESTRUCTIVE_PATTERNS` | — | Comma-separated extra regex sources (case-insensitive) appended to `safe` mode's destructive-click detector, on top of the built-in English and Japanese patterns. Invalid entries are skipped with a warning |
 | `SHOAL_TRACE` | `1` | Record Playwright traces of browser agent sessions (`0` to disable). Each finding gets a trace chunk at save time (`logs/traces/<run>/<findingId>.zip`); the agent session trace remains at `logs/traces/<run>/<agentId>.zip` |
 | `REFRESH_SPEC` | — | Set to `1` to re-run product discovery |
+| `SHOAL_RETENTION_DAYS` | `30` | Days of `logs/screenshots/run_*` and `logs/traces/run_*` to keep; older run directories are deleted at the start of each run. `0` disables pruning |
 | `SHOAL_MAX_USD` | — | Hard spend cap for a run (estimated USD). Once reached, no further LLM call starts and the remaining lanes are skipped — findings already collected are still saved and reported |
 | `SHOAL_HOST` | `127.0.0.1` | Dashboard bind address. Loopback by default; set it to expose the dashboard (see [Dashboard access](#dashboard-access)) |
 | `SHOAL_TOKEN` | — | Dashboard token. Required whenever `SHOAL_HOST` is not loopback or `SHOAL_ALLOWED_HOSTS` is set; generated and printed at startup if unset |
@@ -301,8 +305,8 @@ shoal serve --env-file apps/shoal/.env
 
 **Safety modes** — agents write data as they explore, so choose how much they're allowed to touch:
 
-- `read-only` — no writes at all. Mutation requests (POST/PUT/PATCH/DELETE) from browser agents are blocked at the network layer. Safe to point at production.
-- `safe` (default) — creating and editing test data is fine, but agents are instructed to stop before irreversible actions: deleting records, payments, sending emails or invitations.
+- `read-only` — no writes to the target app at all. Mutation requests (POST/PUT/PATCH/DELETE) from browser agents are blocked at the network layer. This only means shoal won't write to your app — everything agents read (page text, accessibility tree, console/network output, screenshots) is still sent to your configured LLM provider. See [What is sent to the LLM provider](SECURITY.md#what-is-sent-to-the-llm-provider) before pointing it at production data.
+- `safe` (default) — creating and editing test data is fine, but agents are instructed to stop before irreversible actions: deleting records, payments, sending emails or invitations. The destructive-click detector recognizes both English and Japanese phrasing (`削除`, `購入する`, `決済`, etc. — set `SHOAL_DESTRUCTIVE_PATTERNS` to add your own) and blocks matching clicks programmatically.
 - `full` — no restrictions. Use only against disposable environments.
 
 In `safe` and `read-only` modes, API tools marked `destructive: true` in your target config are removed from the agents' toolset. The mode can also be selected per run in the dashboard's start dialog.
@@ -469,9 +473,14 @@ Detection rate: 5/7 (71%)
 
 Scores recorded with `BENCH_RECORD=1` (see `bench/scores.json`):
 
-| Variant | Model | Detection | Findings | Date | Config |
-|---|---|---:|---:|---|---|
-| store | claude-sonnet-4-20250514 | 71% | 11 | 2026-08-15 | MAX_BROWSERS=3, default prompts |
+| Variant | Model | Detection | Precision | Findings | Unmatched | Date | Config |
+|---|---|---:|---:|---:|---:|---|---|
+| store | claude-sonnet-4-20250514 | 71% | —¹ | 11 | —¹ | 2026-08-15 | MAX_BROWSERS=3, default prompts |
+
+¹ Scored before the matcher required word boundaries (a substring matcher
+counted "alt" inside "Although" and "total" inside "Totally" as detections),
+and before precision/unmatched were recorded — not comparable to rows scored
+after that fix.
 
 > **One configuration, one run.** Read that number as a single sample, not a
 > benchmark: detection rate varies run to run (agents explore
@@ -531,9 +540,11 @@ shoal defaults to Anthropic Claude. To use a different provider, set these varia
 | Groq | `LLM_PROVIDER=groq`, `LLM_API_KEY`, `LLM_MODEL` |
 | Gemini | `LLM_PROVIDER=gemini`, `LLM_API_KEY`, `LLM_MODEL` |
 | Codex (ChatGPT subscription) | run `npm run auth:codex` once, then `LLM_PROVIDER=codex` |
-| Claude CLI (Claude Code subscription) | run `npm run auth:claude` once, then `LLM_PROVIDER=claude-cli` |
+| Claude CLI (Claude Code subscription) | `npm install @anthropic-ai/claude-agent-sdk` (optional peer dependency, not installed by default — see note below), then run `npm run auth:claude` once and set `LLM_PROVIDER=claude-cli` |
 | Ollama | `LLM_BASE_URL=http://localhost:11434/v1`, `LLM_MODEL` |
 | LM Studio | `LLM_BASE_URL=http://localhost:1234/v1`, `LLM_MODEL` |
+
+`claude-cli` is the only provider with an extra install step: `@anthropic-ai/claude-agent-sdk` is ~200MB and carries Anthropic's own licence (not OSI-approved — "SEE LICENSE IN README.md"), so it ships as an optional peer dependency rather than a hard one. Every other provider works with a plain `npm install @m8i-51/shoal`.
 
 ### Codex (ChatGPT subscription)
 

@@ -33,11 +33,18 @@ function formatDuration(startedAt: string, completedAt: string | null): string {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
+// Same hex values as web/src/utils/format.ts's CATEGORY_COLOR (bug/ux/feature-request)
+// — this file is a standalone server-side HTML generator and can't import
+// from web/src, so keep these in sync by hand. Darker than the naive
+// "500" shade of each hue: white text on top (see `.badge`, `.bar-segment
+// span`) needs >=4.5:1 contrast against the background, which the lighter
+// shade fails (2.8-3.8:1). See framework/__tests__/report.test.ts for the
+// pinned contrast ratios.
 function categoryColor(cat: string): string {
   switch (cat) {
-    case "bug": return "#ef4444";
-    case "ux": return "#f97316";
-    case "feature-request": return "#3b82f6";
+    case "bug": return "#dc2626";
+    case "ux": return "#c2410c";
+    case "feature-request": return "#2563eb";
     default: return "#6b7280";
   }
 }
@@ -82,7 +89,8 @@ export function generateReport(
   const findingCards = sortedFindings.map((f) => {
     const status = issuedSet.has(f.id) ? "issued" : skippedSet.has(f.id) ? "skipped" : "unprocessed";
     const statusLabel = { issued: "→ Issue", skipped: "skipped", unprocessed: "pending" }[status];
-    const statusColor = { issued: "#22c55e", skipped: "#9ca3af", unprocessed: "#f59e0b" }[status];
+    // Darkened for >=4.5:1 contrast against the white .badge text (see categoryColor above).
+    const statusColor = { issued: "#15803d", skipped: "#6b7280", unprocessed: "#b45309" }[status];
     const imgData = embedImage(f.screenshotPath);
     const assignment = agentAssignments.get(f.agentId);
     const assignmentTag = assignment?.scenario
@@ -112,12 +120,13 @@ export function generateReport(
 
   const agentRows = runLog.agents.map((a) => {
     const assignment = agentAssignments.get(a.agentId);
+    // Darkened for >=4.5:1 contrast against the white .badge text (see categoryColor above).
     const assignmentCell = assignment?.scenario
-      ? `<span class="badge" style="background:#8b5cf6">scenario</span>&nbsp;${esc(assignment.scenario.title)}`
+      ? `<span class="badge" style="background:#7c3aed">scenario</span>&nbsp;${esc(assignment.scenario.title)}`
       : assignment?.lens
-      ? `<span class="badge" style="background:#0ea5e9">lens</span>&nbsp;${esc(assignment.lens.split(":")[0].trim())}`
-      : `<span class="badge" style="background:#9ca3af">${esc(a.agentType)}</span>`;
-    const statusColor = a.status === "completed" ? "#22c55e" : "#ef4444";
+      ? `<span class="badge" style="background:#0369a1">lens</span>&nbsp;${esc(assignment.lens.split(":")[0].trim())}`
+      : `<span class="badge" style="background:#6b7280">${esc(a.agentType)}</span>`;
+    const statusColor = a.status === "completed" ? "#15803d" : "#dc2626";
     return `<tr>
   <td>${esc(a.agentName)}</td>
   <td><span class="badge" style="background:#475569">${esc(a.agentType)}</span></td>
@@ -136,11 +145,13 @@ export function generateReport(
     const achieved = scenarioOutcomes.filter((o) => o.achieved).length;
     const total = scenarioOutcomes.length;
     const allPassed = achieved === total;
-    const headerColor = allPassed ? "#22c55e" : achieved === 0 ? "#ef4444" : "#f59e0b";
+    // Darkened for >=4.5:1 contrast against this h2's #f8fafc (body) background
+    // — same palette as categoryColor/statusColor above and scoreColor below.
+    const headerColor = allPassed ? "#15803d" : achieved === 0 ? "#dc2626" : "#b45309";
     const rows = scenarioOutcomes.map((o) => `<tr>
   <td>${esc(o.scenarioTitle)}</td>
   <td>${esc(o.agentName)}</td>
-  <td><span class="badge" style="background:${o.achieved ? "#22c55e" : "#ef4444"}">${o.achieved ? "achieved" : "failed"}</span></td>
+  <td><span class="badge" style="background:${o.achieved ? "#15803d" : "#dc2626"}">${o.achieved ? "achieved" : "failed"}</span></td>
   <td style="font-size:.8rem;color:#475569">${esc(o.reason)}</td>
 </tr>`).join("\n");
     return `
@@ -215,9 +226,14 @@ export function generateReport(
     .bar-segment span{font-size:.7rem;color:#fff;font-weight:700;white-space:nowrap}
     .badge{display:inline-block;padding:.15rem .5rem;border-radius:9999px;font-size:.65rem;font-weight:700;color:#fff;white-space:nowrap}
     .finding{background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:1rem 1.25rem;margin-bottom:.75rem}
+    /* Deliberately de-emphasised, not held to AA: opacity:.55 multiplies every
+       foreground/background pair inside a skipped card, so reaching 4.5:1 here
+       would need near-black text that defeats the fade. Skipped findings are
+       de-prioritized by design — this is the one exception to the contrast
+       pass below. */
     .finding.skipped{opacity:.55}
     .finding-header{display:flex;align-items:center;gap:.4rem;margin-bottom:.5rem;flex-wrap:wrap}
-    .agent-name{font-size:.75rem;color:#94a3b8;margin-left:auto}
+    .agent-name{font-size:.75rem;color:#64748b;margin-left:auto}
     .assignment-tag{font-size:.7rem;padding:.1rem .45rem;border-radius:4px;white-space:nowrap}
     .assignment-tag.scenario{color:#7c3aed;background:#ede9fe}
     .assignment-tag.lens{color:#0369a1;background:#e0f2fe}
@@ -229,11 +245,11 @@ export function generateReport(
     .screenshot-toggle summary{font-size:.8rem;color:#64748b;cursor:pointer;user-select:none}
     .screenshot{max-width:100%;max-height:400px;object-fit:contain;border:1px solid #e2e8f0;border-radius:4px;margin-top:.5rem;display:block}
     table{width:100%;border-collapse:collapse;background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;font-size:.85rem}
-    th{background:#f1f5f9;padding:.6rem 1rem;text-align:left;font-weight:700;color:#64748b;font-size:.7rem;text-transform:uppercase;letter-spacing:.05em}
+    th{background:#f1f5f9;padding:.6rem 1rem;text-align:left;font-weight:700;color:#475569;font-size:.7rem;text-transform:uppercase;letter-spacing:.05em}
     td{padding:.6rem 1rem;border-top:1px solid #e2e8f0;vertical-align:middle}
     .scenarios{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:1rem}
     .scenario-card{background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:1rem}
-    .scenario-id{font-size:.65rem;font-weight:700;color:#8b5cf6;text-transform:uppercase;letter-spacing:.08em;margin-bottom:.25rem}
+    .scenario-id{font-size:.65rem;font-weight:700;color:#7c3aed;text-transform:uppercase;letter-spacing:.08em;margin-bottom:.25rem}
     .scenario-card h3{font-size:.875rem;font-weight:600;margin-bottom:.5rem}
     .scenario-card p{font-size:.8rem;color:#475569;margin-top:.2rem}
   </style>
@@ -248,11 +264,12 @@ export function generateReport(
     <h2>Summary</h2>
     <div class="summary-grid">
       ${experience ? (() => {
-        const scoreColor = experience.latest.score >= 70 ? "#22c55e" : experience.latest.score >= 40 ? "#f59e0b" : "#ef4444";
+        // Darkened for >=4.5:1 against this .stat-card's white background (see categoryColor above).
+        const scoreColor = experience.latest.score >= 70 ? "#15803d" : experience.latest.score >= 40 ? "#b45309" : "#dc2626";
         const deltaBadge = experience.delta == null ? ""
-          : experience.delta > 0 ? `<span style="font-size:.8rem;color:#22c55e;font-weight:700"> ▲${experience.delta}</span>`
-          : experience.delta < 0 ? `<span style="font-size:.8rem;color:#ef4444;font-weight:700"> ▼${Math.abs(experience.delta)}</span>`
-          : `<span style="font-size:.8rem;color:#94a3b8;font-weight:700"> ±0</span>`;
+          : experience.delta > 0 ? `<span style="font-size:.8rem;color:#15803d;font-weight:700"> ▲${experience.delta}</span>`
+          : experience.delta < 0 ? `<span style="font-size:.8rem;color:#dc2626;font-weight:700"> ▼${Math.abs(experience.delta)}</span>`
+          : `<span style="font-size:.8rem;color:#64748b;font-weight:700"> ±0</span>`;
         return `<div class="stat-card"><div class="number" style="color:${scoreColor}">${experience.latest.score}${deltaBadge}</div><div class="label">experience score</div></div>`;
       })() : ""}
       <div class="stat-card"><div class="number">${findings.length}</div><div class="label">findings</div></div>
@@ -260,23 +277,23 @@ export function generateReport(
       <div class="stat-card"><div class="number">${triageResult.skipped.length}</div><div class="label">skipped</div></div>
       <div class="stat-card"><div class="number">${triageResult.unprocessed.length}</div><div class="label">pending</div></div>
       <div class="stat-card"><div class="number">${runLog.agents.length}</div><div class="label">agents</div></div>
-      ${allRegressionChecks.length > 0 ? `<div class="stat-card"><div class="number" style="color:#22c55e">${fixedChecks.length}</div><div class="label">still fixed</div></div><div class="stat-card"><div class="number" style="color:${regressedChecks.length > 0 ? "#ef4444" : "#94a3b8"}">${regressedChecks.length}</div><div class="label">regressed</div></div>` : ""}
+      ${allRegressionChecks.length > 0 ? `<div class="stat-card"><div class="number" style="color:#15803d">${fixedChecks.length}</div><div class="label">still fixed</div></div><div class="stat-card"><div class="number" style="color:${regressedChecks.length > 0 ? "#dc2626" : "#64748b"}">${regressedChecks.length}</div><div class="label">regressed</div></div>` : ""}
     </div>
-    <div class="category-bar">${categoryBar || '<div style="width:100%;display:flex;align-items:center;padding:0 .75rem;font-size:.75rem;color:#94a3b8">no findings</div>'}</div>
+    <div class="category-bar">${categoryBar || '<div style="width:100%;display:flex;align-items:center;padding:0 .75rem;font-size:.75rem;color:#475569">no findings</div>'}</div>
   </section>
 
   ${allRegressionChecks.length > 0 ? `
   <section>
     <h2>Progress (${allRegressionChecks.length} issues checked)</h2>
-    ${regressedChecks.length > 0 ? `<p style="color:#ef4444;font-size:.875rem;margin-bottom:.75rem">⚠ ${regressedChecks.length} regression${regressedChecks.length !== 1 ? "s" : ""} detected</p>` : `<p style="color:#22c55e;font-size:.875rem;margin-bottom:.75rem">✓ All previously fixed issues remain resolved</p>`}
+    ${regressedChecks.length > 0 ? `<p style="color:#dc2626;font-size:.875rem;margin-bottom:.75rem">⚠ ${regressedChecks.length} regression${regressedChecks.length !== 1 ? "s" : ""} detected</p>` : `<p style="color:#15803d;font-size:.875rem;margin-bottom:.75rem">✓ All previously fixed issues remain resolved</p>`}
     <table>
       <thead><tr><th>ID</th><th>Issue</th><th style="text-align:center">Status</th></tr></thead>
       <tbody>
         ${allRegressionChecks.map((c) => `
         <tr>
-          <td style="color:#94a3b8">${formatIssueRef(c.issueNumber)}</td>
+          <td style="color:#64748b">${formatIssueRef(c.issueNumber)}</td>
           <td>${esc(c.issueTitle)}</td>
-          <td style="text-align:center">${c.status === "fixed" ? '<span class="badge" style="background:#22c55e">✓ fixed</span>' : '<span class="badge" style="background:#ef4444">⚠ regressed</span>'}</td>
+          <td style="text-align:center">${c.status === "fixed" ? '<span class="badge" style="background:#15803d">✓ fixed</span>' : '<span class="badge" style="background:#dc2626">⚠ regressed</span>'}</td>
         </tr>`).join("")}
       </tbody>
     </table>
@@ -284,7 +301,7 @@ export function generateReport(
 
   <section>
     <h2>Findings (${findings.length})</h2>
-    ${sortedFindings.length > 0 ? findingCards : "<p style='color:#94a3b8;font-size:.875rem'>No findings collected.</p>"}
+    ${sortedFindings.length > 0 ? findingCards : "<p style='color:#64748b;font-size:.875rem'>No findings collected.</p>"}
   </section>
 
   ${outcomesSection}
