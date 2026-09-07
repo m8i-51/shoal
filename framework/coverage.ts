@@ -4,6 +4,7 @@ import { isFinding, type Finding } from "./types";
 import type { Scenario, ScenarioOutcome } from "./scenario-designer";
 import { extractFindingPath } from "./findings";
 import { formatAdoptionSummary, lensAdoptionWeight, categoryAdoptionWeight, loadAdoptionStats } from "./adoption";
+import * as log from "./log";
 
 export interface OutcomeRecord {
   scenarioTitle: string;
@@ -121,7 +122,7 @@ export function updateCoverage(
   }
 
   saveCoverage(coverage);
-  console.log(`[coverage] updated (${coverage.entries.length} run(s) tracked)`);
+  log.info(`[coverage] updated (${coverage.entries.length} run(s) tracked)`);
 }
 
 export function computeWeightedSummary(): WeightedSummary {

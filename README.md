@@ -14,9 +14,49 @@
 
 **AI agents that experience your app — and help it grow.**
 
-shoal drops a swarm of AI agents onto a web app. Each agent has a distinct persona and explores the app as a real user would — navigating pages, taking actions, noticing friction. They surface bugs, usability issues, missing features, and gaps between what the app does and what it's meant to achieve.
+Your test suite checks the things someone already thought to check. The bugs
+that reach users are usually in the paths nobody wrote a test for: the flow
+that works but is confusing, the empty state nobody designed, the admin screen
+that breaks when a field is blank.
 
-No test scripts. No test data. No prior knowledge of the app required. Just a URL.
+shoal drops a swarm of AI agents onto a running web app. Each has a distinct
+persona and explores as a real user would — navigating, taking actions,
+noticing friction — then triage merges what they found and files it as issue
+tickets. No test scripts, no test data, no prior knowledge of the app. Just a
+URL.
+
+```bash
+npm install -g @m8i-51/shoal && shoal init && shoal
+```
+
+### Who it's for
+
+Teams with a staging or preview environment who want exploratory coverage they
+do not have time to write by hand — a weekly pass over the whole app that
+files what it finds, in front of the people who can fix it.
+
+### What it will not do
+
+Worth knowing before you install it:
+
+- **It costs real money per run.** Every agent turn is an LLM call. `SHOAL_MAX_USD`
+  caps a run, and `shoal doctor` warns when your model has no published price
+  and the cap therefore cannot fire.
+- **It finds some of the bugs, not all of them.** On shoal's own benchmark —
+  a sample app with seeded bugs and ground-truth labels — the measured
+  detection rate is **71%** (7 seeded bugs, `claude-sonnet-4`). See
+  [shoal-bench](#shoal-bench); you can run it yourself.
+- **Two runs differ.** Agents are LLM-driven, so this is exploration, not a
+  regression suite. Coverage is tracked across runs so successive sessions
+  push into unexplored areas rather than repeating each other.
+- **Some findings will be wrong.** Triage merges duplicates and skips what
+  matches an existing issue, but a human still decides. The bench reports
+  precision alongside detection for exactly this reason.
+- **It never reads your code.** It only sees the app the way a user does. That
+  is the point, and it is also the limit: it can tell you a flow is broken, not
+  which commit broke it.
+
+It complements a deterministic test suite. It does not replace one.
 
 ---
 
@@ -92,6 +132,26 @@ Bugs are never marked this way: a defect is a defect whatever the positioning,
 and that rule is enforced in code, not just asked for in the prompt. Without a
 declared edge the whole mechanism stays off.
 
+### Severity
+
+Every filed issue carries a severity, judged from the impact the agent actually
+observed rather than from how hard a fix looks — the agent cannot see your code:
+
+| | |
+| --- | --- |
+| `critical` | blocks the core task entirely, loses data, or exposes something it should not |
+| `major` | completable only via a workaround a real user would likely give up before finding |
+| `minor` | noticeable friction or a wrong detail that does not stop the task |
+| `trivial` | cosmetic, or an improvement nobody is currently blocked by |
+
+It is written into the issue body and applied as a `severity:<level>` label, so
+a tracker can filter on it. Severity is independent of category: a `ux` finding
+can be `critical` and a `bug` can be `trivial`. When triage returns a level that
+is not one of the four and cannot be mapped from a common synonym (`blocker`,
+`high`, `P2`…), the issue is still filed — with no severity at all rather than a
+guessed one, so a team sorting by severity never mistakes a fabricated level for
+a real one.
+
 ---
 
 ## Quick Start
@@ -120,9 +180,26 @@ BASE_URL=http://localhost:3000   # URL of the app to explore
 Then run **from that same directory**:
 
 ```bash
+shoal doctor   # check the setup before spending a run on it
 shoal serve    # open web dashboard at http://localhost:4000
 shoal          # or run agents directly from the terminal
 shoal config   # update settings in existing .env (e.g. issue trackers)
+```
+
+`shoal doctor` makes no LLM call and costs nothing. It checks the Node version,
+whether `.env` exists and is readable only by you, that the provider has the
+credential it needs, that the model is one `SHOAL_MAX_USD` can actually be
+enforced against, that a Playwright browser is installed, that `BASE_URL` is a
+usable URL, and that any enabled tracker is fully configured. It exits non-zero
+only when something would genuinely stop a run, so CI can gate on it:
+
+```
+  ✓ Node.js             v22.22.2
+  ✓ LLM credentials     ANTHROPIC_API_KEY set
+  ! Spend cap           SHOAL_MAX_USD=$5 is set, but no price is known for "x/unlisted" — the cap cannot fire
+                        → use a model with published pricing, or treat the run as uncapped
+  ✗ Target app          BASE_URL is not set
+                        → set BASE_URL to the app you want explored
 ```
 
 On startup shoal prints which `.env` it loaded (or that it found none). If you see `0 variables injected`, you are not in the directory that contains `.env`.
@@ -295,6 +372,8 @@ shoal serve --env-file apps/shoal/.env
 | `REFRESH_SPEC` | — | Set to `1` to re-run product discovery |
 | `SHOAL_RETENTION_DAYS` | `30` | Days of `logs/screenshots/run_*` and `logs/traces/run_*` to keep; older run directories are deleted at the start of each run. `0` disables pruning |
 | `SHOAL_MAX_USD` | — | Hard spend cap for a run (estimated USD). Once reached, no further LLM call starts and the remaining lanes are skipped — findings already collected are still saved and reported |
+| `SHOAL_LANG` | — | Language agents write findings, issue titles and bodies in. Accepts a code (`ja`, `pt-BR`, `zh-TW`) or a plain name. Unset means the model decides from the app it is looking at |
+| `SHOAL_LOG_LEVEL` | `info` | How much shoal prints: `silent`, `error`, `warn`, `info`, `debug`. `error` is the quiet CI setting — progress and warnings go, but the run summary, dashboard URL and report path still print; only `silent` suppresses those |
 | `SHOAL_HOST` | `127.0.0.1` | Dashboard bind address. Loopback by default; set it to expose the dashboard (see [Dashboard access](#dashboard-access)) |
 | `SHOAL_TOKEN` | — | Dashboard token. Required whenever `SHOAL_HOST` is not loopback or `SHOAL_ALLOWED_HOSTS` is set; generated and printed at startup if unset |
 | `SHOAL_ALLOWED_HOSTS` | — | Comma-separated public hostname(s) of a reverse proxy in front of the dashboard (see [Dashboard access](#dashboard-access)) |

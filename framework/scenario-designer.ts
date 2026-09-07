@@ -2,6 +2,7 @@ import type { LLMClient } from "./llm-client";
 import { captureStructuredTool } from "./tool-session";
 import type { ProductSpec } from "./product-discovery";
 import { findBestByRole, roleAffinity } from "./role-match";
+import * as log from "./log";
 
 export interface ScenarioActor {
   role: string; // e.g. "admin", "user" — should match an available test account role
@@ -200,7 +201,7 @@ export async function designScenarios(
   coverageSummary?: string,
   accountRoles: string[] = [],
 ): Promise<Scenario[]> {
-  console.log("\n[scenario-designer] generating scenarios...");
+  log.info("\n[scenario-designer] generating scenarios...");
 
   const issueHints = openIssues.length > 0
     ? `\n[Known Open Issues — risky areas to naturally route scenarios through]\n${openIssues.slice(0, 15).map((i) => `- ${i.title} [${i.labels.join(", ")}]`).join("\n")}`
@@ -263,12 +264,12 @@ Call output_scenarios with exactly ${count} scenarios.`,
   });
 
   if (!raw) {
-    console.warn("[scenario-designer] LLM did not call output_scenarios — falling back to lens-only mode");
+    log.warn("[scenario-designer] LLM did not call output_scenarios — falling back to lens-only mode");
     return [];
   }
 
   if (!Array.isArray(raw.scenarios) || raw.scenarios.length === 0) {
-    console.warn("[scenario-designer] empty scenarios array returned");
+    log.warn("[scenario-designer] empty scenarios array returned");
     return [];
   }
 
@@ -291,7 +292,7 @@ Call output_scenarios with exactly ${count} scenarios.`,
       ...(channel ? { channel } : {}),
     };
     if (looksConcurrentWithoutActors(next)) {
-      console.warn(
+      log.warn(
         `[scenario-designer] discarded "${next.title}" — concurrent work without actors[]`,
       );
       return;
@@ -299,14 +300,14 @@ Call output_scenarios with exactly ${count} scenarios.`,
     scenarios.push(next);
   });
 
-  console.log(`[scenario-designer] generated ${scenarios.length} scenarios:`);
+  log.info(`[scenario-designer] generated ${scenarios.length} scenarios:`);
   scenarios.forEach((s) => {
     const channel = inferScenarioChannel(s);
     const extra = [
       s.actors ? `multi-actor: ${s.actors.map((a) => a.role).join(" × ")}` : "",
       `channel: ${channel}`,
     ].filter(Boolean).join(", ");
-    console.log(`  - [${s.id}] ${s.title}${extra ? ` (${extra})` : ""}`);
+    log.info(`  - [${s.id}] ${s.title}${extra ? ` (${extra})` : ""}`);
   });
 
   return scenarios;

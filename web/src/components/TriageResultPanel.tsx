@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { apiFetch } from "../api";
-import { CATEGORY_COLOR, safeExternalUrl } from "../utils/format";
+import { CATEGORY_COLOR, SEVERITY_COLOR, safeExternalUrl } from "../utils/format";
 
 interface TriageFindingRef {
   id: string;
@@ -13,6 +13,7 @@ interface TriageFindingRef {
 interface TriageIssue {
   title: string;
   category: string;
+  severity: string | null;
   url: string | null;
   edgeRisk: { edge: string; why: string } | null;
   createdAt: string | null;
@@ -35,11 +36,20 @@ interface TriageView {
     findingsSkipped: number;
     findingsUnprocessed: number;
     edgeRisks: number;
+    critical: number;
   };
   legacy: boolean;
 }
 
 const EDGE_RISK_COLOR = "#a855f7";
+
+function SeverityChip({ severity }: { severity: string }) {
+  return (
+    <span style={{ ...styles.chip, background: SEVERITY_COLOR[severity] ?? "#4b5563" }}>
+      {severity}
+    </span>
+  );
+}
 
 function CategoryChip({ category }: { category: string }) {
   return (
@@ -97,6 +107,9 @@ export function TriageResultPanel({ runId, refreshKey }: { runId: string; refres
         <Stat label={t("triage.statIssued")} value={stats.findingsIssued} />
         <Stat label={t("triage.statSkipped")} value={stats.findingsSkipped} />
         <Stat label={t("triage.statUnprocessed")} value={stats.findingsUnprocessed} />
+        {stats.critical > 0 && (
+          <Stat label={t("triage.statCritical")} value={stats.critical} color={SEVERITY_COLOR.critical} />
+        )}
         {stats.edgeRisks > 0 && (
           <Stat label={t("triage.statEdgeRisks")} value={stats.edgeRisks} color={EDGE_RISK_COLOR} />
         )}
@@ -111,6 +124,7 @@ export function TriageResultPanel({ runId, refreshKey }: { runId: string; refres
             <article key={`${issue.title}-${i}`} style={styles.issue}>
               <div style={styles.issueHead}>
                 <CategoryChip category={issue.category} />
+                {issue.severity && <SeverityChip severity={issue.severity} />}
                 {safeExternalUrl(issue.url) ? (
                   <a href={safeExternalUrl(issue.url)!} target="_blank" rel="noreferrer noopener" style={styles.issueLink}>
                     {issue.title}

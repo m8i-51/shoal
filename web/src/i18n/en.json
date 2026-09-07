@@ -207,6 +207,7 @@
     "statIssued": "Findings filed",
     "statSkipped": "Skipped",
     "statUnprocessed": "Unprocessed",
+    "statCritical": "Critical",
     "statEdgeRisks": "Edge risks",
     "issuesTitle": "Issues filed",
     "mergedFrom": "Merged from {{count}} finding(s)",
@@ -239,6 +240,8 @@
     "average": "Per run",
     "last30d": "Last 30 days",
     "tokens": "Input / output tokens",
+    "screenshotShare": "Screenshot share of input",
+    "estimated": "estimated",
     "missing": "{{count}} run(s) have no cost estimate and are not in the total."
   }
 }

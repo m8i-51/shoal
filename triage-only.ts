@@ -16,11 +16,12 @@ import { runTriageAgent } from "./framework/triage";
 import { loadCachedSpec } from "./framework/product-discovery";
 import { buildTrackers } from "./framework/trackers/index";
 import type { Finding } from "./framework/types";
+import * as log from "./framework/log";
 
 function loadFindings(runId: string): Finding[] {
   const dir = path.join(process.cwd(), "findings", runId);
   if (!fs.existsSync(dir)) {
-    console.error(`findings/${runId} が見つかりません`);
+    log.error(`findings/${runId} が見つかりません`);
     process.exit(1);
   }
   const files = fs.readdirSync(dir).filter((f) => f.endsWith(".json") && f !== "triage_result.json");
@@ -31,7 +32,7 @@ function getLatestRunId(): string {
   const findingsDir = path.join(process.cwd(), "findings");
   const runs = fs.readdirSync(findingsDir).filter((d) => d.startsWith("run_")).sort();
   if (runs.length === 0) {
-    console.error("findingsディレクトリにrunが見つかりません");
+    log.error("findingsディレクトリにrunが見つかりません");
     process.exit(1);
   }
   return runs[runs.length - 1];
@@ -48,24 +49,24 @@ function loadProductEdge() {
 
 async function main() {
   const runId = process.env.RUN_ID ?? getLatestRunId();
-  console.log(`[トリアージ単体実行] runId: ${runId}`);
+  log.info(`[トリアージ単体実行] runId: ${runId}`);
 
   const findings = loadFindings(runId);
-  console.log(`[トリアージ単体実行] findings読み込み: ${findings.length}件`);
-  findings.forEach((f) => console.log(`  - ${f.agentName}: ${f.title.slice(0, 50)}`));
+  log.info(`[トリアージ単体実行] findings読み込み: ${findings.length}件`);
+  findings.forEach((f) => log.info(`  - ${f.agentName}: ${f.title.slice(0, 50)}`));
 
   const { client, defaultModel } = createLLMClient();
   const trackers = buildTrackers();
   const result = await runTriageAgent(findings, client, defaultModel, trackers, undefined, loadProductEdge());
 
-  console.log("\n=== トリアージ結果 ===");
-  console.log(`  Issue作成: ${result.issuesCreated}件`);
-  console.log(`  スキップ: ${result.skipped.length}件`);
-  console.log(`  未処理: ${result.unprocessed.length}件`);
-  console.log(`  尖りリスク付き: ${result.edgeRisks.length}件`);
+  log.print("\n=== トリアージ結果 ===");
+  log.print(`  Issue作成: ${result.issuesCreated}件`);
+  log.print(`  スキップ: ${result.skipped.length}件`);
+  log.print(`  未処理: ${result.unprocessed.length}件`);
+  log.print(`  尖りリスク付き: ${result.edgeRisks.length}件`);
 }
 
 main().catch((e) => {
-  console.error(e);
+  log.error(e);
   process.exitCode = 1;
 });

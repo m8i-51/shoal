@@ -24,6 +24,7 @@ import { inferRoutesFromFiles, formatDiffSummary, resolvePrNumber, postPrComment
 import { listCachedPaths } from "./framework/page-cache";
 import { computeExperienceScore } from "./framework/experience-score";
 import { isFinding, type Finding } from "./framework/types";
+import * as log from "./framework/log";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -42,8 +43,8 @@ function getChangedFiles(baseRef: string): string[] {
     });
     return out.split("\n").map((s) => s.trim()).filter(Boolean);
   } catch (e) {
-    console.error(`[diff] git diff against "${baseRef}" failed — is this a git repository with that ref?`);
-    console.error(String(e).slice(0, 300));
+    log.error(`[diff] git diff against "${baseRef}" failed — is this a git repository with that ref?`);
+    log.error(String(e).slice(0, 300));
     process.exit(1);
   }
 }
@@ -85,7 +86,7 @@ function spawnFocusedRun(runId: string, focusRoutes: string[]): Promise<number> 
 async function main() {
   const baseRef = getBaseRef();
   const changedFiles = getChangedFiles(baseRef);
-  console.log(`[diff] ${changedFiles.length} file(s) changed vs ${baseRef}`);
+  log.info(`[diff] ${changedFiles.length} file(s) changed vs ${baseRef}`);
 
   const fileRoutes = inferRoutesFromFiles(changedFiles);
   let focusRoutes = fileRoutes;
@@ -94,7 +95,7 @@ async function main() {
     const cachedPaths = listCachedPaths(new URL(baseUrl).host);
     const expanded = expandFocusRoutesWithPageCache(fileRoutes, cachedPaths);
     if (expanded.length > fileRoutes.length) {
-      console.log(`[diff] page-cache expanded routes: ${expanded.join(", ")}`);
+      log.info(`[diff] page-cache expanded routes: ${expanded.join(", ")}`);
     }
     focusRoutes = expanded;
   } catch {
@@ -102,13 +103,13 @@ async function main() {
   }
 
   if (focusRoutes.length > 0) {
-    console.log(`[diff] focus routes: ${focusRoutes.join(", ")}`);
+    log.info(`[diff] focus routes: ${focusRoutes.join(", ")}`);
   } else {
-    console.log("[diff] no route mapping inferred — agents will explore freely");
+    log.info("[diff] no route mapping inferred — agents will explore freely");
   }
 
   const runId = `run_${Date.now()}`;
-  console.log(`[diff] starting focused run ${runId}...\n`);
+  log.info(`[diff] starting focused run ${runId}...\n`);
   await spawnFocusedRun(runId, focusRoutes);
 
   const findings = loadRunFindings(runId);
@@ -122,19 +123,19 @@ async function main() {
   if (token && repo && prNumber) {
     const ok = await postPrComment(summary, { token, repo, prNumber });
     if (ok) {
-      console.log(`\n[diff] summary posted to ${repo}#${prNumber}`);
+      log.print(`\n[diff] summary posted to ${repo}#${prNumber}`);
       return;
     }
-    console.warn("[diff] PR comment failed — falling back to file output");
+    log.warn("[diff] PR comment failed — falling back to file output");
   }
 
   const outPath = path.join(process.cwd(), "logs", `diff_${runId}.md`);
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
   fs.writeFileSync(outPath, summary, "utf-8");
-  console.log(`\n${summary}\n\n[diff] summary saved: ${outPath}`);
+  log.print(`\n${summary}\n\n[diff] summary saved: ${outPath}`);
 }
 
 main().catch((e) => {
-  console.error(e);
+  log.error(e);
   process.exit(1);
 });

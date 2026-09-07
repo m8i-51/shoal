@@ -15,6 +15,13 @@ import OpenAI from "openai";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import * as log from "./log";
+import {
+  PROVIDER_DEFAULT_MODELS,
+  findProvider,
+  resolveCredential,
+  type ProviderSpec,
+} from "./providers";
 
 // ---- 型定義（Anthropic 互換） ----
 
@@ -471,117 +478,90 @@ class CodexClient {
 
 // ---- Factory ----
 
-export type LLMClient =
-  | AnthropicClient
-  | BedrockClient
-  | OpenAICompatClient
-  | CodexClient
-  | { createMessage: (params: CreateMessageParams) => Promise<Message> };
+/**
+ * What every provider client must do. This was a union of the four concrete
+ * classes plus a structural fallback, which meant the type grew an arm for
+ * each new provider and consumers could accidentally depend on a concrete
+ * class. They only ever call `createMessage`, so that is the contract.
+ */
+export interface LLMClient {
+  createMessage(params: CreateMessageParams): Promise<Message>;
+}
 
 /**
- * Default model per provider, when `.env` sets `LLM_PROVIDER` without
- * `LLM_MODEL`. This is the single source of truth for those defaults —
- * `bin/init.js`'s interactive prompt (its own copy, since it runs as plain
- * JS and cannot import this `.ts` module directly) is cross-checked against
- * it by `framework/__tests__/provider-defaults.test.ts`, so a retired model
- * id has one place to fix instead of drifting silently in a second copy.
- *
- * `ollama` and `lm-studio` are intentionally absent: local model catalogs
- * vary per machine, so both the runtime (`""` for lm-studio, `llama3.2` as a
- * common Ollama pull) and the interactive prompt ask rather than assume.
+ * The `claude-cli` provider does not speak the Messages API at all — it runs
+ * through the Agent SDK in `tool-session.ts`. It still needs a client object
+ * so the factory has one shape to return, and this one fails loudly rather
+ * than silently doing nothing if a lane ever routes past `runToolSession`.
  */
-export const PROVIDER_DEFAULT_MODELS: Record<string, string> = {
-  anthropic: "claude-haiku-4-5-20251001",
-  // anthropic.claude-3-5-haiku-20241022-v1:0 (the previous default) is retired.
-  bedrock: "anthropic.claude-haiku-4-5-20251001-v1:0",
-  codex: "gpt-5.1-codex-mini",
-  "claude-cli": "claude-sonnet-4-6",
-  ollama: "llama3.2",
-  "lm-studio": "",
-  groq: "llama-3.3-70b-versatile",
-  gemini: "gemini-2.0-flash",
-  openai: "gpt-4o-mini",
-  // google/gemini-flash-1.5 (the previous default) points at a retired Gemini
-  // 1.5 generation; keep it aligned with the "gemini" compat provider above.
-  openrouter: "google/gemini-2.0-flash-001",
-};
+function claudeCliPlaceholder(): LLMClient {
+  return {
+    createMessage: async () => {
+      throw new Error(
+        "LLM_PROVIDER=claude-cli does not support createMessage; use runToolSession / completeText from framework/tool-session.ts",
+      );
+    },
+  };
+}
 
-// OpenAI-compat プロバイダのデフォルト設定
-// LLM_BASE_URL / LLM_MODEL で個別上書き可能
-const COMPAT_PROVIDERS: Record<string, { baseURL: string; defaultModel: string }> = {
-  ollama:       { baseURL: "http://localhost:11434/v1",                               defaultModel: PROVIDER_DEFAULT_MODELS.ollama },
-  "lm-studio":  { baseURL: "http://localhost:1234/v1",                                defaultModel: PROVIDER_DEFAULT_MODELS["lm-studio"] },
-  groq:         { baseURL: "https://api.groq.com/openai/v1",                         defaultModel: PROVIDER_DEFAULT_MODELS.groq },
-  gemini:       { baseURL: "https://generativelanguage.googleapis.com/v1beta/openai", defaultModel: PROVIDER_DEFAULT_MODELS.gemini },
-  openai:       { baseURL: "https://api.openai.com/v1",                              defaultModel: PROVIDER_DEFAULT_MODELS.openai },
-  openrouter:   { baseURL: "https://openrouter.ai/api/v1",                           defaultModel: PROVIDER_DEFAULT_MODELS.openrouter },
-};
+function buildClient(spec: ProviderSpec, model: string, baseURL: string | undefined): LLMClient {
+  switch (spec.kind) {
+    case "anthropic":
+      return new AnthropicClient(process.env.ANTHROPIC_API_KEY ?? "");
+    case "bedrock":
+      return new BedrockClient();
+    case "codex":
+      return new CodexClient(model);
+    case "claude-cli":
+      return claudeCliPlaceholder();
+    case "openai-compat":
+      return new OpenAICompatClient(
+        resolveCredential(spec) ?? "",
+        baseURL ?? spec.baseURL ?? "https://api.openai.com/v1",
+        model,
+      );
+  }
+}
+
+/**
+ * A provider named only by `LLM_BASE_URL`: any OpenAI-compatible endpoint the
+ * operator points at, with no registry entry of its own.
+ */
+function customCompatSpec(id: string): ProviderSpec {
+  return {
+    id,
+    label: id,
+    kind: "openai-compat",
+    defaultModel: PROVIDER_DEFAULT_MODELS.openai,
+    credentialEnv: ["LLM_API_KEY", "OPENAI_API_KEY"],
+    free: false,
+  };
+}
 
 export function createLLMClient(): { client: LLMClient; defaultModel: string; provider: string } {
   const provider = process.env.LLM_PROVIDER ?? "anthropic";
   const baseURL = process.env.LLM_BASE_URL;
   const model = process.env.LLM_MODEL;
 
-  // Bedrock
-  if (provider === "bedrock") {
-    const effectiveModel = model ?? PROVIDER_DEFAULT_MODELS.bedrock;
-    console.log(`[LLM] provider: Amazon Bedrock (region: ${process.env.AWS_REGION ?? "us-east-1"}), model: ${effectiveModel}`);
-    return {
-      client: new BedrockClient(),
-      defaultModel: effectiveModel,
-      provider: "bedrock",
-    };
-  }
+  // An unknown provider id is only usable when LLM_BASE_URL says where to send
+  // the request; otherwise fall back to Anthropic, as every release has.
+  const spec = findProvider(provider) ?? (baseURL ? customCompatSpec(provider) : findProvider("anthropic")!);
+  const effectiveModel = model ?? spec.defaultModel;
+  const effectiveBaseURL = baseURL ?? spec.baseURL;
 
-  // Codex は独自クライアント
-  if (provider === "codex") {
-    const effectiveModel = model ?? PROVIDER_DEFAULT_MODELS.codex;
-    console.log(`[LLM] provider: Codex (ChatGPT subscription), model: ${effectiveModel}`);
-    return {
-      client: new CodexClient(effectiveModel),
-      defaultModel: effectiveModel,
-      provider: "codex",
-    };
-  }
+  const where =
+    spec.kind === "openai-compat" && effectiveBaseURL
+      ? ` (${effectiveBaseURL})`
+      : spec.kind === "bedrock"
+        ? ` (region: ${process.env.AWS_REGION ?? "us-east-1"})`
+        : "";
+  log.info(`[LLM] provider: ${spec.label}${where}, model: ${effectiveModel}`);
 
-  // Claude CLI / Agent SDK（Claude Code ログイン）。Messages createMessage は使わない。
-  if (provider === "claude-cli") {
-    const effectiveModel = model ?? PROVIDER_DEFAULT_MODELS["claude-cli"];
-    console.log(`[LLM] provider: Claude CLI (Claude Code login), model: ${effectiveModel}`);
-    return {
-      client: {
-        createMessage: async () => {
-          throw new Error(
-            'LLM_PROVIDER=claude-cli does not support createMessage; use runToolSession / completeText from framework/tool-session.ts'
-          );
-        },
-      },
-      defaultModel: effectiveModel,
-      provider: "claude-cli",
-    };
-  }
-
-  // OpenAI-compat: 既知プロバイダ名 または LLM_BASE_URL が設定されている場合
-  const compatDefaults = COMPAT_PROVIDERS[provider];
-  if (compatDefaults || baseURL) {
-    const apiKey = process.env.LLM_API_KEY ?? process.env.OPENAI_API_KEY ?? "";
-    const effectiveBaseURL = baseURL ?? compatDefaults?.baseURL ?? "https://api.openai.com/v1";
-    const effectiveModel = model ?? compatDefaults?.defaultModel ?? PROVIDER_DEFAULT_MODELS.openai;
-    console.log(`[LLM] provider: ${provider} (${effectiveBaseURL}), model: ${effectiveModel}`);
-    return {
-      client: new OpenAICompatClient(apiKey, effectiveBaseURL, effectiveModel),
-      defaultModel: effectiveModel,
-      provider,
-    };
-  }
-
-  // Anthropic (default)
-  const apiKey = process.env.ANTHROPIC_API_KEY ?? "";
-  const effectiveModel = model ?? PROVIDER_DEFAULT_MODELS.anthropic;
-  console.log(`[LLM] provider: Anthropic, model: ${effectiveModel}`);
   return {
-    client: new AnthropicClient(apiKey),
+    client: buildClient(spec, effectiveModel, effectiveBaseURL),
     defaultModel: effectiveModel,
-    provider: "anthropic",
+    provider: spec.id,
   };
 }
+
+export { PROVIDER_DEFAULT_MODELS } from "./providers";

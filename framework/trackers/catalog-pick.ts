@@ -5,6 +5,7 @@
  */
 import { createLLMClient } from "../llm-client";
 import { completeText } from "../tool-session";
+import * as log from "../log";
 
 export interface CatalogItem {
   id: string;
@@ -137,7 +138,7 @@ export async function defaultPickWithModel(
     const byLongest = [...items].sort((a, b) => b.id.length - a.id.length);
     return byLongest.find((i) => tokens.includes(i.id)) ?? null;
   } catch (e) {
-    console.warn(`[trackers] model picker failed for ${kind}:`, e instanceof Error ? e.message : e);
+    log.warn(`[trackers] model picker failed for ${kind}:`, e instanceof Error ? e.message : e);
     return null;
   }
 }
@@ -154,7 +155,7 @@ export async function pickCatalogItem(options: {
 
   const named = pickByName(items, category, kind);
   if (named) {
-    console.log(
+    log.info(
       `${logPrefix} selected ${kind} "${named.name}" (id=${named.id}) for category=${category} (name match)`,
     );
     return named;
@@ -163,7 +164,7 @@ export async function pickCatalogItem(options: {
   const picker = pickWithModel ?? defaultPickWithModel;
   const fromModel = await picker(items, category, kind);
   if (fromModel) {
-    console.log(
+    log.info(
       `${logPrefix} selected ${kind} "${fromModel.name}" (id=${fromModel.id}) for category=${category} (model)`,
     );
     return fromModel;
@@ -171,7 +172,7 @@ export async function pickCatalogItem(options: {
 
   const fallback = items[0] ?? null;
   if (fallback) {
-    console.warn(
+    log.warn(
       `${logPrefix} could not match ${kind} for category=${category}; falling back to "${fallback.name}" (id=${fallback.id})`,
     );
   }

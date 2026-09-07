@@ -54,7 +54,7 @@ function makeRunLog(overrides: Partial<RunLog> = {}): RunLog {
       regressionChecked: 0,
       regressionFailed: 0,
       rateLimitRetries: 0,
-      cost: { inputTokens: 0, outputTokens: 0, estimatedUSD: null },
+      cost: { inputTokens: 0, imageInputTokens: 0, outputTokens: 0, estimatedUSD: null },
     },
     ...overrides,
   };

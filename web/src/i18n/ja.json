@@ -207,6 +207,7 @@
     "statIssued": "起票された finding",
     "statSkipped": "スキップ",
     "statUnprocessed": "未処理",
+    "statCritical": "Critical",
     "statEdgeRisks": "尖りリスク",
     "issuesTitle": "起票した issue",
     "mergedFrom": "{{count}} 件の finding をまとめた",
@@ -239,6 +240,8 @@
     "average": "1 run 平均",
     "last30d": "直近 30 日",
     "tokens": "入力 / 出力トークン",
+    "screenshotShare": "入力に占めるスクリーンショット",
+    "estimated": "推定",
     "missing": "{{count}} 件の run はコスト推計がなく、累計に含まれていません。"
   }
 }

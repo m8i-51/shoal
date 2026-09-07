@@ -9,6 +9,14 @@ import { recordIssueLink } from "./adoption";
 import { commentReturningUserReReports } from "./triage-rereport";
 import { formatIssueRef } from "./issue-id";
 import { neutralizeMentions } from "./mentions";
+import { ISSUE_CATEGORIES, isIssueCategory } from "./issue-category";
+import {
+  formatSeverityLine,
+  normalizeSeverity,
+  severityLabel,
+  severitySchemaProperty,
+  type Severity,
+} from "./severity";
 import {
   EDGE_RISK_LABEL,
   canCarryEdgeRisk,
@@ -17,6 +25,7 @@ import {
   normalizeEdgeRisk,
   type ProductEdge,
 } from "./product-edge";
+import * as log from "./log";
 
 function buildTriageTools(hasProductEdge: boolean): Anthropic.Tool[] {
   const tools: Anthropic.Tool[] = [
@@ -33,14 +42,15 @@ function buildTriageTools(hasProductEdge: boolean): Anthropic.Tool[] {
         properties: {
           title: { type: "string", description: "Issue title (concise)" },
           body: { type: "string", description: "Issue body with details from multiple perspectives" },
-          category: { type: "string", enum: ["ux", "feature-request", "bug", "goal-gap"] },
+          category: { type: "string", enum: [...ISSUE_CATEGORIES] },
+          severity: severitySchemaProperty(),
           merged_finding_ids: {
             type: "array",
             items: { type: "string" },
             description: "IDs of the findings merged into this Issue",
           },
         },
-        required: ["title", "body", "category", "merged_finding_ids"],
+        required: ["title", "body", "category", "severity", "merged_finding_ids"],
       },
     },
     {
@@ -89,6 +99,11 @@ export interface TriagedIssue {
   /** Title as filed on the tracker, including the `[category]` prefix. */
   title: string;
   category: string;
+  /**
+   * How badly it hurts, as triage judged it — null when the model gave a value
+   * we could not place, so a missing severity is never confused with a real one.
+   */
+  severity: Severity | null;
   /** Tracker URL, or null when no tracker is configured (report-only runs). */
   url: string | null;
   /** Findings merged into this one issue. */
@@ -153,11 +168,11 @@ export async function runTriageAgent(
   productEdge?: ProductEdge,
 ): Promise<TriageResult> {
   if (findings.length === 0) {
-    console.log("\n[triage] no findings, skipping");
+    log.info("\n[triage] no findings, skipping");
     return emptyTriageResult();
   }
 
-  console.log(`\n[triage] starting (findings: ${findings.length})`);
+  log.info(`\n[triage] starting (findings: ${findings.length})`);
 
   const openIssues = await tracker.fetchOpenIssues();
   const { results: reReports, remaining: triageFindings } = await commentReturningUserReReports(
@@ -167,12 +182,12 @@ export async function runTriageAgent(
   );
   for (const report of reReports) {
     if (report.commented) {
-      console.log(`  [triage] re-report comment on ${formatIssueRef(report.issueNumber)}: ${report.issueTitle}`);
+      log.info(`  [triage] re-report comment on ${formatIssueRef(report.issueNumber)}: ${report.issueTitle}`);
     }
   }
 
   if (triageFindings.length === 0) {
-    console.log("[triage] all findings handled via re-report comments");
+    log.info("[triage] all findings handled via re-report comments");
     const reReportSkips = reReports.filter((r) => r.commented).map(reReportSkip);
     return emptyTriageResult({
       skipped: reReportSkips.map((s) => s.findingId),
@@ -213,6 +228,15 @@ Organize feedback collected by multiple agents and post it as issue tickets.
 - feature-request: missing capability users would expect
 - goal-gap: the app fails to meet one of its stated goals — use only when a finding directly undermines a specific app goal
 
+[Severity Guide]
+Judge from the user impact you can see in the finding, not from how hard a fix looks — you cannot see the codebase.
+- critical: blocks the core task entirely, loses data, or exposes something it should not
+- major: completable only via a workaround a real user would likely give up before finding
+- minor: noticeable friction or a wrong detail that does not stop the task
+- trivial: cosmetic, or an improvement nobody is currently blocked by
+Severity is independent of category: a ux finding can be critical, a bug can be trivial.
+When merging findings of differing impact, use the highest.
+
 [Merging Guidelines]
 - Multiple reports about the same screen/feature can be merged into one issue
 - Merge into one issue even across categories if it's the same underlying problem
@@ -239,20 +263,27 @@ Organize feedback collected by multiple agents and post it as issue tickets.
           timestamp: f.timestamp,
           pending: pendingIds.has(f.id),
         }));
-        console.log(`  [triage] fetched findings (${triageFindings.length})`);
+        log.info(`  [triage] fetched findings (${triageFindings.length})`);
         return JSON.stringify(result);
       }
 
       if (t.name === "create_issue") {
-        const { title, body, category, merged_finding_ids, edge_risk } = input as {
+        const { title, body, category, severity: rawSeverity, merged_finding_ids, edge_risk } = input as {
           title?: string;
           body?: string;
           category?: string;
+          severity?: unknown;
           merged_finding_ids?: string[];
           edge_risk?: unknown;
         };
         if (!title || !body || !category) {
           return JSON.stringify({ error: "create_issue: missing required fields" });
+        }
+        const safeCategory = category.trim().toLowerCase();
+        if (!isIssueCategory(safeCategory)) {
+          return JSON.stringify({
+            error: `invalid category "${category}". Must be one of: ${ISSUE_CATEGORIES.join(", ")}`,
+          });
         }
         const mergedIds = merged_finding_ids ?? [];
         if (mergedIds.length === 0) {
@@ -260,35 +291,49 @@ Organize feedback collected by multiple agents and post it as issue tickets.
         }
         const mergedFindings = triageFindings.filter((f) => mergedIds.includes(f.id));
         const mergedAgents = mergedFindings.map((f) => `${f.agentName} (${f.role})`);
+        // Persona names are model-written and can contain @mentions; the
+        // Screenshots list used to concatenate them raw, which pinged on GitHub
+        // even after Reported by was neutralized. Titles stay as-is: GitHub
+        // does not notify on mentions in titles.
         const screenshots = mergedFindings
           .filter((f) => f.screenshotPath)
-          .map((f) => `- ${f.agentName}: ${f.screenshotPath}`);
+          .map((f) => neutralizeMentions(`- ${f.agentName}: ${f.screenshotPath}`));
         const screenshotSection = screenshots.length > 0
           ? `\n\n**Screenshots:**\n${screenshots.join("\n")}`
           : "";
         // edge が宣言されているときだけ、かつ defect カテゴリ以外にのみ印を付ける
-        const edgeRisk = edgePrompt && canCarryEdgeRisk(category) ? normalizeEdgeRisk(edge_risk) : null;
+        const edgeRisk = edgePrompt && canCarryEdgeRisk(safeCategory) ? normalizeEdgeRisk(edge_risk) : null;
         if (edge_risk && !edgeRisk) {
           const reason = !edgePrompt
             ? "no product edge declared"
-            : !canCarryEdgeRisk(category)
-              ? `a ${category} is a defect, not a positioning call`
+            : !canCarryEdgeRisk(safeCategory)
+              ? `a ${safeCategory} is a defect, not a positioning call`
               : "edge / why missing";
-          console.log(`  [triage] edge_risk ignored — ${reason}`);
+          log.info(`  [triage] edge_risk ignored — ${reason}`);
         }
         const edgeRiskSection = edgeRisk ? formatEdgeRiskSection(edgeRisk) : "";
-        const fullBody = `**Category:** ${category}\n\n${neutralizeMentions(body)}${screenshotSection}${edgeRiskSection}\n\n---\n**Reported by:** ${mergedAgents.join(", ")}\n*This Issue was auto-generated by an AI triage agent*`;
+        // A severity we cannot place stays null rather than defaulting: a
+        // fabricated level is worse than a missing one, because a team sorting
+        // by severity cannot tell the two apart.
+        const severity: Severity | null = normalizeSeverity(rawSeverity);
+        if (rawSeverity != null && severity == null) {
+          log.info(`  [triage] unrecognised severity ${JSON.stringify(rawSeverity)} — filing without one`);
+        }
+        const fullBody = `**Category:** ${safeCategory}\n${formatSeverityLine(severity)}\n${neutralizeMentions(body)}${screenshotSection}${edgeRiskSection}\n\n---\n**Reported by:** ${neutralizeMentions(mergedAgents.join(", "))}\n*This Issue was auto-generated by an AI triage agent*`;
         const cleanTitle = title.replace(/^\[[^\]]+\]\s*/i, "");
-        const labels = edgeRisk ? [category, "feedback-agent", EDGE_RISK_LABEL] : [category, "feedback-agent"];
-        const url = await tracker.createIssue(`[${category}] ${cleanTitle}`, fullBody, labels);
+        const labels = [safeCategory, "feedback-agent"];
+        if (severity) labels.push(severityLabel(severity));
+        if (edgeRisk) labels.push(EDGE_RISK_LABEL);
+        const url = await tracker.createIssue(`[${safeCategory}] ${cleanTitle}`, fullBody, labels);
         if (url === null && !tracker.isEmpty) {
           return JSON.stringify({ created: false, error: "tracker returned null — check logs" });
         }
         mergedIds.forEach((id) => { pendingIds.delete(id); issuedIds.push(id); });
         issuesCreated++;
         issues.push({
-          title: `[${category}] ${cleanTitle}`,
-          category,
+          title: `[${safeCategory}] ${cleanTitle}`,
+          category: safeCategory,
+          severity,
           url,
           mergedFindingIds: mergedIds,
           edgeRisk,
@@ -296,7 +341,7 @@ Organize feedback collected by multiple agents and post it as issue tickets.
         });
         if (edgeRisk) {
           edgeRiskIds.push(...mergedIds);
-          console.log(`  [triage] edge risk flagged: ${edgeRisk.edge}`);
+          log.info(`  [triage] edge risk flagged: ${edgeRisk.edge}`);
         }
         if (url && agentAssignments) {
           const lenses = new Set<string>();
@@ -308,15 +353,15 @@ Organize feedback collected by multiple agents and post it as issue tickets.
           }
           recordIssueLink({
             url,
-            title: `[${category}] ${cleanTitle}`,
-            category,
+            title: `[${safeCategory}] ${cleanTitle}`,
+            category: safeCategory,
             lenses: [...lenses],
             scenarios: [...scenarios],
             runId: mergedFindings[0]?.runId ?? "",
             createdAt: new Date().toISOString(),
           });
         }
-        console.log(`  [triage] issue created: "[${category}] ${cleanTitle}" (merged ${mergedIds.length})`);
+        log.info(`  [triage] issue created: "[${safeCategory}] ${cleanTitle}" (merged ${mergedIds.length})`);
         return JSON.stringify({ created: true, url, mergedCount: mergedIds.length, edgeRisk: Boolean(edgeRisk) });
       }
 
@@ -329,7 +374,7 @@ Organize feedback collected by multiple agents and post it as issue tickets.
         skippedIds.push(finding_id);
         skips.push({ findingId: finding_id, reason: reason ?? "no reason given" });
         skipped++;
-        console.log(`  [triage] skipped: ${finding_id} — ${reason}`);
+        log.info(`  [triage] skipped: ${finding_id} — ${reason}`);
         return JSON.stringify({ skipped: true });
       }
 
@@ -369,6 +414,6 @@ Organize feedback collected by multiple agents and post it as issue tickets.
   }
 
   const edgeRiskNote = edgeRiskIds.length > 0 ? ` / edge-risk: ${edgeRiskIds.length}` : "";
-  console.log(`[triage] done (issues created: ${issuesCreated} / skipped: ${skipped}${edgeRiskNote})`);
+  log.info(`[triage] done (issues created: ${issuesCreated} / skipped: ${skipped}${edgeRiskNote})`);
   return result;
 }

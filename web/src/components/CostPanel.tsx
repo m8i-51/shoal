@@ -60,6 +60,14 @@ export function CostPanel({ runs }: { runs: RunSummary[] }) {
               <strong>{formatTokens(stats.outputTokens)}</strong>
             </span>
           )}
+          {stats.imageInputTokens > 0 && stats.inputTokens > 0 && (
+            <span style={styles.subStat}>
+              {t("cost.screenshotShare")}:{" "}
+              <strong>{Math.round((stats.imageInputTokens / stats.inputTokens) * 100)}%</strong>
+              {" "}
+              <span style={styles.estimated}>({t("cost.estimated")})</span>
+            </span>
+          )}
         </div>
       </div>
 
@@ -71,6 +79,9 @@ export function CostPanel({ runs }: { runs: RunSummary[] }) {
 }
 
 const styles = {
+  estimated: {
+    color: "#475569",
+  },
   panel: {
     background: "#fff",
     border: "1px solid #e2e8f0",

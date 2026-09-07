@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import type { Finding, RunLog } from "./types";
 import { redactRunLog } from "./redact";
+import * as log from "./log";
 
 export const collectedFindings: Finding[] = [];
 export let runLog: RunLog;
@@ -94,7 +95,7 @@ export function initRunLog(agentCount: number, repo: string): void {
       regressionChecked: 0,
       regressionFailed: 0,
       rateLimitRetries: 0,
-      cost: { inputTokens: 0, outputTokens: 0, estimatedUSD: null },
+      cost: { inputTokens: 0, imageInputTokens: 0, outputTokens: 0, estimatedUSD: null },
     },
   };
 }
@@ -108,5 +109,5 @@ export function saveRunLog(): void {
   const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   const filePath = path.join(logsDir, `${ts}_${runLog.runId}.json`);
   fs.writeFileSync(filePath, JSON.stringify(redactRunLog(runLog), null, 2), "utf-8");
-  console.log(`\n[log] saved: ${filePath}`);
+  log.info(`\n[log] saved: ${filePath}`);
 }

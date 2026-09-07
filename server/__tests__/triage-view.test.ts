@@ -107,8 +107,56 @@ describe("buildTriageView", () => {
       findingsSkipped: 0,
       findingsUnprocessed: 0,
       edgeRisks: 0,
+      critical: 0,
     });
     expect(view.legacy).toBe(false);
+  });
+
+  it("severity が記録されていない過去の run は critical 0 / severity null で読める", () => {
+    writeFinding("run_1", makeFinding({ id: "f1" }));
+    writeTriageResult("run_1", {
+      issued: ["f1"],
+      skipped: [],
+      unprocessed: [],
+      edgeRisks: [],
+      issues: [{
+        title: "[bug] Login broken",
+        category: "bug",
+        url: null,
+        mergedFindingIds: ["f1"],
+        edgeRisk: null,
+        createdAt: "2026-01-02T00:00:00.000Z",
+      }],
+      skips: [],
+    });
+    const view = buildTriageView("run_1")!;
+    expect(view.issues[0].severity).toBeNull();
+    expect(view.stats.critical).toBe(0);
+  });
+
+  it("severity を読み出し critical を数える", () => {
+    writeFinding("run_1", makeFinding({ id: "f1" }));
+    writeFinding("run_1", makeFinding({ id: "f2" }));
+    writeTriageResult("run_1", {
+      issued: ["f1", "f2"],
+      skipped: [],
+      unprocessed: [],
+      edgeRisks: [],
+      issues: [
+        {
+          title: "[bug] Login broken", category: "bug", severity: "critical", url: null,
+          mergedFindingIds: ["f1"], edgeRisk: null, createdAt: "2026-01-02T00:00:00.000Z",
+        },
+        {
+          title: "[ux] Cramped footer", category: "ux", severity: "trivial", url: null,
+          mergedFindingIds: ["f2"], edgeRisk: null, createdAt: "2026-01-02T00:00:00.000Z",
+        },
+      ],
+      skips: [],
+    });
+    const view = buildTriageView("run_1")!;
+    expect(view.issues.map((i) => i.severity)).toEqual(["critical", "trivial"]);
+    expect(view.stats.critical).toBe(1);
   });
 
   it("edge-risk の尖りと理由をそのまま返す", () => {

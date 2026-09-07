@@ -16,6 +16,7 @@ function makeRun(overrides: Partial<RunSummary> = {}): RunSummary {
     hasReport: true,
     estimatedCostUSD: 1,
     inputTokens: 1000,
+    imageInputTokens: 700,
     outputTokens: 500,
     regressionChecked: 0,
     regressionFailed: 0,
@@ -68,6 +69,7 @@ describe("computeCostStats", () => {
       makeRun({ runId: "run_1", estimatedCostUSD: null, inputTokens: 200, outputTokens: 20 }),
     ])!;
     expect(stats.inputTokens).toBe(300);
+    expect(stats.imageInputTokens).toBe(1400);
     expect(stats.outputTokens).toBe(30);
   });
 
@@ -97,5 +99,14 @@ describe("formatTokens", () => {
     expect(formatTokens(1_500)).toBe("2K");
     expect(formatTokens(12_400)).toBe("12K");
     expect(formatTokens(2_450_000)).toBe("2.5M");
+  });
+});
+
+describe("computeCostStats — screenshot share", () => {
+  it("画像トークンが記録されていない過去の run は 0 として集計する", () => {
+    const legacy = makeRun({ runId: "run_1", estimatedCostUSD: 1, inputTokens: 100 });
+    delete (legacy as { imageInputTokens?: number }).imageInputTokens;
+    const stats = computeCostStats([legacy])!;
+    expect(stats.imageInputTokens).toBe(0);
   });
 });

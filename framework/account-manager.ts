@@ -18,6 +18,7 @@ import { findBestByRole, roleAffinity } from "./role-match";
 import { clickDescribedElement, clickToolHasTarget } from "./click-target";
 import { formatToolCallLog, isPasswordLabel, redactFillResultText, REDACTED_SECRET } from "./redact";
 import { registerSecret } from "./trace-scrub";
+import * as log from "./log";
 
 export interface TestAccount {
   email: string;
@@ -588,7 +589,7 @@ async function captureAccountSession(
     try {
       const attempt = await performLogin(page, loginUrls, account);
       if (!attempt.ok) {
-        console.warn(`    login failed for ${account.email}: ${describeLoginFailure(attempt)}`);
+        log.warn(`    login failed for ${account.email}: ${describeLoginFailure(attempt)}`);
         return "";
       }
       return await saveContextSession(isolated, account.role);
@@ -701,22 +702,22 @@ export async function runAccountManager(
   runId: string,
   existingAccounts: TestAccount[] = [],
 ): Promise<TestAccount[]> {
-  console.log("\n[account-manager] starting...");
+  log.info("\n[account-manager] starting...");
 
   const loginPath = resolveLoginPath(productSpec);
   const loginUrls = loginCandidateUrls(baseUrl, loginPath);
   if (loginPath) {
-    console.log(`[account-manager] login URL candidates: ${loginUrls.join(" → ")}`);
+    log.info(`[account-manager] login URL candidates: ${loginUrls.join(" → ")}`);
   }
 
   const page = await context.newPage();
   const observation = setupObservation(page);
 
   // まず seed アカウントでログイン（発見済みのログイン URL を優先）
-  console.log(`[account-manager] logging in as ${credentials.email}...`);
+  log.info(`[account-manager] logging in as ${credentials.email}...`);
   const loggedIn = await performLogin(page, loginUrls, credentials);
   if (!loggedIn.ok) {
-    console.warn(`[account-manager] seed login failed (${describeLoginFailure(loggedIn)}) — skipping role discovery, still trying known accounts`);
+    log.warn(`[account-manager] seed login failed (${describeLoginFailure(loggedIn)}) — skipping role discovery, still trying known accounts`);
     await page.close();
     return persistKnownAccounts(
       loginUrls,
@@ -725,7 +726,7 @@ export async function runAccountManager(
       { [credentials.email]: "" },
     );
   }
-  console.log("[account-manager] login succeeded");
+  log.info("[account-manager] login succeeded");
 
   const seedRole = existingAccounts.find((a) => a.email === credentials.email)?.role || "user";
   const seedStatePath = await saveContextSession(context, seedRole);
@@ -765,7 +766,7 @@ If user management is not accessible from this account, or the app has no role s
     description: t.description ?? t.name,
     input_schema: t.input_schema as Record<string, unknown>,
     execute: async (input: Record<string, unknown>): Promise<ToolResultContent> => {
-      console.log(`  → ${formatToolCallLog(t.name, input)}`);
+      log.info(`  → ${formatToolCallLog(t.name, input)}`);
       let resultText: string;
       let screenshot: string | null = null;
 
@@ -848,7 +849,7 @@ If user management is not accessible from this account, or the app has no role s
             const role = input.role as string | undefined;
             if (!email || !password || !role) { resultText = "save_account: missing required fields"; break; }
             savedAccounts.push({ email, password, role });
-            console.log(`  [account-manager] saved account: ${email} (role: ${role})`);
+            log.info(`  [account-manager] saved account: ${email} (role: ${role})`);
             resultText = `Account saved: ${email} (${role})`;
             break;
           }
@@ -868,7 +869,7 @@ If user management is not accessible from this account, or the app has no role s
               category: "ux",
               timestamp: new Date().toISOString(),
             });
-            console.log(`  [account-manager] finding: ${title}`);
+            log.info(`  [account-manager] finding: ${title}`);
             resultText = "Finding recorded.";
             break;
           }
@@ -900,7 +901,7 @@ If user management is not accessible from this account, or the app has no role s
   });
 
   await page.close();
-  console.log(`[account-manager] found ${savedAccounts.length} newly created account(s)`);
+  log.info(`[account-manager] found ${savedAccounts.length} newly created account(s)`);
 
   return persistKnownAccounts(
     loginUrls,
@@ -918,18 +919,18 @@ async function persistKnownAccounts(
 ): Promise<TestAccount[]> {
   const testAccounts: TestAccount[] = [];
   for (const account of accounts) {
-    console.log(`  [account-manager] saving session for ${account.email} (role: ${account.role})`);
+    log.info(`  [account-manager] saving session for ${account.email} (role: ${account.role})`);
     let statePath = Object.prototype.hasOwnProperty.call(alreadySaved, account.email)
       ? alreadySaved[account.email]
       : await captureAccountSession(loginUrls, context, account);
     if (!statePath && account.storageStatePath) {
       statePath = account.storageStatePath;
-      console.warn(`    login failed for ${account.email} — keeping previously saved session`);
+      log.warn(`    login failed for ${account.email} — keeping previously saved session`);
     }
     if (statePath) {
-      console.log(`    saved: ${statePath}`);
+      log.info(`    saved: ${statePath}`);
     } else {
-      console.warn(`    login failed for ${account.email} — storageState not saved; credentials kept for browser-agent handoff`);
+      log.warn(`    login failed for ${account.email} — storageState not saved; credentials kept for browser-agent handoff`);
     }
     testAccounts.push({ ...account, storageStatePath: statePath });
   }
@@ -937,9 +938,9 @@ async function persistKnownAccounts(
   saveTestAccounts(testAccounts);
   const ready = testAccounts.filter((a) => a.storageStatePath);
   const fallback = testAccounts.filter((a) => !a.storageStatePath && hasUsableCredentials(a));
-  console.log(`[account-manager] done (${ready.length}/${testAccounts.length} account(s) with session)`);
+  log.info(`[account-manager] done (${ready.length}/${testAccounts.length} account(s) with session)`);
   if (fallback.length > 0) {
-    console.warn(`[account-manager] ${fallback.length} account(s) have no session — browser agents will receive credentials and the login URL instead of guessing`);
+    log.warn(`[account-manager] ${fallback.length} account(s) have no session — browser agents will receive credentials and the login URL instead of guessing`);
   }
   // Keep accounts without a session so the runner can hand off credentials
   // instead of leaving browser agents to invent logins.
@@ -954,7 +955,7 @@ export async function persistAccountSessions(
   accounts: TestAccount[],
 ): Promise<TestAccount[]> {
   const loginUrls = loginCandidateUrls(baseUrl, loginPath);
-  console.log("[account-manager] capturing sessions for existing accounts (no admin UI exploration)");
+  log.info("[account-manager] capturing sessions for existing accounts (no admin UI exploration)");
   const usable = accounts.filter(hasUsableCredentials);
   return persistKnownAccounts(loginUrls, context, usable, {});
 }

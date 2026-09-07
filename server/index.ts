@@ -40,6 +40,7 @@ import {
 } from "../framework/persona-from-seed.js";
 import type { ProductSpec } from "../framework/product-discovery.js";
 import { normalizeProductEdge } from "../framework/product-edge.js";
+import * as log from "../framework/log.js";
 
 function specFilePath(baseUrl: string): string {
   try {
@@ -204,7 +205,7 @@ app.post("/api/personas", personaCreateLimiter, async (req, res) => {
       res.status(502).json({ error: e.message });
       return;
     }
-    console.error("[personas] generate failed:", e);
+    log.error("[personas] generate failed:", e);
     res.status(502).json({ error: "persona generation failed" });
   }
 });
@@ -359,7 +360,7 @@ app.post("/api/runs/:runId/diary", async (req, res) => {
     const content = await generateDiary(runId, lines);
     res.json({ content });
   } catch (err) {
-    console.error("[diary] generation failed:", err);
+    log.error("[diary] generation failed:", err);
     res.status(500).json({ error: "diary generation failed" });
   }
 });
@@ -651,7 +652,7 @@ if (existsSync(distPath)) {
 
 // Express エラーハンドラ（クラッシュ防止）
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error("[server] unhandled error:", err.message);
+  log.error("[server] unhandled error:", err.message);
   if (!res.headersSent) {
     res.status(500).json({ error: "internal server error" });
   }
@@ -659,10 +660,10 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 
 // Node.js uncaught exception / rejection をログだけしてサーバーを落とさない
 process.on("uncaughtException", (err) => {
-  console.error("[server] uncaughtException:", err.message);
+  log.error("[server] uncaughtException:", err.message);
 });
 process.on("unhandledRejection", (reason) => {
-  console.error("[server] unhandledRejection:", reason);
+  log.error("[server] unhandledRejection:", reason);
 });
 
 export { app };
@@ -672,22 +673,22 @@ if (process.env.NODE_ENV !== "test") {
   try {
     assertBindingAllowed(binding);
   } catch (e) {
-    console.error(e instanceof Error ? e.message : String(e));
+    log.error(e instanceof Error ? e.message : String(e));
     process.exit(1);
   }
 
   app.listen(binding.port, binding.host, () => {
     const displayHost = binding.isLoopback ? "localhost" : binding.host;
-    console.log(`\nshoal dashboard → http://${displayHost}:${binding.port}`);
-    for (const notice of auth.notices) console.log(notice);
+    log.print(`\nshoal dashboard → http://${displayHost}:${binding.port}`);
+    for (const notice of auth.notices) log.print(notice);
     if (auth.token && !binding.isLoopback) {
-      console.warn(
+      log.warn(
         "[auth] WARNING: this listener is plain HTTP. The token travels in cleartext unless\n" +
         "       you put a TLS-terminating reverse proxy in front of it. Do not expose this\n" +
         "       port directly to an untrusted network — prefer an SSH tunnel.",
       );
     }
-    console.log("");
+    log.info("");
     startScheduler();
   });
 
@@ -702,7 +703,7 @@ if (process.env.NODE_ENV !== "test") {
     if (shuttingDown) return;
     shuttingDown = true;
     const pending = cancelAllSessions();
-    console.log(`\n[server] received ${signal}, cancelling ${pending.length} unfinished session(s)...`);
+    log.info(`\n[server] received ${signal}, cancelling ${pending.length} unfinished session(s)...`);
     await waitForSessionsToExit(pending, 5000);
     process.exit(0);
   };

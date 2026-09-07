@@ -58,6 +58,7 @@ export function Dashboard() {
               isLive: true,
               estimatedCostUSD: null,
               inputTokens: 0,
+              imageInputTokens: 0,
               outputTokens: 0,
               regressionChecked: 0,
               regressionFailed: 0,

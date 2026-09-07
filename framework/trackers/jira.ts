@@ -1,5 +1,6 @@
 import type { IssueTracker, OpenIssue, ClosedIssue } from "./types";
 import { normalizeCloseReason } from "./close-reason";
+import * as log from "../log";
 
 export class JiraTracker implements IssueTracker {
   readonly name = "jira";
@@ -42,16 +43,16 @@ export class JiraTracker implements IssueTracker {
     });
     if (!res.ok) {
       const msg = await res.text().catch(() => "");
-      console.error(`[jira] failed to create issue (${res.status}): ${msg.slice(0, 200)}`);
+      log.error(`[jira] failed to create issue (${res.status}): ${msg.slice(0, 200)}`);
       return null;
     }
     const data = await res.json() as { key?: string };
     if (!data.key) {
-      console.error("[jira] create issue response missing key");
+      log.error("[jira] create issue response missing key");
       return null;
     }
     const url = `${this.baseUrl}/browse/${data.key}`;
-    console.log(`[jira] issue created: ${url}`);
+    log.info(`[jira] issue created: ${url}`);
     return url;
   }
 
@@ -88,7 +89,7 @@ export class JiraTracker implements IssueTracker {
     });
     if (!res.ok) {
       const msg = await res.text().catch(() => "");
-      console.error(`[jira] failed to comment on issue ${issueNumber} (${res.status}): ${msg.slice(0, 200)}`);
+      log.error(`[jira] failed to comment on issue ${issueNumber} (${res.status}): ${msg.slice(0, 200)}`);
     }
     return res.ok;
   }

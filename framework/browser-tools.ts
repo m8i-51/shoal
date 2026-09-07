@@ -38,8 +38,10 @@ import type { ClosedIssue } from "./trackers/types";
 import type { Finding, RegressionCheck } from "./types";
 import type { RunTimings } from "./run-config";
 import { neutralizeMentions } from "./mentions";
+import { ISSUE_CATEGORIES, isIssueCategory } from "./issue-category";
+import * as log from "./log";
 
-export const VALID_CATEGORIES = ["ux", "feature-request", "bug", "goal-gap"];
+export const VALID_CATEGORIES: readonly string[] = ISSUE_CATEGORIES;
 
 /** Tools whose result is worth sending back with a fresh screenshot. */
 export const TOOLS_THAT_SEND_SCREENSHOT = new Set(["navigate", "post_feedback", "view_screen"]);
@@ -153,7 +155,7 @@ export async function executeBrowserTool(
         }
         const guard = await guardSafeBrowserClick(page, description ?? "", ctx.mode, ref);
         if (!guard.allowed) {
-          console.log(`  [guardrails] blocked click: ${description ?? ref}`);
+          log.info(`  [guardrails] blocked click: ${description ?? ref}`);
           screenshot = await ctx.takeScreenshot(page, `blocked_click_${String(description ?? ref).slice(0, 20)}`);
           resultText = guard.message;
           break;
@@ -242,7 +244,7 @@ export async function executeBrowserTool(
             iterations: agentLog.iterations,
           };
           ctx.scenarioOutcomes.push(outcome);
-          console.log(`  ${achieved ? "✓" : "✗"} [outcome] "${ctx.scenario.title}": ${achieved ? "achieved" : "NOT achieved"} — ${reason}`);
+          log.info(`  ${achieved ? "✓" : "✗"} [outcome] "${ctx.scenario.title}": ${achieved ? "achieved" : "NOT achieved"} — ${reason}`);
         }
         resultText = "Outcome recorded.";
         break;
@@ -251,7 +253,7 @@ export async function executeBrowserTool(
         const audit = await runA11yAudit(page);
         // Audit output quotes element markup from the page — untrusted content.
         resultText = wrapUntrusted("a11y audit", formatAuditForAgent(audit));
-        console.log(`  [a11y] ${audit.summary}`);
+        log.info(`  [a11y] ${audit.summary}`);
         break;
       }
       case "check_swarm_signals": {
@@ -268,7 +270,8 @@ export async function executeBrowserTool(
       }
       case "post_feedback": {
         const { title, body, category } = input as { title: string; body: string; category: string };
-        const safeCategory = VALID_CATEGORIES.includes(String(category)) ? String(category) : "ux";
+        const rawCategory = String(category);
+        const safeCategory = isIssueCategory(rawCategory) ? rawCategory : "ux";
         screenshot = await ctx.takeScreenshot(page, `feedback_${String(title).slice(0, 20)}`);
         const findingId = `${agentId}_${Date.now()}`;
         let findingTracePath: string | undefined;
@@ -291,7 +294,7 @@ export async function executeBrowserTool(
         };
         saveFinding(finding);
         agentLog.feedbacksSaved.push({ title: String(title), category: safeCategory, findingId: finding.id });
-        console.log(`  → [findings] saved: "${title}" (${safeCategory})`);
+        log.info(`  → [findings] saved: "${title}" (${safeCategory})`);
         resultText = `Feedback recorded: "${title}" (will become an Issue after triage)`;
         break;
       }
@@ -340,7 +343,7 @@ export async function executeBrowserTool(
           regressionUrl: null,
         });
         runLog.summary.regressionChecked++;
-        console.log(`  ✓ verified: ${issueId} "${original_issue_title}"`);
+        log.info(`  ✓ verified: ${issueId} "${original_issue_title}"`);
         resultText = JSON.stringify({ verified: true });
         break;
       }

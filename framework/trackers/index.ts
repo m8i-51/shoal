@@ -4,6 +4,7 @@ import { JiraTracker } from "./jira";
 import { NotionTracker } from "./notion";
 import { BacklogTracker } from "./backlog";
 import { AsanaTracker } from "./asana";
+import * as log from "../log";
 
 export type { IssueTracker, OpenIssue, ClosedIssue } from "./types";
 
@@ -27,7 +28,7 @@ export class AggregatedTracker implements IssueTracker {
     if (this.trackers.length === 0) return null;
     const results = await Promise.allSettled(this.trackers.map((t) => t.createIssue(title, body, labels)));
     for (const r of results) {
-      if (r.status === "rejected") console.error("[trackers] createIssue error:", r.reason);
+      if (r.status === "rejected") log.error("[trackers] createIssue error:", r.reason);
     }
     const urls = results.filter((r): r is PromiseFulfilledResult<string | null> => r.status === "fulfilled");
     return urls.map((r) => r.value).find((u) => u !== null) ?? null;
@@ -36,7 +37,7 @@ export class AggregatedTracker implements IssueTracker {
   async fetchOpenIssues(): Promise<OpenIssue[]> {
     const results = await Promise.allSettled(this.trackers.map((t) => t.fetchOpenIssues()));
     return results.flatMap((r) => {
-      if (r.status === "rejected") { console.error("[trackers] fetchOpenIssues error:", r.reason); return []; }
+      if (r.status === "rejected") { log.error("[trackers] fetchOpenIssues error:", r.reason); return []; }
       return r.value;
     });
   }
@@ -44,7 +45,7 @@ export class AggregatedTracker implements IssueTracker {
   async fetchClosedIssues(): Promise<ClosedIssue[]> {
     const results = await Promise.allSettled(this.trackers.map((t) => t.fetchClosedIssues()));
     return results.flatMap((r) => {
-      if (r.status === "rejected") { console.error("[trackers] fetchClosedIssues error:", r.reason); return []; }
+      if (r.status === "rejected") { log.error("[trackers] fetchClosedIssues error:", r.reason); return []; }
       return r.value;
     });
   }
@@ -53,7 +54,7 @@ export class AggregatedTracker implements IssueTracker {
     if (this.trackers.length === 0) return false;
     const results = await Promise.allSettled(this.trackers.map((t) => t.commentOnIssue(issueNumber, body)));
     for (const r of results) {
-      if (r.status === "rejected") console.error("[trackers] commentOnIssue error:", r.reason);
+      if (r.status === "rejected") log.error("[trackers] commentOnIssue error:", r.reason);
     }
     return results.some((r) => r.status === "fulfilled" && r.value === true);
   }
@@ -81,7 +82,7 @@ export function buildTrackers(): AggregatedTracker {
         if (token && repo) {
           trackers.push(new GitHubTracker(token, repo));
         } else {
-          console.warn("[trackers] github: GITHUB_TOKEN or GITHUB_REPO not set, skipping");
+          log.warn("[trackers] github: GITHUB_TOKEN or GITHUB_REPO not set, skipping");
         }
         break;
       }
@@ -93,7 +94,7 @@ export function buildTrackers(): AggregatedTracker {
         if (baseUrl && email && apiToken && projectKey) {
           trackers.push(new JiraTracker(baseUrl, email, apiToken, projectKey));
         } else {
-          console.warn("[trackers] jira: JIRA_BASE_URL / JIRA_EMAIL / JIRA_API_TOKEN / JIRA_PROJECT_KEY required, skipping");
+          log.warn("[trackers] jira: JIRA_BASE_URL / JIRA_EMAIL / JIRA_API_TOKEN / JIRA_PROJECT_KEY required, skipping");
         }
         break;
       }
@@ -103,7 +104,7 @@ export function buildTrackers(): AggregatedTracker {
         if (token && databaseId) {
           trackers.push(new NotionTracker(token, databaseId));
         } else {
-          console.warn("[trackers] notion: NOTION_API_KEY or NOTION_DATABASE_ID not set, skipping");
+          log.warn("[trackers] notion: NOTION_API_KEY or NOTION_DATABASE_ID not set, skipping");
         }
         break;
       }
@@ -114,7 +115,7 @@ export function buildTrackers(): AggregatedTracker {
         if (space && apiKey && !isNaN(projectId)) {
           trackers.push(new BacklogTracker(space, apiKey, projectId));
         } else {
-          console.warn("[trackers] backlog: BACKLOG_SPACE / BACKLOG_API_KEY / BACKLOG_PROJECT_ID required, skipping");
+          log.warn("[trackers] backlog: BACKLOG_SPACE / BACKLOG_API_KEY / BACKLOG_PROJECT_ID required, skipping");
         }
         break;
       }
@@ -124,19 +125,19 @@ export function buildTrackers(): AggregatedTracker {
         if (token && projectId) {
           trackers.push(new AsanaTracker(token, projectId));
         } else {
-          console.warn("[trackers] asana: ASANA_ACCESS_TOKEN or ASANA_PROJECT_ID not set, skipping");
+          log.warn("[trackers] asana: ASANA_ACCESS_TOKEN or ASANA_PROJECT_ID not set, skipping");
         }
         break;
       }
       default:
-        console.warn(`[trackers] unknown tracker: "${name}"`);
+        log.warn(`[trackers] unknown tracker: "${name}"`);
     }
   }
 
   if (trackers.length > 0) {
-    console.log(`[trackers] enabled: ${trackers.map((t) => t.name).join(", ")}`);
+    log.info(`[trackers] enabled: ${trackers.map((t) => t.name).join(", ")}`);
   } else {
-    console.log("[trackers] no issue trackers configured — findings saved locally only");
+    log.info("[trackers] no issue trackers configured — findings saved locally only");
   }
 
   return new AggregatedTracker(trackers);

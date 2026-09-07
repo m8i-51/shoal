@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { EnvironmentProfile } from "./environment";
+import * as log from "./log";
 
 /** 1 run 分のエージェント個人の体験記録 */
 export interface AgentMemory {
@@ -258,7 +259,7 @@ export function recordAgentMemories(runId: string, inputs: Map<string, MemoryInp
   }
   if (updated > 0) {
     saveAgents(agents);
-    console.log(`[memory] recorded experiences for ${updated} agent(s)`);
+    log.info(`[memory] recorded experiences for ${updated} agent(s)`);
   }
 }
 

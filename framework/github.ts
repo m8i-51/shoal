@@ -1,4 +1,5 @@
 import type { ClosedIssue } from "./trackers/types";
+import * as log from "./log";
 
 interface GitHubOptions {
   token: string;
@@ -34,7 +35,7 @@ async function fetchAllPages(baseUrl: string, token: string): Promise<unknown[]>
     });
     if (!res.ok) {
       const msg = await res.text().catch(() => "");
-      console.error(`[github] failed to list issues (${res.status}): ${msg.slice(0, 200)}`);
+      log.error(`[github] failed to list issues (${res.status}): ${msg.slice(0, 200)}`);
       // First page soft-fails to [] (same as a missing token): callers treat
       // an empty list as "nothing to dedupe against". Mid-list failure must
       // not return a prefix — triage would treat a truncated history as
@@ -63,7 +64,7 @@ async function safeJson(res: Response): Promise<unknown> {
   try {
     return await res.json();
   } catch (e) {
-    console.error(`[github] response body was not valid JSON: ${String(e)}`);
+    log.error(`[github] response body was not valid JSON: ${String(e)}`);
     return null;
   }
 }
@@ -75,7 +76,7 @@ export async function postGitHubIssue(
   { token, repo }: GitHubOptions
 ): Promise<string | null> {
   if (!token || !repo) {
-    console.log("[github] skip (GITHUB_TOKEN or GITHUB_REPO not set)");
+    log.info("[github] skip (GITHUB_TOKEN or GITHUB_REPO not set)");
     return null;
   }
   const [owner, repoName] = repo.split("/");
@@ -86,11 +87,11 @@ export async function postGitHubIssue(
   });
   if (!res.ok) {
     const msg = await res.text().catch(() => "");
-    console.error(`[github] failed to create issue (${res.status}): ${msg.slice(0, 200)}`);
+    log.error(`[github] failed to create issue (${res.status}): ${msg.slice(0, 200)}`);
     return null;
   }
   const data = await safeJson(res) as { html_url?: string } | null;
-  console.log(`[github] issue created: ${data?.html_url}`);
+  log.info(`[github] issue created: ${data?.html_url}`);
   return data?.html_url ?? null;
 }
 

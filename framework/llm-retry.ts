@@ -2,6 +2,9 @@ import type Anthropic from "@anthropic-ai/sdk";
 import type { CreateMessageParams } from "./llm-client";
 import { runLog } from "./findings";
 import { assertWithinBudget, recordSpend } from "./budget";
+import { withOutputLanguage } from "./language";
+import { estimateImageTokensInMessages } from "./image-tokens";
+import * as log from "./log";
 
 export let rateLimitRetries = 0;
 
@@ -100,6 +103,11 @@ export async function createMessageWithRetry(
   params: CreateMessageParams,
   retries = 5
 ): Promise<Anthropic.Message> {
+  // SHOAL_LANG is applied here rather than at each prompt-building site: this
+  // is the one function every Messages-API call in shoal goes through, so a
+  // new lane cannot forget it. No-op when SHOAL_LANG is unset.
+  const localized: CreateMessageParams = { ...params, system: withOutputLanguage(params.system) };
+
   for (let i = 0; i < retries; i++) {
     // Checked before *every* attempt, not once per call: a backoff can last
     // tens of seconds, and another lane may exhaust the cap while we wait.
@@ -109,12 +117,19 @@ export async function createMessageWithRetry(
     assertWithinBudget();
 
     try {
-      const response = await client.createMessage(params);
+      const response = await client.createMessage(localized);
       const inputTokens = response.usage?.input_tokens ?? 0;
       const outputTokens = response.usage?.output_tokens ?? 0;
       if (runLog?.summary?.cost) {
         runLog.summary.cost.inputTokens += inputTokens;
         runLog.summary.cost.outputTokens += outputTokens;
+        // Estimated, and capped at what the provider actually charged for
+        // input: an over-estimate that exceeded inputTokens would render the
+        // text remainder negative and the whole split untrustworthy.
+        runLog.summary.cost.imageInputTokens += Math.min(
+          estimateImageTokensInMessages(localized.messages),
+          inputTokens,
+        );
       }
       recordSpend(
         params.model,
@@ -128,7 +143,7 @@ export async function createMessageWithRetry(
         const err = e as RetryableErrorShape;
         const waitMs = parseRetryAfterMs(err?.headers?.get?.("retry-after")) ?? backoffMs(i);
         const label = typeof err?.status === "number" ? `status ${err.status}` : (err?.name ?? err?.code ?? "network error");
-        console.log(`  [retry] ${label} — waiting ${(waitMs / 1000).toFixed(1)}s (attempt ${i + 1}/${retries})`);
+        log.info(`  [retry] ${label} — waiting ${(waitMs / 1000).toFixed(1)}s (attempt ${i + 1}/${retries})`);
         rateLimitRetries++;
         await sleep(waitMs);
         continue;

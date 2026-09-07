@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { spawnRun, hasActiveRun } from "./runner.js";
+import * as log from "../framework/log.js";
 
 export interface ScheduleConfig {
   enabled: boolean;
@@ -61,13 +62,13 @@ export function startScheduler(): void {
     const deferred = config.pendingDate === today;
     if ((inWindow || deferred) && config.lastRunDate !== today) {
       if (hasActiveRun()) {
-        console.log(`[scheduler] skipping scheduled run (${today}) — a run is already in progress`);
+        log.info(`[scheduler] skipping scheduled run (${today}) — a run is already in progress`);
         if (config.pendingDate !== today) {
           saveSchedule({ ...config, pendingDate: today });
         }
         return;
       }
-      console.log(`[scheduler] triggering scheduled run (${today})`);
+      log.info(`[scheduler] triggering scheduled run (${today})`);
       spawnRun({});
       saveSchedule({ ...config, lastRunDate: today, pendingDate: null });
     }
