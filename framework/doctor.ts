@@ -14,7 +14,13 @@ import { existsSync, statSync } from "fs";
 import * as path from "path";
 import { estimateCostSync } from "./cost";
 import { resolveBudgetLimit } from "./budget";
-import { PROVIDER_DEFAULT_MODELS } from "./llm-client";
+import {
+  LOCAL_PROVIDER_IDS,
+  PROVIDER_DEFAULT_MODELS,
+  SUBSCRIPTION_PROVIDER_IDS,
+  findProvider,
+  resolveCredential,
+} from "./providers";
 import { resolveOutputLanguage } from "./language";
 import { LOG_LEVELS } from "./log";
 
@@ -37,11 +43,10 @@ export interface DoctorReport {
 
 const MIN_NODE_MAJOR = 22;
 
-/** Providers that authenticate out-of-band rather than via an env var. */
-const SUBSCRIPTION_PROVIDERS = new Set(["claude-cli", "codex"]);
-
-/** Providers that talk to a local server and need no credential. */
-const LOCAL_PROVIDERS = new Set(["ollama", "lm-studio"]);
+// Both derived from the provider registry, so this file cannot fall out of
+// step with the list of providers shoal actually supports.
+const SUBSCRIPTION_PROVIDERS = SUBSCRIPTION_PROVIDER_IDS;
+const LOCAL_PROVIDERS = LOCAL_PROVIDER_IDS;
 
 function checkNode(version: string): Check {
   const major = Number(version.replace(/^v/, "").split(".")[0]);
@@ -117,19 +122,22 @@ function credentialFor(provider: string, env: NodeJS.ProcessEnv): Check {
         : "no AWS_* keys set — falling back to the default AWS credential chain",
     };
   }
-  if (provider === "anthropic") {
-    return env.ANTHROPIC_API_KEY
-      ? { name, status: "ok", detail: "ANTHROPIC_API_KEY set" }
-      : { name, status: "fail", detail: "ANTHROPIC_API_KEY is not set", fix: "add ANTHROPIC_API_KEY to .env" };
+  // Everything else names the env vars that can carry its credential in the
+  // registry, so this stays correct as providers are added.
+  const spec = findProvider(provider);
+  const names = spec?.credentialEnv ?? ["LLM_API_KEY", "OPENAI_API_KEY"];
+  if (spec && resolveCredential(spec, env)) {
+    return { name, status: "ok", detail: `${names.find((n) => env[n])} set` };
   }
-  return env.LLM_API_KEY || env.OPENAI_API_KEY
-    ? { name, status: "ok", detail: "LLM_API_KEY set" }
-    : {
-        name,
-        status: "fail",
-        detail: `LLM_API_KEY is not set for provider "${provider}"`,
-        fix: "add LLM_API_KEY to .env",
-      };
+  if (!spec && (env.LLM_API_KEY || env.OPENAI_API_KEY)) {
+    return { name, status: "ok", detail: "LLM_API_KEY set" };
+  }
+  return {
+    name,
+    status: "fail",
+    detail: `${names[0]} is not set for provider "${provider}"`,
+    fix: `add ${names[0]} to .env`,
+  };
 }
 
 function checkSpendCap(provider: string, model: string, env: NodeJS.ProcessEnv): Check {

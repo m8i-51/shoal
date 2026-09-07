@@ -1,5 +1,6 @@
 // Per-token USD prices (as of 2026-04)
 import * as log from "./log";
+import { FREE_PROVIDER_IDS } from "./providers";
 const ANTHROPIC_PRICING: Record<string, { input: number; output: number }> = {
   // Claude 5.x
   "claude-fable-5":             { input: 10 / 1e6,  output: 50 / 1e6  },
@@ -124,8 +125,10 @@ const OPENAI_PRICING: Record<string, { input: number; output: number }> = {
   "o3":               { input: 10 / 1e6,   output: 40 / 1e6  },
 };
 
-// Local / subscription providers — cost tracking not applicable
-const FREE_PROVIDERS = new Set(["ollama", "lm-studio", "codex", "claude-cli", "local"]);
+// Local / subscription providers — cost tracking not applicable. Derived from
+// the provider registry rather than hand-listed, so a newly added local
+// provider cannot be priced as metered by omission.
+const FREE_PROVIDERS = FREE_PROVIDER_IDS;
 
 let openrouterCache: Map<string, { input: number; output: number }> | null = null;
 let openrouterCachedAt = 0;
