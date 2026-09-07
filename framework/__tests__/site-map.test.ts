@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -287,5 +287,27 @@ describe("loadSiteMap / saveSiteMap", () => {
     fs.writeFileSync(path.join(tmpDir, "coverage", "site-map.json"), "{not-json", "utf-8");
     const loaded = loadSiteMap(ORIGIN);
     expect(loaded.entries).toEqual({});
+  });
+
+  it("warns and quarantines the corrupt file instead of leaving it to be overwritten", () => {
+    const filePath = path.join(tmpDir, "coverage", "site-map.json");
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, "{not-json", "utf-8");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const loaded = loadSiteMap(ORIGIN);
+
+    expect(loaded.entries).toEqual({});
+    expect(fs.existsSync(filePath)).toBe(false); // moved aside, not left for the next save to clobber
+    const quarantined = fs.readdirSync(path.dirname(filePath)).find((f) => f.includes(".corrupt-"));
+    expect(quarantined).toBeDefined();
+    expect(fs.readFileSync(path.join(path.dirname(filePath), quarantined!), "utf-8")).toBe("{not-json");
+
+    expect(warnSpy).toHaveBeenCalled();
+    const message = warnSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+    expect(message).toContain("site-map.json");
+    expect(message.toLowerCase()).toContain("site map");
+
+    warnSpy.mockRestore();
   });
 });

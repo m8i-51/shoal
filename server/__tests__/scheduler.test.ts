@@ -50,6 +50,25 @@ describe("loadSchedule", () => {
     expect(loadSchedule()).toEqual(DEFAULT);
   });
 
+  it("壊れている場合は警告を出し破損ファイルを退避したうえでデフォルトを返す", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue("invalid json{{{");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = loadSchedule();
+
+    expect(result).toEqual(DEFAULT);
+    expect(warnSpy).toHaveBeenCalled();
+    const message = warnSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+    expect(message).toContain("schedule.json");
+    expect(fs.renameSync).toHaveBeenCalled();
+    const [fromArg, toArg] = vi.mocked(fs.renameSync).mock.calls.at(-1)!;
+    expect(String(fromArg)).toContain("schedule.json");
+    expect(String(toArg)).toContain(".corrupt-");
+
+    warnSpy.mockRestore();
+  });
+
   it("pendingDate の無い古い schedule.json は null で埋める", () => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
     vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
