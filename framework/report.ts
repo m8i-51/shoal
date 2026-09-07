@@ -1,11 +1,14 @@
 import * as fs from "fs";
 import * as path from "path";
+import * as crypto from "crypto";
 import type { Finding, RunLog, RegressionCheck } from "./types";
 import type { ProductSpec } from "./product-discovery";
 import type { TriageResult } from "./triage";
 import type { Scenario, ScenarioOutcome } from "./scenario-designer";
 import type { ExperienceScore } from "./experience-score";
 import { formatIssueRef } from "./issue-id";
+import { getKnownSecrets, replaceAllLiteral } from "./trace-scrub";
+import * as log from "./log";
 
 function esc(s: string): string {
   return s
@@ -23,6 +26,70 @@ function embedImage(filePath: string | undefined): string | null {
     return `data:image/png;base64,${data.toString("base64")}`;
   } catch {
     return null;
+  }
+}
+
+// Matches an embedded screenshot's data: URI as produced by embedImage() above
+// — always image/png, always base64. Used to shield the image payload from
+// scrubReportHtml() below.
+const IMAGE_DATA_URI_RE = /data:image\/png;base64,[A-Za-z0-9+/=]+/g;
+
+/**
+ * Redacts every known secret (test-account passwords, values typed into a
+ * field shoal detected as a password — see trace-scrub.ts's SecretRegistry)
+ * out of the fully-rendered report HTML, right before it is written to disk.
+ * Findings are written by an LLM describing what it saw and did, so a
+ * secret it typed into the target app can end up quoted in a finding's
+ * title or body; agent names and assignment tags are likewise free text.
+ * Scrubbing the whole document this late — rather than each field at the
+ * point it's interpolated — means nothing this file renders can slip past
+ * it, including anything a future change adds without remembering to scrub
+ * its own input.
+ *
+ * Uses the exact same literal string-replace (`replaceAllLiteral`) that
+ * `scrubTraceZip` already applies to trace zips, so the report gets the same
+ * redaction behaviour as the trace rather than a second implementation that
+ * could drift from it.
+ *
+ * The one thing a whole-document replace must not touch is the base64
+ * payload of an embedded screenshot: a short registered secret (>=4 chars)
+ * can coincidentally occur as a substring of arbitrary base64 text, and
+ * replacing it there would corrupt the image without redacting anything a
+ * person could actually read off the picture (screenshot pixels can't be
+ * scrubbed at all — see the warning banner and SECURITY.md). So every
+ * `data:image/png;base64,...` URI is pulled out from behind a random,
+ * per-call marker before the scrub runs over the rest of the document, and
+ * spliced back in completely untouched afterwards. The marker is generated
+ * fresh from `crypto.randomBytes` on every call, so it cannot collide with
+ * real report content or with a registered secret, which is what makes the
+ * swap-out/swap-back safe.
+ */
+function scrubReportHtml(html: string): string {
+  const secrets = getKnownSecrets();
+  if (secrets.length === 0) return html;
+
+  try {
+    const marker = crypto.randomBytes(16).toString("hex");
+    const placeholderRe = new RegExp(`@@REPORT_IMG_${marker}_(\\d+)@@`, "g");
+
+    const dataUris: string[] = [];
+    const withPlaceholders = html.replace(IMAGE_DATA_URI_RE, (match) => {
+      dataUris.push(match);
+      return `@@REPORT_IMG_${marker}_${dataUris.length - 1}@@`;
+    });
+
+    let scrubbed = withPlaceholders;
+    for (const secret of secrets) {
+      scrubbed = replaceAllLiteral(scrubbed, secret).text;
+    }
+
+    return scrubbed.replace(placeholderRe, (_match, i: string) => dataUris[Number(i)]);
+  } catch (e) {
+    // Never let a scrub bug break report generation — an unscrubbed report
+    // that still exists beats no report at all, same rationale as
+    // scrubTraceZipSafely in trace-scrub.ts.
+    log.warn("[report] failed to scrub known secrets from report HTML:", e);
+    return html;
   }
 }
 
@@ -252,9 +319,15 @@ export function generateReport(
     .scenario-id{font-size:.65rem;font-weight:700;color:#7c3aed;text-transform:uppercase;letter-spacing:.08em;margin-bottom:.25rem}
     .scenario-card h3{font-size:.875rem;font-weight:600;margin-bottom:.5rem}
     .scenario-card p{font-size:.8rem;color:#475569;margin-top:.2rem}
+    /* #78350f on #fef3c7 = 8.15:1 (WCAG AA requires >=4.5:1 for normal text)
+       — computed via the same relative-luminance formula report.test.ts uses
+       to verify every other colour in this file. */
+    .security-banner{background:#fef3c7;border:1px solid #f59e0b;color:#78350f;padding:.85rem 1.5rem;font-size:.85rem;font-weight:600;line-height:1.4}
+    .security-banner .icon{margin-right:.35rem}
   </style>
 </head>
 <body>
+<div class="security-banner"><span class="icon">⚠</span>This report embeds full-page screenshots captured during an authenticated session. Finding text has been scanned for known secrets and redacted, but screenshot <strong>images are not</strong> — treat this file as sensitive and review it before sharing or attaching it anywhere outside your team.</div>
 <header>
   <h1>shoal &mdash; ${esc(productSpec.appName)}</h1>
   <p class="meta">${esc(date)}&nbsp;&nbsp;&middot;&nbsp;&nbsp;${esc(duration)}&nbsp;&nbsp;&middot;&nbsp;&nbsp;${esc(runLog.runId)}</p>
@@ -332,7 +405,9 @@ export function generateReport(
 </body>
 </html>`;
 
+  const scrubbedHtml = scrubReportHtml(html);
+
   fs.mkdirSync(path.dirname(reportPath), { recursive: true });
-  fs.writeFileSync(reportPath, html, "utf-8");
+  fs.writeFileSync(reportPath, scrubbedHtml, "utf-8");
   return reportPath;
 }

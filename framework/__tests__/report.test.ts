@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import type { AgentLog, RegressionCheck } from "../types";
@@ -14,6 +14,7 @@ import { generateReport } from "../report";
 import type { RunLog, Finding } from "../types";
 import type { TriageResult } from "../triage";
 import type { ProductSpec } from "../product-discovery";
+import { registerSecret, clearKnownSecrets } from "../trace-scrub";
 
 function getSavedHtml(): string {
   const calls = vi.mocked(fs.writeFileSync).mock.calls;
@@ -607,5 +608,77 @@ describe("generateReport — 配色コントラスト（badge 背景 / 前景テ
     const metaColor = mustMatch(html, /header \.meta\{font-size:\.875rem;color:(#[0-9a-fA-F]{6})\}/, "header .meta color");
     expect(metaColor).toBe("#94a3b8");
     expect(contrastRatio(metaColor, headerBg)).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
+describe("generateReport — known-secret scrubbing", () => {
+  beforeEach(() => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    vi.mocked(fs.mkdirSync).mockReturnValue(undefined);
+    vi.mocked(fs.writeFileSync).mockReturnValue(undefined);
+  });
+
+  afterEach(() => {
+    // The registry trace-scrub.ts exports is process-wide; clear it so a
+    // secret registered here can't bleed into another test in this file
+    // (or another file sharing the module in the same worker).
+    clearKnownSecrets();
+  });
+
+  it("登録済みシークレットは finding の body にあってもレポート HTML のどこにも残らない", () => {
+    registerSecret("hunterhunter2");
+    const finding = makeFinding({
+      title: "Login accepted a stale session",
+      body: "Typed password hunterhunter2 into the field and the app logged me straight in.",
+    });
+    generateReport(makeRunLog(), [finding], emptyTriage, makeProductSpec(), [], new Map());
+    const html = getSavedHtml();
+    expect(html).not.toContain("hunterhunter2");
+    expect(html).toContain("********");
+  });
+
+  it("agent 名に含まれるシークレットもレポート HTML から取り除かれる", () => {
+    registerSecret("swordfish99");
+    const agent = makeAgentLog({ agentName: "runner-swordfish99" });
+    const finding = makeFinding({ agentId: agent.agentId, agentName: agent.agentName });
+    generateReport(makeRunLog({ agents: [agent] }), [finding], emptyTriage, makeProductSpec(), [], new Map());
+    const html = getSavedHtml();
+    expect(html).not.toContain("swordfish99");
+  });
+
+  it("レポート HTML の先頭付近に、認証済みセッションのスクリーンショットを含む旨の警告バナーがある", () => {
+    generateReport(makeRunLog(), [], emptyTriage, makeProductSpec(), [], new Map());
+    const html = getSavedHtml();
+    expect(html).toContain("security-banner");
+    expect(html.toLowerCase()).toContain("authenticated session");
+    // "at the top" — the banner must appear before the main content, not
+    // buried somewhere after the findings/agents tables.
+    const bannerPos = html.indexOf("security-banner");
+    const mainPos = html.indexOf("<main>");
+    expect(bannerPos).toBeGreaterThan(-1);
+    expect(bannerPos).toBeLessThan(mainPos);
+  });
+
+  it("スクラブは埋め込みスクリーンショットの base64 データを壊さない（たとえその中に登録済みシークレットと同じ文字列が偶然出現しても）", () => {
+    // Zero bytes base64-encode to a long run of the letter "A" — register a
+    // secret that is guaranteed to occur inside that base64 text, so this
+    // test actually exercises the image-protection path instead of passing
+    // vacuously because the secret never overlapped the image data.
+    registerSecret("AAAA");
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    const rawImage = Buffer.alloc(60, 0);
+    vi.mocked(fs.readFileSync).mockImplementation((p: unknown) => {
+      if (String(p).endsWith(".png")) return rawImage;
+      return "{}" as unknown as ReturnType<typeof fs.readFileSync>;
+    });
+    const finding = makeFinding({ screenshotPath: "/tmp/shot.png" });
+    generateReport(makeRunLog(), [finding], emptyTriage, makeProductSpec(), [], new Map());
+    const html = getSavedHtml();
+
+    const match = html.match(/data:image\/png;base64,([A-Za-z0-9+/=]+)/);
+    expect(match, "expected an embedded screenshot data URI").not.toBeNull();
+    expect(match![1]).toContain("AAAA"); // sanity: the coincidental overlap really exists
+    const decoded = Buffer.from(match![1], "base64");
+    expect(decoded.equals(rawImage)).toBe(true);
   });
 });
