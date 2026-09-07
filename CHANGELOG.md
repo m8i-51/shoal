@@ -12,6 +12,8 @@ to `0.1.20` or earlier, so those releases are not separately documented here.
 
 ## [Unreleased]
 
+## [0.2.2] — 2026-09-07
+
 ### Added
 
 - **`shoal doctor`.** A preflight check that makes no LLM call and so costs
@@ -77,6 +79,9 @@ to `0.1.20` or earlier, so those releases are not separately documented here.
   instructions, what it will not do — the per-run cost, the measured 71%
   detection rate on its own benchmark, non-determinism, false positives, and
   that it never reads your code.
+- **Playwright 1.62.1.** The runtime `playwright` dependency moved from
+  1.59.1. Existing Chromium installs from an older Playwright may need
+  `npx playwright install chromium` once.
 
 ### Fixed
 
@@ -553,7 +558,8 @@ to `0.1.20` or earlier, so those releases are not separately documented here.
 
 - Documentation for the dashboard's built-in weekly scheduler.
 
-[Unreleased]: https://github.com/m8i-51/shoal/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/m8i-51/shoal/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/m8i-51/shoal/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/m8i-51/shoal/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/m8i-51/shoal/compare/v0.1.33...v0.2.0
 [0.1.33]: https://github.com/m8i-51/shoal/compare/v0.1.32...v0.1.33
