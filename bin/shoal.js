@@ -16,7 +16,7 @@ import { spawn, spawnSync } from "child_process";
 import { fileURLToPath } from "url";
 import { dirname, join, resolve } from "path";
 import { existsSync } from "fs";
-import { parseShoalArgs, printHelp } from "./cli-args.js";
+import { parseShoalArgs, printHelp, resolveDependencyBin } from "./cli-args.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const packageRoot = join(__dirname, "..");
@@ -69,8 +69,7 @@ async function main() {
     const webSrc = join(packageRoot, "web", "src");
     if (!existsSync(distIndex) && existsSync(webSrc)) {
       console.log("[shoal] web/dist not found — building frontend...");
-      const viteBin = join(packageRoot, "node_modules", ".bin", "vite");
-      const buildBin = existsSync(viteBin) ? viteBin : "vite";
+      const buildBin = resolveDependencyBin(packageRoot, "vite");
       const result = spawnSync(buildBin, ["build", "web"], {
         stdio: "inherit",
         cwd: packageRoot,
@@ -91,8 +90,7 @@ async function main() {
   };
   const script = scriptMap[subcommand] ?? "run.ts";
 
-  const tsxBin = join(packageRoot, "node_modules", ".bin", "tsx");
-  const bin = existsSync(tsxBin) ? tsxBin : "tsx";
+  const bin = resolveDependencyBin(packageRoot, "tsx");
   const scriptPath = join(packageRoot, script);
 
   const child = spawn(bin, [scriptPath, ...process.argv.slice(subcommand ? 3 : 2)], {
