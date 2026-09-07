@@ -39,6 +39,7 @@
     "server/",
     "web/dist/",
     "run.ts",
+    "doctor.ts",
     "triage-only.ts",
     "diff.ts",
     ".env.example",

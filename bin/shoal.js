@@ -5,6 +5,7 @@
  * Usage:
  *   shoal init     # interactive setup — creates .env in current directory
  *   shoal config   # update settings in existing .env (e.g. issue trackers)
+ *   shoal doctor   # check config, credentials, browser and target before running
  *   shoal serve    # web dashboard at http://localhost:4000
  *   shoal          # run agents from the terminal
  *   shoal triage   # triage-only mode
@@ -82,6 +83,7 @@ async function main() {
   }
 
   const scriptMap = {
+    doctor: "doctor.ts",
     serve: "server/index.ts",
     triage: "triage-only.ts",
     mcp: "server/mcp.ts",

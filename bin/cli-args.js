@@ -25,6 +25,7 @@ export function printHelp() {
 Commands:
   init      interactive setup — creates .env in the working directory
   config    update settings in existing .env
+  doctor    check config, credentials, browser and target — makes no LLM call
   serve     web dashboard at http://localhost:4000
   triage    triage-only mode
   mcp       MCP server on stdio

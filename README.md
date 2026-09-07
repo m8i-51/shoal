@@ -140,9 +140,26 @@ BASE_URL=http://localhost:3000   # URL of the app to explore
 Then run **from that same directory**:
 
 ```bash
+shoal doctor   # check the setup before spending a run on it
 shoal serve    # open web dashboard at http://localhost:4000
 shoal          # or run agents directly from the terminal
 shoal config   # update settings in existing .env (e.g. issue trackers)
+```
+
+`shoal doctor` makes no LLM call and costs nothing. It checks the Node version,
+whether `.env` exists and is readable only by you, that the provider has the
+credential it needs, that the model is one `SHOAL_MAX_USD` can actually be
+enforced against, that a Playwright browser is installed, that `BASE_URL` is a
+usable URL, and that any enabled tracker is fully configured. It exits non-zero
+only when something would genuinely stop a run, so CI can gate on it:
+
+```
+  ✓ Node.js             v22.22.2
+  ✓ LLM credentials     ANTHROPIC_API_KEY set
+  ! Spend cap           SHOAL_MAX_USD=$5 is set, but no price is known for "x/unlisted" — the cap cannot fire
+                        → use a model with published pricing, or treat the run as uncapped
+  ✗ Target app          BASE_URL is not set
+                        → set BASE_URL to the app you want explored
 ```
 
 On startup shoal prints which `.env` it loaded (or that it found none). If you see `0 variables injected`, you are not in the directory that contains `.env`.

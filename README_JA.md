@@ -138,9 +138,26 @@ BASE_URL=http://localhost:3000   # 対象アプリの URL
 **同じディレクトリから**実行:
 
 ```bash
+shoal doctor   # run に金を使う前に設定を点検する
 shoal serve    # Web ダッシュボードを http://localhost:4000 で起動
 shoal          # またはターミナルから直接実行
 shoal config   # 既存の .env を対話形式で更新（トラッカー設定など）
+```
+
+`shoal doctor` は LLM を一切呼ばないので無料。Node のバージョン、`.env` の
+有無と「自分以外に読めないか」、プロバイダに必要な資格情報が揃っているか、
+`SHOAL_MAX_USD` が実際に発火できるモデルか、Playwright のブラウザが入って
+いるか、`BASE_URL` が使える URL か、有効にしたトラッカーの設定が埋まって
+いるかを確認する。終了コードが 0 以外になるのは run が実際に止まる問題が
+あるときだけなので、CI のゲートに使える:
+
+```
+  ✓ Node.js             v22.22.2
+  ✓ LLM credentials     ANTHROPIC_API_KEY set
+  ! Spend cap           SHOAL_MAX_USD=$5 is set, but no price is known for "x/unlisted" — the cap cannot fire
+                        → use a model with published pricing, or treat the run as uncapped
+  ✗ Target app          BASE_URL is not set
+                        → set BASE_URL to the app you want explored
 ```
 
 起動時に、どの `.env` を読んだか（または読めなかったか）がログに出ます。`0 variables injected` と出たら、`.env` のあるディレクトリにいません。
