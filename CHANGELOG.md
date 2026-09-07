@@ -12,6 +12,81 @@ to `0.1.20` or earlier, so those releases are not separately documented here.
 
 ## [Unreleased]
 
+### Security
+
+- **Playwright errors bypassed the untrusted-content fence.** Every
+  page-derived tool result went through `wrapUntrusted` except the catch-all
+  in `executeBrowserTool`, and Playwright embeds page-authored text verbatim
+  in its errors — a page rendering two identical buttons produces a
+  strict-mode dump quoting their contents. Verified against a real browser
+  carrying an injected instruction straight into the model's context.
+- **Product discovery fenced nothing.** `navigate_and_read` returned raw page
+  text and ARIA tree, `fetch_url` returned raw body text, and the discovery
+  system prompt had no untrusted-content section — despite producing the
+  `ProductSpec` that defines appGoals, features and productEdge for every
+  downstream lane, cached and reused across runs.
+- **`fetch_url` was an unguarded SSRF.** It fetched any URL the model named,
+  with no scheme check and no address filtering, while the model's choice was
+  steered by the page content above. Verified reachable: a local service
+  returned its contents into the model's context, and 169.254.169.254 was
+  reachable the same way. New `framework/safe-fetch.ts` blocks non-http(s)
+  schemes, loopback, link-local, private v4, unique-local v6 and the
+  unspecified address, resolving hostnames first. It deliberately allows the
+  configured `BASE_URL` origin, since the app under test is routinely
+  localhost. DNS rebinding between check and fetch remains open and is
+  documented rather than papered over.
+- **The shared artifact was the least protected one.** Trace zips were
+  scrubbed of registered secrets; the standalone HTML report — the file meant
+  to be attached to a ticket — was not scrubbed at all. Its rendered text now
+  goes through the same registry and the same replacement, with base64 image
+  URIs lifted out first so a colliding secret cannot corrupt a screenshot.
+  Screenshot pixels cannot be scrubbed: a banner in the report and a new
+  SECURITY.md section say so plainly rather than implying more protection
+  than exists.
+
+- **`safe` mode's destructive-click guard was English-only.** `DESTRUCTIVE_CLICK_PATTERNS`
+  only matched English phrasing, so a Japanese UI (`削除`, `購入する`) passed straight
+  through the click-level guard in `safe` mode. Added a matching set of Japanese
+  patterns (delete, purchase, payment, cancellation, unrecoverable actions, etc.,
+  deliberately excluding a bare `送信` so ordinary form submits still work), plus
+  `SHOAL_DESTRUCTIVE_PATTERNS` so operators can append their own regexes — invalid
+  entries are skipped with a warning rather than crashing the run.
+- **A dashboard token holder could exfiltrate the operator's LLM API key.**
+  `POST /api/runs/start` accepted a caller-supplied `llmBaseUrl` while the
+  spawned run inherited the server's own `LLM_API_KEY`/`OPENAI_API_KEY` from
+  its environment, and the OpenAI-compatible client sent that inherited key
+  as a Bearer token to whatever URL the caller supplied — pointing
+  `llmBaseUrl` at an attacker-controlled server leaked the operator's real
+  key. `llmBaseUrl` without `llmApiKey` is now rejected with 400, and
+  whenever `llmBaseUrl` is set, the spawned run's environment has the
+  server's own `LLM_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+  `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN`,
+  `LLM_BASE_URL`, and `LLM_PROVIDER` stripped before the caller's own
+  values are applied, so only the caller's key can ever reach the caller's
+  URL. Tracker tokens stay — the child still has to file issues.
+- **The run-detail report `<iframe>` had no `sandbox`.** `framework/report.ts`
+  generates plain HTML with no `<script>`, so the frame now gets `sandbox=""`
+  — no script capability, and critically, never `allow-same-origin`.
+- **Playwright traces held typed passwords in plaintext.** `tracing.start({
+  snapshots: true })` records every value a `fill()` writes into the page —
+  including a password typed during login — inside `trace.trace` /
+  `*.network` entries of the saved zip, even though redact.ts already masked
+  the same value in console output, run JSON, and the HTML report. Every
+  trace zip (each lane's full-session trace and each finding's trace chunk)
+  is now scrubbed in place immediately after it is written: known test-account
+  passwords and target credentials are registered up front, and any value
+  typed into a field detected as a password is added as it happens. A scrub
+  failure only logs a warning and never fails the run.
+- **"read-only — safe to point at production" undersold what still leaves the
+  machine.** `SHOAL_MODE=read-only` only blocks writes to the target app —
+  everything agents read (page text, accessibility tree, console/network
+  output, screenshots) is still sent to the configured LLM provider. Reworded
+  the safety-mode docs (README, README_JA, SECURITY.md, `.env.example`, the
+  dashboard's start-dialog hint) to say so, and added a
+  [What is sent to the LLM provider](SECURITY.md#what-is-sent-to-the-llm-provider)
+  section spelling out exactly what leaves the machine and what controls
+  where it goes.
+
 ### Added
 
 - **`shoal doctor`.** A preflight check that makes no LLM call and so costs
@@ -58,6 +133,14 @@ to `0.1.20` or earlier, so those releases are not separately documented here.
 
 ### Changed
 
+- **The Japanese locale is no longer half-English.** Thirteen `ja` values were
+  still the English string, including main dashboard labels and the severity
+  badge added in the previous cycle. A new parity test asserts matching key
+  sets and that no `ja` value equals its `en` counterpart outside a small
+  explicit allowlist — a product name, placeholders, a duration format and a
+  literal shell command — which is what stops the next English-only entry
+  going in unnoticed.
+
 - **A provider is now one registry entry.** Facts about an LLM provider were
   spread across five files, and forgetting the one in `cost.ts` meant a local
   provider quietly priced as if it were metered. `framework/providers.ts` holds
@@ -78,7 +161,40 @@ to `0.1.20` or earlier, so those releases are not separately documented here.
   detection rate on its own benchmark, non-determinism, false positives, and
   that it never reads your code.
 
+- **`@anthropic-ai/claude-agent-sdk` was a hard dependency for everyone, used
+  only by `LLM_PROVIDER=claude-cli`.** It is ~200MB of a ~378MB production
+  install (measured with `npm pack` + `npm install --omit=dev`) and carries
+  Anthropic's own licence, not an OSI-approved one ("SEE LICENSE IN
+  README.md"). It is now an optional `peerDependency` (kept in
+  `devDependencies` too, so tests and local dev are unaffected) and is
+  imported dynamically only when `runClaudeCliSession` actually runs; every
+  other provider now installs without it. A measured production install
+  dropped from 378MB to 168MB. Using `claude-cli` without the package
+  installed now fails with a clear message telling you to
+  `npm install @anthropic-ai/claude-agent-sdk`.
+
 ### Fixed
+
+- **State files were written non-atomically and read back silently.** Every
+  persistent store used a bare `writeFileSync`, and every reader swallowed
+  corruption — a truncated `agents.json` made `loadAgents()` return `[]` with
+  no warning. Since that file holds the LLM-built persona roster and its
+  accumulated memory, a process killed mid-write meant the next run quietly
+  rebuilt everything with fresh spend and no error shown. Writes now go
+  through `framework/atomic-write.ts` (sibling temp file, then rename), and a
+  corrupt file is warned about and quarantined to a `.corrupt` sibling
+  instead of being overwritten.
+- **A local install of the published package could not start.** `bin/shoal.js`
+  looked only for `<packageRoot>/node_modules/.bin/tsx`, which npm hoists to
+  the top level on a local install, then fell back to a bare `tsx` that is not
+  on PATH — `spawn tsx ENOENT`. Global installs were unaffected. Both `tsx`
+  and `vite` are now resolved through Node's own resolution.
+- **Four tests could not detect the bug they existed to prevent.** The
+  `waitForSessionsToExit` tests only awaited the promise, so they passed
+  identically against an implementation that never waited at all — the exact
+  failure that leaves an orphaned swarm running after `shoal serve` exits.
+  They now assert the promise is still pending before the settling event, and
+  cover the multi-session branch that had no coverage.
 
 - **`@mentions` in LLM-generated persona names.** Persona names are written by
   the model, and reached the issue body's "Reported by:" line, the Screenshots
@@ -202,65 +318,6 @@ to `0.1.20` or earlier, so those releases are not separately documented here.
   GitHub renders them as plain text and does not notify on a mention there.
 - `schedule.json` (written by the dashboard scheduler to the working
   directory) is now gitignored.
-
-### Security
-
-- **`safe` mode's destructive-click guard was English-only.** `DESTRUCTIVE_CLICK_PATTERNS`
-  only matched English phrasing, so a Japanese UI (`削除`, `購入する`) passed straight
-  through the click-level guard in `safe` mode. Added a matching set of Japanese
-  patterns (delete, purchase, payment, cancellation, unrecoverable actions, etc.,
-  deliberately excluding a bare `送信` so ordinary form submits still work), plus
-  `SHOAL_DESTRUCTIVE_PATTERNS` so operators can append their own regexes — invalid
-  entries are skipped with a warning rather than crashing the run.
-- **A dashboard token holder could exfiltrate the operator's LLM API key.**
-  `POST /api/runs/start` accepted a caller-supplied `llmBaseUrl` while the
-  spawned run inherited the server's own `LLM_API_KEY`/`OPENAI_API_KEY` from
-  its environment, and the OpenAI-compatible client sent that inherited key
-  as a Bearer token to whatever URL the caller supplied — pointing
-  `llmBaseUrl` at an attacker-controlled server leaked the operator's real
-  key. `llmBaseUrl` without `llmApiKey` is now rejected with 400, and
-  whenever `llmBaseUrl` is set, the spawned run's environment has the
-  server's own `LLM_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
-  `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN`,
-  `LLM_BASE_URL`, and `LLM_PROVIDER` stripped before the caller's own
-  values are applied, so only the caller's key can ever reach the caller's
-  URL. Tracker tokens stay — the child still has to file issues.
-- **The run-detail report `<iframe>` had no `sandbox`.** `framework/report.ts`
-  generates plain HTML with no `<script>`, so the frame now gets `sandbox=""`
-  — no script capability, and critically, never `allow-same-origin`.
-- **Playwright traces held typed passwords in plaintext.** `tracing.start({
-  snapshots: true })` records every value a `fill()` writes into the page —
-  including a password typed during login — inside `trace.trace` /
-  `*.network` entries of the saved zip, even though redact.ts already masked
-  the same value in console output, run JSON, and the HTML report. Every
-  trace zip (each lane's full-session trace and each finding's trace chunk)
-  is now scrubbed in place immediately after it is written: known test-account
-  passwords and target credentials are registered up front, and any value
-  typed into a field detected as a password is added as it happens. A scrub
-  failure only logs a warning and never fails the run.
-- **"read-only — safe to point at production" undersold what still leaves the
-  machine.** `SHOAL_MODE=read-only` only blocks writes to the target app —
-  everything agents read (page text, accessibility tree, console/network
-  output, screenshots) is still sent to the configured LLM provider. Reworded
-  the safety-mode docs (README, README_JA, SECURITY.md, `.env.example`, the
-  dashboard's start-dialog hint) to say so, and added a
-  [What is sent to the LLM provider](SECURITY.md#what-is-sent-to-the-llm-provider)
-  section spelling out exactly what leaves the machine and what controls
-  where it goes.
-
-### Changed
-
-- **`@anthropic-ai/claude-agent-sdk` was a hard dependency for everyone, used
-  only by `LLM_PROVIDER=claude-cli`.** It is ~200MB of a ~378MB production
-  install (measured with `npm pack` + `npm install --omit=dev`) and carries
-  Anthropic's own licence, not an OSI-approved one ("SEE LICENSE IN
-  README.md"). It is now an optional `peerDependency` (kept in
-  `devDependencies` too, so tests and local dev are unaffected) and is
-  imported dynamically only when `runClaudeCliSession` actually runs; every
-  other provider now installs without it. A measured production install
-  dropped from 378MB to 168MB. Using `claude-cli` without the package
-  installed now fails with a clear message telling you to
-  `npm install @anthropic-ai/claude-agent-sdk`.
 
 ## [0.2.1] — 2026-09-03
 
