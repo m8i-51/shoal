@@ -11,6 +11,7 @@ import { z } from "zod";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { query as QueryFnType } from "@anthropic-ai/claude-agent-sdk";
 import type { SessionTool, ToolSessionResult, UserPrompt } from "./tool-types";
+import { withOutputLanguage } from "./language";
 
 export const SHOAL_MCP_SERVER = "shoal";
 
@@ -218,7 +219,7 @@ export async function runClaudeCliSession(opts: ClaudeCliRunnerOptions): Promise
       prompt,
       options: {
         model: opts.model,
-        systemPrompt: opts.system,
+        systemPrompt: withOutputLanguage(opts.system),
         tools: [], // disable Claude Code built-ins
         mcpServers: { [SHOAL_MCP_SERVER]: server },
         allowedTools,

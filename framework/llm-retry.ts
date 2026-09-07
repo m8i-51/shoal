@@ -2,6 +2,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import type { CreateMessageParams } from "./llm-client";
 import { runLog } from "./findings";
 import { assertWithinBudget, recordSpend } from "./budget";
+import { withOutputLanguage } from "./language";
 
 export let rateLimitRetries = 0;
 
@@ -100,6 +101,11 @@ export async function createMessageWithRetry(
   params: CreateMessageParams,
   retries = 5
 ): Promise<Anthropic.Message> {
+  // SHOAL_LANG is applied here rather than at each prompt-building site: this
+  // is the one function every Messages-API call in shoal goes through, so a
+  // new lane cannot forget it. No-op when SHOAL_LANG is unset.
+  const localized: CreateMessageParams = { ...params, system: withOutputLanguage(params.system) };
+
   for (let i = 0; i < retries; i++) {
     // Checked before *every* attempt, not once per call: a backoff can last
     // tens of seconds, and another lane may exhaust the cap while we wait.
@@ -109,7 +115,7 @@ export async function createMessageWithRetry(
     assertWithinBudget();
 
     try {
-      const response = await client.createMessage(params);
+      const response = await client.createMessage(localized);
       const inputTokens = response.usage?.input_tokens ?? 0;
       const outputTokens = response.usage?.output_tokens ?? 0;
       if (runLog?.summary?.cost) {
