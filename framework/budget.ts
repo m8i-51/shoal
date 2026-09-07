@@ -65,111 +65,162 @@ export function resolveBudgetLimit(env: NodeJS.ProcessEnv = process.env): number
   return parsed;
 }
 
-let state: BudgetState = {
-  limitUSD: null,
-  spentUSD: 0,
-  sawUnpricedCall: false,
-  exceeded: false,
-  enforceable: true,
-};
+/**
+ * One run's spend accounting.
+ *
+ * This was module-level `let state`, which made every test that touched the
+ * cap order-dependent — a test that pushed spend past the limit left the
+ * module "exceeded" for whatever ran next — and made two runs in one process
+ * share one budget. The state now belongs to an instance; the module-level
+ * functions below delegate to the process-wide one the CLI uses, so no caller
+ * had to change, and a test constructs its own tracker instead of relying on
+ * an `initBudget()` call for isolation.
+ */
+export class BudgetTracker {
+  readonly state: BudgetState;
 
-export function initBudget(env: NodeJS.ProcessEnv = process.env): BudgetState {
-  state = {
-    limitUSD: resolveBudgetLimit(env),
-    spentUSD: 0,
-    sawUnpricedCall: false,
-    exceeded: false,
-    enforceable: true,
-  };
-  return state;
+  constructor(limitUSD: number | null = null) {
+    this.state = {
+      limitUSD,
+      spentUSD: 0,
+      sawUnpricedCall: false,
+      exceeded: false,
+      enforceable: true,
+    };
+  }
+
+  static fromEnv(env: NodeJS.ProcessEnv = process.env): BudgetTracker {
+    return new BudgetTracker(resolveBudgetLimit(env));
+  }
+
+  /**
+   * Load the pricing the cap needs, and check the run's own model can be
+   * priced. Returns a line to log when the cap cannot be enforced, or null.
+   */
+  async prepare(model: string, provider: string): Promise<string | null> {
+    if (this.state.limitUSD == null) return null;
+
+    let warmed: boolean;
+    try {
+      warmed = await warmPricingCache(provider);
+    } catch {
+      warmed = false;
+    }
+
+    const priced = estimateCostSync(model, provider, 1, 1) != null;
+    if (warmed && priced) return null;
+
+    this.state.enforceable = false;
+    return (
+      `[budget] WARNING: SHOAL_MAX_USD is set to $${this.state.limitUSD.toFixed(2)}, but no price is ` +
+      `available for model "${model}" on provider "${provider}"${warmed ? "" : " (pricing lookup failed)"} — ` +
+      "the cap cannot be enforced and this run is effectively uncapped."
+    );
+  }
+
+  /**
+   * Add one call's usage to the running estimate. Returns the new total.
+   * Unpriced models add nothing but are remembered for the status line.
+   */
+  recordSpend(model: string, provider: string, inputTokens: number, outputTokens: number): number {
+    const cost = estimateCostSync(model, provider, inputTokens, outputTokens);
+    if (cost == null) {
+      this.state.sawUnpricedCall = true;
+      return this.state.spentUSD;
+    }
+    this.state.spentUSD += cost;
+    if (this.state.limitUSD != null && this.state.spentUSD >= this.state.limitUSD) {
+      this.state.exceeded = true;
+    }
+    return this.state.spentUSD;
+  }
+
+  /** True when the cap is configured and already reached. */
+  get exceeded(): boolean {
+    return this.state.exceeded;
+  }
+
+  /**
+   * Throw when the cap has been reached. Call this *before* starting an LLM
+   * request so the run stops instead of spending past the limit.
+   */
+  assertWithinBudget(): void {
+    if (this.state.limitUSD != null && this.state.exceeded) {
+      throw new BudgetExceededError(this.state.spentUSD, this.state.limitUSD);
+    }
+  }
+
+  /** True when a cap is configured and can actually fire. */
+  get enforceable(): boolean {
+    return this.state.limitUSD != null && this.state.enforceable;
+  }
+
+  /** Startup line describing the configured cap, or null when there is none. */
+  statusLine(): string | null {
+    if (this.state.limitUSD == null) return null;
+    return `[budget] cap: $${this.state.limitUSD.toFixed(2)} (estimated; models with no published price are not counted)`;
+  }
+
+  /** Line printed when the cap stops a run. */
+  stopLine(): string {
+    const limit = this.state.limitUSD != null ? `$${this.state.limitUSD.toFixed(2)}` : "—";
+    const unpriced = this.state.sawUnpricedCall
+      ? " (some calls used a model with no known price and were not counted)"
+      : "";
+    return `[budget] spend cap reached: ~$${this.state.spentUSD.toFixed(4)} of ${limit}${unpriced} — remaining work skipped`;
+  }
 }
 
 /**
- * Load the pricing the cap needs, and check the run's own model can be priced.
- *
- * Call once, after `initBudget`, before any LLM call. OpenRouter fetches its
- * catalogue here: without it every OpenRouter call prices as unknown, the
- * running total stays at zero, and the cap never fires. Returns a line to log
- * when the cap cannot be enforced, or null when all is well.
+ * The tracker the CLI's single run uses. A test that needs isolation should
+ * construct its own `BudgetTracker` rather than reaching for this.
  */
-export async function prepareBudget(model: string, provider: string): Promise<string | null> {
-  if (state.limitUSD == null) return null;
+let current = new BudgetTracker();
 
-  let warmed: boolean;
-  try {
-    warmed = await warmPricingCache(provider);
-  } catch {
-    warmed = false;
-  }
+export function initBudget(env: NodeJS.ProcessEnv = process.env): BudgetState {
+  current = BudgetTracker.fromEnv(env);
+  return current.state;
+}
 
-  const priced = estimateCostSync(model, provider, 1, 1) != null;
-  if (warmed && priced) return null;
+/** The process-wide tracker. */
+export function getBudget(): BudgetTracker {
+  return current;
+}
 
-  state.enforceable = false;
-  return (
-    `[budget] WARNING: SHOAL_MAX_USD is set to $${state.limitUSD.toFixed(2)}, but no price is ` +
-    `available for model "${model}" on provider "${provider}"${warmed ? "" : " (pricing lookup failed)"} — ` +
-    "the cap cannot be enforced and this run is effectively uncapped."
-  );
+export function prepareBudget(model: string, provider: string): Promise<string | null> {
+  return current.prepare(model, provider);
 }
 
 export function getBudgetState(): BudgetState {
-  return state;
+  return current.state;
 }
 
-/** True when the cap is configured and already reached. */
 export function isBudgetExceeded(): boolean {
-  return state.exceeded;
+  return current.exceeded;
 }
 
-/**
- * Add one call's usage to the running estimate. Returns the new total.
- * Unpriced models add nothing but are remembered for the status line.
- */
 export function recordSpend(
   model: string,
   provider: string,
   inputTokens: number,
   outputTokens: number,
 ): number {
-  const cost = estimateCostSync(model, provider, inputTokens, outputTokens);
-  if (cost == null) {
-    state.sawUnpricedCall = true;
-    return state.spentUSD;
-  }
-  state.spentUSD += cost;
-  if (state.limitUSD != null && state.spentUSD >= state.limitUSD) {
-    state.exceeded = true;
-  }
-  return state.spentUSD;
+  return current.recordSpend(model, provider, inputTokens, outputTokens);
 }
 
-/**
- * Throw when the cap has been reached. Call this *before* starting an LLM
- * request so the run stops instead of spending past the limit.
- */
 export function assertWithinBudget(): void {
-  if (state.limitUSD != null && state.exceeded) {
-    throw new BudgetExceededError(state.spentUSD, state.limitUSD);
-  }
+  current.assertWithinBudget();
 }
 
-/** True when a cap is configured and can actually fire. */
 export function isBudgetEnforceable(): boolean {
-  return state.limitUSD != null && state.enforceable;
+  return current.enforceable;
 }
 
-/** Startup line describing the configured cap, or null when there is none. */
 export function budgetStatusLine(): string | null {
-  if (state.limitUSD == null) return null;
-  return `[budget] cap: $${state.limitUSD.toFixed(2)} (estimated; models with no published price are not counted)`;
+  return current.statusLine();
 }
 
 /** Line printed when the cap stops a run. */
 export function budgetStopLine(): string {
-  const limit = state.limitUSD != null ? `$${state.limitUSD.toFixed(2)}` : "—";
-  const unpriced = state.sawUnpricedCall
-    ? " (some calls used a model with no known price and were not counted)"
-    : "";
-  return `[budget] spend cap reached: ~$${state.spentUSD.toFixed(4)} of ${limit}${unpriced} — remaining work skipped`;
+  return current.stopLine();
 }

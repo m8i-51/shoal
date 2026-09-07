@@ -23,6 +23,13 @@ export interface A11yAuditResult {
   summary: string;
 }
 
+/**
+ * Deliberately module-level, unlike the run state in budget.ts and
+ * trace-scrub.ts that was converted to instances. This is a lazy read of a
+ * file shipped inside node_modules: the value cannot differ between callers,
+ * nothing mutates it after the first read, and no test can observe a
+ * difference in ordering. It is a memoized constant, not shared state.
+ */
 let axeSource: string | null = null;
 
 function getAxeSource(): string {

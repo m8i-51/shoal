@@ -130,14 +130,50 @@ const OPENAI_PRICING: Record<string, { input: number; output: number }> = {
 // provider cannot be priced as metered by omission.
 const FREE_PROVIDERS = FREE_PROVIDER_IDS;
 
-let openrouterCache: Map<string, { input: number; output: number }> | null = null;
-let openrouterCachedAt = 0;
 const CACHE_TTL_MS = 60 * 60 * 1000;
 
-async function fetchOpenRouterPricing(): Promise<Map<string, { input: number; output: number }>> {
-  if (openrouterCache && Date.now() - openrouterCachedAt < CACHE_TTL_MS) {
-    return openrouterCache;
+/**
+ * OpenRouter publishes its catalogue over HTTP, so prices are fetched once and
+ * held. This was a pair of module-level `let`s, which made every test that
+ * warmed the cache change what the next test saw. It is now one object with a
+ * `reset()`, so the mutable state has a name and a boundary.
+ */
+class PricingCache {
+  private entries: Map<string, { input: number; output: number }> | null = null;
+  private fetchedAt = 0;
+
+  /** The cached catalogue while it is still fresh, else null. */
+  fresh(): Map<string, { input: number; output: number }> | null {
+    if (this.entries && Date.now() - this.fetchedAt < CACHE_TTL_MS) return this.entries;
+    return null;
   }
+
+  /** The cached catalogue regardless of age — the fallback when a refetch fails. */
+  stale(): Map<string, { input: number; output: number }> | null {
+    return this.entries;
+  }
+
+  set(entries: Map<string, { input: number; output: number }>): void {
+    this.entries = entries;
+    this.fetchedAt = Date.now();
+  }
+
+  reset(): void {
+    this.entries = null;
+    this.fetchedAt = 0;
+  }
+}
+
+const openrouterPricing = new PricingCache();
+
+/** Drop the cached OpenRouter catalogue (used by tests, and after a config change). */
+export function resetPricingCache(): void {
+  openrouterPricing.reset();
+}
+
+async function fetchOpenRouterPricing(): Promise<Map<string, { input: number; output: number }>> {
+  const cached = openrouterPricing.fresh();
+  if (cached) return cached;
   try {
     const res = await fetch("https://openrouter.ai/api/v1/models", {
       signal: AbortSignal.timeout(8000),
@@ -152,13 +188,12 @@ async function fetchOpenRouterPricing(): Promise<Map<string, { input: number; ou
       const out = parseFloat(m.pricing?.completion ?? "0");
       if (inp >= 0 && out >= 0) map.set(m.id, { input: inp, output: out });
     }
-    openrouterCache = map;
-    openrouterCachedAt = Date.now();
+    openrouterPricing.set(map);
     log.info(`[cost] OpenRouter pricing loaded (${map.size} models)`);
     return map;
   } catch (e) {
     log.warn("[cost] OpenRouter pricing fetch failed:", String(e));
-    return openrouterCache ?? new Map();
+    return openrouterPricing.stale() ?? new Map();
   }
 }
 
@@ -178,7 +213,7 @@ function lookupPricingSync(
   if (provider === "anthropic") return lookupAnthropicPricing(model);
   if (provider === "bedrock") return lookupBedrockPricing(model);
   if (provider === "openai") return longestPrefixMatch(OPENAI_PRICING, model);
-  if (provider === "openrouter") return openrouterCache?.get(model);
+  if (provider === "openrouter") return openrouterPricing.stale()?.get(model);
   return undefined;
 }
 

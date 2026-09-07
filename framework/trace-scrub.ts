@@ -17,33 +17,66 @@ const MIN_SECRET_LENGTH = 4;
 export const REDACTED = "********";
 
 /**
- * Run-level registry of secrets to scrub. Populated with known credentials
- * (test-accounts/accounts.json, target.credentials) at startup, and with
- * whatever value the `fill` browser tool wrote into a field it detected as a
- * password field, as it happens.
+ * The secrets to scrub out of a trace.
+ *
+ * Populated with known credentials (test-accounts/accounts.json,
+ * target.credentials) at startup, and with whatever value the `fill` browser
+ * tool wrote into a field it detected as a password field, as it happens.
+ *
+ * This was a module-level `Set` with a `clearKnownSecrets()` escape hatch
+ * labelled "test-only" — which is what a module-global looks like once tests
+ * start leaking into each other. The set now belongs to an instance, so a
+ * test builds its own registry and needs no reset at all.
  */
-const knownSecrets = new Set<string>();
+export class SecretRegistry {
+  private readonly secrets = new Set<string>();
+
+  /** Register one secret value (ignored if shorter than the minimum length). */
+  add(value: string | undefined | null): void {
+    if (typeof value === "string" && value.length >= MIN_SECRET_LENGTH) {
+      this.secrets.add(value);
+    }
+  }
+
+  /** Register several at once (undefined/short entries are skipped). */
+  addAll(values: Array<string | undefined | null>): void {
+    for (const value of values) this.add(value);
+  }
+
+  /** What the next scrub will redact. */
+  list(): string[] {
+    return [...this.secrets];
+  }
+
+  clear(): void {
+    this.secrets.clear();
+  }
+}
+
+/**
+ * The registry the CLI's single run uses. A test that needs isolation should
+ * construct its own `SecretRegistry` rather than clearing this one.
+ */
+const runRegistry = new SecretRegistry();
 
 /** Register one secret value (ignored if shorter than the minimum length). */
 export function registerSecret(value: string | undefined | null): void {
-  if (typeof value === "string" && value.length >= MIN_SECRET_LENGTH) {
-    knownSecrets.add(value);
-  }
+  runRegistry.add(value);
 }
 
 /** Register several secret values at once (undefined/short entries are skipped). */
 export function registerSecrets(values: Array<string | undefined | null>): void {
-  for (const value of values) registerSecret(value);
+  runRegistry.addAll(values);
 }
 
 /** Currently known secrets — what the next `scrubTraceZip` call will redact. */
 export function getKnownSecrets(): string[] {
-  return [...knownSecrets];
+  return runRegistry.list();
 }
 
-/** Test-only: reset the registry between runs/tests. */
+/** Reset the process-wide registry. */
 export function clearKnownSecrets(): void {
-  knownSecrets.clear();
+  runRegistry.clear();
 }
 
 function isBinaryEntry(entryName: string): boolean {
