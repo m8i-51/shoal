@@ -80,6 +80,13 @@ export interface RunLog {
     rateLimitRetries: number;
     cost: {
       inputTokens: number;
+      /**
+       * Estimated share of `inputTokens` that came from screenshots.
+       * Providers do not report the split, so this is derived from the images
+       * we sent — see framework/image-tokens.ts. Never used for billing or the
+       * spend cap, which stay on the provider's own counts.
+       */
+      imageInputTokens: number;
       outputTokens: number;
       estimatedUSD: number | null;
     };

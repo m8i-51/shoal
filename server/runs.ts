@@ -16,6 +16,8 @@ export interface RunSummary {
   isLive?: boolean;
   estimatedCostUSD: number | null;
   inputTokens: number;
+  /** Estimated share of inputTokens from screenshots; 0 on runs recorded before the split existed. */
+  imageInputTokens: number;
   outputTokens: number;
   regressionChecked: number;
   regressionFailed: number;
@@ -88,6 +90,7 @@ export function listRuns(): RunSummary[] {
             isLive: true,
             estimatedCostUSD: null,
             inputTokens: 0,
+            imageInputTokens: 0,
             outputTokens: 0,
             regressionChecked: 0,
             regressionFailed: 0,
@@ -119,6 +122,7 @@ export function listRuns(): RunSummary[] {
         hasReport: fs.existsSync(reportPath),
         estimatedCostUSD: log.summary?.cost?.estimatedUSD ?? null,
         inputTokens: log.summary?.cost?.inputTokens ?? 0,
+        imageInputTokens: log.summary?.cost?.imageInputTokens ?? 0,
         outputTokens: log.summary?.cost?.outputTokens ?? 0,
         regressionChecked: log.summary?.regressionChecked ?? 0,
         regressionFailed: log.summary?.regressionFailed ?? 0,

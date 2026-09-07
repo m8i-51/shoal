@@ -3,6 +3,7 @@ import type { CreateMessageParams } from "./llm-client";
 import { runLog } from "./findings";
 import { assertWithinBudget, recordSpend } from "./budget";
 import { withOutputLanguage } from "./language";
+import { estimateImageTokensInMessages } from "./image-tokens";
 
 export let rateLimitRetries = 0;
 
@@ -121,6 +122,13 @@ export async function createMessageWithRetry(
       if (runLog?.summary?.cost) {
         runLog.summary.cost.inputTokens += inputTokens;
         runLog.summary.cost.outputTokens += outputTokens;
+        // Estimated, and capped at what the provider actually charged for
+        // input: an over-estimate that exceeded inputTokens would render the
+        // text remainder negative and the whole split untrustworthy.
+        runLog.summary.cost.imageInputTokens += Math.min(
+          estimateImageTokensInMessages(localized.messages),
+          inputTokens,
+        );
       }
       recordSpend(
         params.model,

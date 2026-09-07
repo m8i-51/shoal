@@ -57,6 +57,7 @@ function makeRunSummary(overrides: Partial<RunSummary> = {}): RunSummary {
     hasReport: true,
     estimatedCostUSD: null,
     inputTokens: 0,
+    imageInputTokens: 0,
     outputTokens: 0,
     regressionChecked: 2,
     regressionFailed: 1,

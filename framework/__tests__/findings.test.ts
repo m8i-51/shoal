@@ -159,7 +159,7 @@ describe("initRunLog", () => {
     const saved = JSON.parse(content as string);
     expect(saved.summary.totalAgents).toBe(5);
     expect(saved.summary.completed).toBe(0);
-    expect(saved.summary.cost).toEqual({ inputTokens: 0, outputTokens: 0, estimatedUSD: null });
+    expect(saved.summary.cost).toEqual({ inputTokens: 0, imageInputTokens: 0, outputTokens: 0, estimatedUSD: null });
     expect(saved.repo).toBe("owner/repo");
   });
 

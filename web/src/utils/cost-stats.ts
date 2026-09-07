@@ -25,6 +25,8 @@ export interface CostStats {
   /** Runs whose cost could not be estimated — they are not in `total`. */
   runsWithoutCost: number;
   inputTokens: number;
+  /** Estimated share of `inputTokens` that came from screenshots. */
+  imageInputTokens: number;
   outputTokens: number;
   /** Oldest to newest, so the bars read left-to-right in time. */
   trend: { runId: string; cost: number }[];
@@ -49,6 +51,7 @@ export function computeCostStats(runs: RunSummary[]): CostStats | null {
     // otherwise the figure quietly understates what was actually spent.
     runsWithoutCost: runs.filter((r) => r.estimatedCostUSD == null && !r.isLive).length,
     inputTokens: runs.reduce((sum, r) => sum + r.inputTokens, 0),
+    imageInputTokens: runs.reduce((sum, r) => sum + (r.imageInputTokens ?? 0), 0),
     outputTokens: runs.reduce((sum, r) => sum + r.outputTokens, 0),
     trend: withCost
       .slice(0, TREND_RUNS)

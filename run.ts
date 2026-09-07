@@ -1821,6 +1821,13 @@ Rules:
   console.log("\nAll agents done.");
   console.log(`  findings collected: ${collectedFindings.length}`);
   console.log(`  tokens: ${runLog.summary.cost.inputTokens} in / ${runLog.summary.cost.outputTokens} out — estimated cost: ${formatCostUSD(runLog.summary.cost.estimatedUSD)}`);
+  // Screenshots are usually most of the input. Saying so points at the right
+  // lever: shorter prompts and fewer turns pull in opposite directions.
+  if (runLog.summary.cost.imageInputTokens > 0 && runLog.summary.cost.inputTokens > 0) {
+    const image = runLog.summary.cost.imageInputTokens;
+    const share = Math.round((image / runLog.summary.cost.inputTokens) * 100);
+    console.log(`    of which ~${image} (${share}%) from screenshots, ~${runLog.summary.cost.inputTokens - image} from text (estimated)`);
+  }
   console.log(`  ${formatIssuesCreatedLine(trackers.enabledNames(), runLog.summary.totalIssuesPosted)}`);
   console.log(`  regression checks: ${runLog.summary.regressionChecked} (regressed: ${runLog.summary.regressionFailed})`);
   console.log(`  screenshots: ${screenshotDir}`);
