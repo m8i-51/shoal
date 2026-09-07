@@ -15,6 +15,7 @@
  * effectively uncapped, so `budgetStatusLine()` says so out loud.
  */
 import { estimateCostSync, warmPricingCache } from "./cost";
+import * as log from "./log";
 
 export class BudgetExceededError extends Error {
   readonly spentUSD: number;
@@ -58,7 +59,7 @@ export function resolveBudgetLimit(env: NodeJS.ProcessEnv = process.env): number
   if (!raw) return null;
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed <= 0) {
-    console.warn(`[budget] ignoring invalid SHOAL_MAX_USD "${raw}" — expected a positive number`);
+    log.warn(`[budget] ignoring invalid SHOAL_MAX_USD "${raw}" — expected a positive number`);
     return null;
   }
   return parsed;

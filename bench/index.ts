@@ -18,6 +18,7 @@ import { fileURLToPath } from "url";
 import { loadLabels, loadRunFindings, scoreFindings, formatBenchResult, recordBenchScore } from "./score";
 import { labelsPathForVariant, resolveBenchVariant } from "./variants";
 import { createLLMClient } from "../framework/llm-client";
+import * as log from "../framework/log";
 
 const benchDir = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.join(benchDir, "..");
@@ -70,7 +71,7 @@ async function main() {
   const app = variant.createApp();
   const server = app.listen(port);
   const baseUrl = `http://localhost:${port}`;
-  console.log(`[bench] ${variant.id} app → ${baseUrl}`);
+  log.info(`[bench] ${variant.id} app → ${baseUrl}`);
 
   const runId = `run_${Date.now()}`;
   try {
@@ -83,13 +84,13 @@ async function main() {
   const findings = loadRunFindings(runId);
   const result = scoreFindings(findings, labels);
 
-  console.log(`\n${formatBenchResult(result, variant.id)}\n`);
+  log.info(`\n${formatBenchResult(result, variant.id)}\n`);
 
   const outDir = path.join(process.cwd(), "logs");
   fs.mkdirSync(outDir, { recursive: true });
   const outPath = path.join(outDir, `bench_${variant.id}_${runId}.json`);
   fs.writeFileSync(outPath, JSON.stringify({ runId, variant: variant.id, ...result }, null, 2), "utf-8");
-  console.log(`[bench] result saved: ${outPath}`);
+  log.info(`[bench] result saved: ${outPath}`);
 
   if (process.env.BENCH_RECORD === "1") {
     recordBenchScore({
@@ -102,12 +103,12 @@ async function main() {
       precision: result.precision,
       unmatchedFindings: result.unmatchedFindings,
     });
-    console.log("[bench] score appended to bench/scores.json");
+    log.info("[bench] score appended to bench/scores.json");
   }
 
   const min = parseInt(process.env.SHOAL_BENCH_MIN ?? "", 10);
   if (Number.isFinite(min) && result.detectionRate * 100 < min) {
-    console.error(`[bench] detection rate ${Math.round(result.detectionRate * 100)}% is below SHOAL_BENCH_MIN=${min}`);
+    log.error(`[bench] detection rate ${Math.round(result.detectionRate * 100)}% is below SHOAL_BENCH_MIN=${min}`);
     process.exitCode = 1;
   }
 }
@@ -116,7 +117,7 @@ async function main() {
 // without spinning up the seeded app and spawning a full shoal run.
 if (process.env.NODE_ENV !== "test") {
   main().catch((e) => {
-    console.error(e);
+    log.error(e);
     process.exit(1);
   });
 }

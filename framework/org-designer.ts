@@ -1,6 +1,7 @@
 import type { LLMClient } from "./llm-client";
 import { completeText } from "./tool-session";
 import type { ProductSpec } from "./product-discovery";
+import * as log from "./log";
 
 export interface OrgDesign {
   personaGuidance: string;
@@ -21,7 +22,7 @@ export const UNIVERSAL_LENSES = [
 ];
 
 export async function designOrg(spec: ProductSpec, client: LLMClient, model: string, coverageSummary?: string): Promise<OrgDesign> {
-  console.log("\n[persona-policy] starting...");
+  log.info("\n[persona-policy] starting...");
 
   const text = await completeText({
     provider: process.env.LLM_PROVIDER ?? "anthropic",
@@ -94,6 +95,6 @@ When recruiting UX/design-oriented agents, give them awareness of these standard
   - Jakob's Law: flag interactions that contradict conventions users expect from similar apps (e.g., swipe to delete, pull to refresh, hamburger menus)
   - Nielsen's heuristics: check for missing system status feedback, unclear error messages, lack of undo, and forcing users to recall rather than recognize`;
 
-  console.log("[persona-policy] done");
+  log.info("[persona-policy] done");
   return { personaGuidance };
 }

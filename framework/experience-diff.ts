@@ -1,6 +1,7 @@
 import type { Finding } from "./types";
 import type { ExperienceScore } from "./experience-score";
 import { pathsShareArea } from "./findings";
+import * as log from "./log";
 
 /**
  * PR Experience Diff — 変更されたコードに対応する画面へ小さい群れを集中投下し、
@@ -154,7 +155,7 @@ export async function postPrComment(
   });
   if (!res.ok) {
     const msg = await res.text().catch(() => "");
-    console.error(`[diff] failed to comment on PR #${opts.prNumber} (${res.status}): ${msg.slice(0, 200)}`);
+    log.error(`[diff] failed to comment on PR #${opts.prNumber} (${res.status}): ${msg.slice(0, 200)}`);
   }
   return res.ok;
 }

@@ -1,5 +1,6 @@
 import type { IssueTracker, OpenIssue, ClosedIssue } from "./types";
 import { normalizeCloseReason } from "./close-reason";
+import * as log from "../log";
 
 export class AsanaTracker implements IssueTracker {
   readonly name = "asana";
@@ -34,18 +35,18 @@ export class AsanaTracker implements IssueTracker {
     });
     if (!res.ok) {
       const msg = await res.text().catch(() => "");
-      console.error(`[asana] failed to create task (${res.status}): ${msg.slice(0, 200)}`);
+      log.error(`[asana] failed to create task (${res.status}): ${msg.slice(0, 200)}`);
       return null;
     }
     const data = await res.json() as {
       data?: { gid: string; permalink_url?: string };
     };
     if (!data.data?.gid) {
-      console.error("[asana] create task response missing gid");
+      log.error("[asana] create task response missing gid");
       return null;
     }
     const url = data.data.permalink_url ?? `https://app.asana.com/0/${this.projectId}/${data.data.gid}`;
-    console.log(`[asana] task created: ${url}`);
+    log.info(`[asana] task created: ${url}`);
     return url;
   }
 
@@ -57,7 +58,7 @@ export class AsanaTracker implements IssueTracker {
     });
     if (!res.ok) {
       const msg = await res.text().catch(() => "");
-      console.error(`[asana] failed to comment on task ${issueNumber} (${res.status}): ${msg.slice(0, 200)}`);
+      log.error(`[asana] failed to comment on task ${issueNumber} (${res.status}): ${msg.slice(0, 200)}`);
     }
     return res.ok;
   }

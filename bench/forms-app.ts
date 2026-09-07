@@ -7,6 +7,7 @@
  * - missing-form-labels: 入力に label がなく placeholder のみ（a11y）
  */
 import express from "express";
+import * as log from "../framework/log";
 
 interface Ticket {
   id: number;
@@ -81,5 +82,5 @@ Stack: FormsService.checkHealth -&gt; PostgresPool.query</pre>`));
 
 if (process.env.NODE_ENV !== "test" && process.argv[1]?.endsWith("forms-app.ts")) {
   const port = parseInt(process.env.BENCH_PORT ?? "4320", 10);
-  createFormsBenchApp().listen(port, () => console.log(`[bench] forms app → http://localhost:${port}`));
+  createFormsBenchApp().listen(port, () => log.info(`[bench] forms app → http://localhost:${port}`));
 }

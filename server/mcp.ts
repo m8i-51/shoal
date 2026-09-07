@@ -21,9 +21,10 @@ import { listRuns } from "./runs.js";
 import { computeExperienceScore } from "../framework/experience-score.js";
 import { isFinding, type Finding } from "../framework/types.js";
 import { loadShoalEnv } from "../framework/load-env.js";
+import * as log from "../framework/log.js";
 
 if (process.env.NODE_ENV !== "test") {
-  loadShoalEnv({ logger: (m) => console.error(m) });
+  loadShoalEnv({ logger: (m) => log.error(m) });
 }
 
 // ================================================================
@@ -262,9 +263,9 @@ if (process.env.NODE_ENV !== "test") {
   const server = buildMcpServer();
   const transport = new StdioServerTransport();
   server.connect(transport).then(() => {
-    console.error("[shoal-mcp] listening on stdio"); // stdout は JSON-RPC 用なので stderr に出す
+    log.error("[shoal-mcp] listening on stdio"); // stdout は JSON-RPC 用なので stderr に出す
   }).catch((e) => {
-    console.error("[shoal-mcp] failed to start:", e);
+    log.error("[shoal-mcp] failed to start:", e);
     process.exit(1);
   });
 }

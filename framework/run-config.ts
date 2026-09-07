@@ -8,6 +8,7 @@
  */
 
 /** Default browser viewport for every non-persona context (discovery, accounts, agents). */
+import * as log from "./log";
 export const DEFAULT_VIEWPORT = { width: 1024, height: 640 } as const;
 
 export interface RunTimings {
@@ -65,7 +66,7 @@ export function positiveIntFromEnv(
   const min = opts.min ?? 1;
   const max = opts.max ?? Number.MAX_SAFE_INTEGER;
   if (!Number.isInteger(parsed) || parsed < min || parsed > max) {
-    console.warn(
+    log.warn(
       `[config] ignoring invalid ${name}="${raw}" — expected an integer between ${min} and ${max}; using ${fallback}`,
     );
     return fallback;
@@ -96,7 +97,7 @@ export function resolveViewport(
   if (!raw) return { ...DEFAULT_VIEWPORT };
   const m = raw.match(/^(\d{2,5})\s*[x×]\s*(\d{2,5})$/i);
   if (!m) {
-    console.warn(`[config] ignoring invalid SHOAL_VIEWPORT "${raw}" — expected WIDTHxHEIGHT (e.g. 1280x800)`);
+    log.warn(`[config] ignoring invalid SHOAL_VIEWPORT "${raw}" — expected WIDTHxHEIGHT (e.g. 1280x800)`);
     return { ...DEFAULT_VIEWPORT };
   }
   return { width: Number(m[1]), height: Number(m[2]) };

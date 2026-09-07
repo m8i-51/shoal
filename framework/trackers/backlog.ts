@@ -8,6 +8,7 @@ import {
   type FindingCategory,
   type ModelPicker,
 } from "./catalog-pick";
+import * as log from "../log";
 
 interface BacklogIssueType {
   id: number;
@@ -47,7 +48,7 @@ export class BacklogTracker implements IssueTracker {
     const res = await fetch(this.endpoint(path, params));
     if (!res.ok) {
       const msg = await res.text().catch(() => "");
-      console.error(`[backlog] GET ${path} failed (${res.status}): ${msg.slice(0, 200)}`);
+      log.error(`[backlog] GET ${path} failed (${res.status}): ${msg.slice(0, 200)}`);
       return null;
     }
     return await res.json() as T;
@@ -91,18 +92,18 @@ export class BacklogTracker implements IssueTracker {
     const [issueTypes, priorities] = await Promise.all([this.loadIssueTypes(), this.loadPriorities()]);
 
     if (issueTypes.length === 0) {
-      console.error("[backlog] could not load issue types for the project — refusing to file with a hardcoded type id");
+      log.error("[backlog] could not load issue types for the project — refusing to file with a hardcoded type id");
       return null;
     }
     if (priorities.length === 0) {
-      console.error("[backlog] could not load priorities — refusing to file with a hardcoded priority id");
+      log.error("[backlog] could not load priorities — refusing to file with a hardcoded priority id");
       return null;
     }
 
     const issueType = await this.resolveField("issueType", category, issueTypes, this.pickedTypes);
     const priority = await this.resolveField("priority", category, priorities, this.pickedPriorities);
     if (!issueType || !priority) {
-      console.error(`[backlog] missing issue type or priority for category=${category}`);
+      log.error(`[backlog] missing issue type or priority for category=${category}`);
       return null;
     }
 
@@ -120,16 +121,16 @@ export class BacklogTracker implements IssueTracker {
     });
     if (!res.ok) {
       const msg = await res.text().catch(() => "");
-      console.error(`[backlog] failed to create issue (${res.status}): ${msg.slice(0, 200)}`);
+      log.error(`[backlog] failed to create issue (${res.status}): ${msg.slice(0, 200)}`);
       return null;
     }
     const data = await res.json() as { issueKey?: string };
     if (!data.issueKey) {
-      console.error("[backlog] create issue response missing issueKey");
+      log.error("[backlog] create issue response missing issueKey");
       return null;
     }
     const url = `${this.baseUrl}/view/${data.issueKey}`;
-    console.log(`[backlog] issue created: ${url}`);
+    log.info(`[backlog] issue created: ${url}`);
     return url;
   }
 
@@ -142,7 +143,7 @@ export class BacklogTracker implements IssueTracker {
     });
     if (!res.ok) {
       const msg = await res.text().catch(() => "");
-      console.error(`[backlog] failed to comment on issue ${issueNumber} (${res.status}): ${msg.slice(0, 200)}`);
+      log.error(`[backlog] failed to comment on issue ${issueNumber} (${res.status}): ${msg.slice(0, 200)}`);
     }
     return res.ok;
   }

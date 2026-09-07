@@ -98,6 +98,7 @@ import {
 } from "./framework/budget";
 import { pickAssignment, dispatchableSoloScenarios, reconcileMultiActorOutcomes, type Assignment } from "./framework/assignment";
 import { partitionClosedIssues, regressionMaxIterations } from "./framework/regression-issue";
+import * as log from "./framework/log";
 
 const BASE_URL = process.env.BASE_URL ?? "http://localhost:3000";
 const REFRESH_SPEC = process.env.REFRESH_SPEC === "1";
@@ -115,11 +116,11 @@ for (const name of ["shoal.config.ts", "shoal.config.js", "shoal.config.mjs"]) {
       const applied = applyLoadedTarget(targetConfig, mod, name);
       targetConfig = applied.config;
       for (const message of applied.messages) {
-        if (message.level === "warn") console.warn(message.text);
-        else console.log(message.text);
+        if (message.level === "warn") log.warn(message.text);
+        else log.info(message.text);
       }
     } catch (e) {
-      console.warn(`[config] failed to load ${name}:`, e);
+      log.warn(`[config] failed to load ${name}:`, e);
     }
     break;
   }
@@ -127,7 +128,7 @@ for (const name of ["shoal.config.ts", "shoal.config.js", "shoal.config.mjs"]) {
 
 const SHOAL_MODE = getShoalMode();
 const VIEWPORT = resolveViewport();
-if (SHOAL_MODE !== "full") console.log(`[guardrails] mode: ${SHOAL_MODE}`);
+if (SHOAL_MODE !== "full") log.info(`[guardrails] mode: ${SHOAL_MODE}`);
 const APP_TOOLS = filterAppTools(targetConfig.appTools, SHOAL_MODE);
 
 // skip exploration when no API tools are configured (after guardrail filtering)
@@ -147,7 +148,7 @@ const FOCUS_PATHS = (process.env.SHOAL_FOCUS_PATHS ?? "")
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);
-if (FOCUS_PATHS.length > 0) console.log(`[focus] exploration focused on: ${FOCUS_PATHS.join(", ")}`);
+if (FOCUS_PATHS.length > 0) log.info(`[focus] exploration focused on: ${FOCUS_PATHS.join(", ")}`);
 
 // verify モード — 単一 finding の修正検証に特化した run（MCP の verify_fix から使う）
 // SHOAL_VERIFY_FINDING に finding の JSON（id/title/body/category）を渡す
@@ -159,7 +160,7 @@ function parseVerifyFinding(): VerifyFinding | null {
     const f = JSON.parse(raw) as VerifyFinding;
     if (typeof f.id === "string" && typeof f.title === "string" && typeof f.body === "string") return f;
   } catch { /* fallthrough */ }
-  console.error("[verify] SHOAL_VERIFY_FINDING must be JSON with id/title/body");
+  log.error("[verify] SHOAL_VERIFY_FINDING must be JSON with id/title/body");
   process.exit(1);
 }
 const VERIFY_FINDING = parseVerifyFinding();
@@ -273,7 +274,7 @@ function makeExecutor(
               iterations: agentLog.iterations,
             };
             scenarioOutcomes.push(outcome);
-            console.log(`  ${achieved ? "✓" : "✗"} [outcome] "${scenario.title}": ${achieved ? "achieved" : "NOT achieved"} — ${reason}`);
+            log.info(`  ${achieved ? "✓" : "✗"} [outcome] "${scenario.title}": ${achieved ? "achieved" : "NOT achieved"} — ${reason}`);
           }
           result = { recorded: true };
           break;
@@ -294,7 +295,7 @@ function makeExecutor(
           };
           saveFinding(finding);
           agentLog.issuesPosted.push({ title: String(title), category: safeCategory, url: null });
-          console.log(`  → [findings] saved: "${title}" (${safeCategory})`);
+          log.info(`  → [findings] saved: "${title}" (${safeCategory})`);
           result = { saved: true, findingId: finding.id };
           break;
         }
@@ -344,7 +345,7 @@ function makeExecutor(
             regressionUrl: null,
           });
           runLog.summary.regressionChecked++;
-          console.log(`  ✓ verified: ${issueId} "${original_issue_title}"`);
+          log.info(`  ✓ verified: ${issueId} "${original_issue_title}"`);
           result = { verified: true };
           break;
         }
@@ -385,7 +386,7 @@ async function runExplorer(
     : assignment.lens
     ? `[lens: ${assignment.lens.slice(0, 30)}...]`
     : "[free exploration]";
-  console.log(`\n[explorer] ${agent.name} start ${assignmentLabel}`);
+  log.info(`\n[explorer] ${agent.name} start ${assignmentLabel}`);
   const agentLog: AgentLog = {
     agentType: "explorer",
     agentId: agent.id,
@@ -436,7 +437,7 @@ Take 3–5 actions, then finish.
 ${untrustedContentPrompt()}`;
 
   await runAgentLoop(agentLog, systemPrompt, EXPLORER_TOOLS, client, defaultModel, makeExecutor(agentLog, scenarioOutcomes, assignment.scenario), llmProvider);
-  console.log(`[explorer] ${agent.name} done`);
+  log.info(`[explorer] ${agent.name} done`);
 }
 
 async function runRegressionAgent(
@@ -444,7 +445,7 @@ async function runRegressionAgent(
   closedIssues: { number: number | string; title: string; body: string; labels: string[] }[],
   productSpec: ProductSpec
 ) {
-  console.log(`\n[regression] ${agent.name} start (${closedIssues.length} issues to check)`);
+  log.info(`\n[regression] ${agent.name} start (${closedIssues.length} issues to check)`);
   const agentLog: AgentLog = {
     agentType: "regression",
     agentId: agent.id,
@@ -499,7 +500,7 @@ ${untrustedContentPrompt()}`;
   );
   const checked = agentLog.regressionChecks.length;
   const failed = agentLog.regressionChecks.filter((c) => c.status === "regressed").length;
-  console.log(`[regression] ${agent.name} done (checked: ${checked} / regressed: ${failed})`);
+  log.info(`[regression] ${agent.name} done (checked: ${checked} / regressed: ${failed})`);
 }
 
 // ================================================================
@@ -518,7 +519,7 @@ async function runPersonaDesigner(
   siteMap: SiteMap | null = null,
   autoSlots = 2,
 ): Promise<void> {
-  console.log("\n[persona-designer] starting...");
+  log.info("\n[persona-designer] starting...");
 
   const accountContext = testAccounts.length > 0
     ? `\n[Available Test Accounts (one per role)]\n${testAccounts.map((a) => `- ${a.role}: ${a.email}`).join("\n")}\nWhen recruiting agents, set accountRole to one of these short tokens (user, instructor, admin). Keep role as a narrative description of the person — never put that sentence in accountRole.`
@@ -563,14 +564,14 @@ ${pathCoverageStep}
         let result: unknown;
         if (t.name === "get_coverage") {
           result = computeWeightedSummary().formatted;
-          console.log("  [persona-designer] coverage summary fetched");
+          log.info("  [persona-designer] coverage summary fetched");
         } else if (t.name === "get_persona_templates") {
           if (!personaPack) {
             result = "(no persona templates configured — set SHOAL_PERSONAS env var or add personas.yaml to your project)";
           } else {
             result = formatPackForPrompt(personaPack);
           }
-          console.log(`  [persona-designer] persona templates fetched (${personaPack?.personas.length ?? 0})`);
+          log.info(`  [persona-designer] persona templates fetched (${personaPack?.personas.length ?? 0})`);
         } else if (t.name === "get_path_coverage") {
           if (siteMap) {
             result = formatSiteMapForPersona(siteMap, {
@@ -581,7 +582,7 @@ ${pathCoverageStep}
           } else {
             result = `Paths visited in last run (${lastRunPaths.runId}):\n${lastRunPaths.visitedPaths.map((p) => `- ${p}`).join("\n")}\n\nRecruit agents whose role naturally takes them to paths NOT in this list.`;
           }
-          console.log(`  [persona-designer] path coverage fetched (site-map=${Boolean(siteMap)}, recent=${lastRunPaths?.visitedPaths.length ?? 0})`);
+          log.info(`  [persona-designer] path coverage fetched (site-map=${Boolean(siteMap)}, recent=${lastRunPaths?.visitedPaths.length ?? 0})`);
         } else if (t.name === "get_finding_hotspots") {
           const hotspots = getFindingHotspots();
           if (hotspots.length === 0) {
@@ -591,14 +592,14 @@ ${pathCoverageStep}
               `${h.pathPrefix}: ${h.totalFindings} findings — ${Object.entries(h.categories).map(([c, n]) => `${c}:${n}`).join(", ")}`
             ).join("\n");
           }
-          console.log(`  [persona-designer] finding hotspots fetched (${hotspots.length} areas)`);
+          log.info(`  [persona-designer] finding hotspots fetched (${hotspots.length} areas)`);
         } else if (t.name === "get_open_issues") {
           if (openIssues.length === 0) {
             result = "(no open issues from configured tracker(s) yet)";
           } else {
             result = openIssues.map((i) => `- ${formatIssueRef(i.number)}: ${i.title} [${i.labels.join(", ")}]`).join("\n");
           }
-          console.log(`  [persona-designer] open issues fetched (${openIssues.length})`);
+          log.info(`  [persona-designer] open issues fetched (${openIssues.length})`);
         } else if (t.name === "get_scenarios") {
           if (scenarios.length === 0) {
             result = "(no scenarios generated — all agents will use free-exploration mode)";
@@ -607,7 +608,7 @@ ${pathCoverageStep}
               `[${s.id}] ${s.title}\n  Context: ${s.context}\n  Goal: ${s.goal}\n  Constraints: ${s.constraints}`
             ).join("\n\n");
           }
-          console.log(`  [persona-designer] scenarios fetched (${scenarios.length})`);
+          log.info(`  [persona-designer] scenarios fetched (${scenarios.length})`);
         } else if (t.name === "get_agents") {
           const agents = loadAgents().filter((a) => (a.status ?? "active") !== "archived");
           result = agents.map((a) => ({
@@ -619,7 +620,7 @@ ${pathCoverageStep}
             origin: agentOrigin(a),
             status: a.status ?? "active",
           }));
-          console.log(`  [persona-designer] current agents: ${agents.length}`);
+          log.info(`  [persona-designer] current agents: ${agents.length}`);
         } else if (t.name === "add_agent") {
           const { name, role, persona, environment, accountRole } = input as {
             name?: string;
@@ -640,24 +641,24 @@ ${pathCoverageStep}
               ...(accountRole?.trim() ? { accountRole: accountRole.trim() } : {}),
             });
             result = agent;
-            console.log(`  [persona-designer] created: ${agent.name} (${agent.role})${agent.accountRole ? ` [accountRole: ${agent.accountRole}]` : ""}${cleanEnv ? ` [env: ${Object.entries(cleanEnv).map(([k, v]) => `${k}=${v}`).join(", ")}]` : ""}`);
+            log.info(`  [persona-designer] created: ${agent.name} (${agent.role})${agent.accountRole ? ` [accountRole: ${agent.accountRole}]` : ""}${cleanEnv ? ` [env: ${Object.entries(cleanEnv).map(([k, v]) => `${k}=${v}`).join(", ")}]` : ""}`);
           } catch (e) {
             const message = e instanceof Error ? e.message : String(e);
             result = { error: message };
-            console.log(`  [persona-designer] add_agent rejected: ${message}`);
+            log.info(`  [persona-designer] add_agent rejected: ${message}`);
           }
         } else if (t.name === "retire_agent") {
           const { agentId, reason } = input as { agentId: string; reason: string };
           const existing = loadAgents().find((a) => a.id === agentId);
           if (existing && isFixedAgent(existing)) {
             result = { success: false, error: "cannot retire fixed persona" };
-            console.log(`  [persona-designer] retire blocked (fixed): ${agentId} — ${reason}`);
+            log.info(`  [persona-designer] retire blocked (fixed): ${agentId} — ${reason}`);
           } else {
             const success = retireAgent(agentId);
             result = success
               ? { success: true }
               : { success: false, error: "agent not found or not retiring" };
-            console.log(`  [persona-designer] retired: ${agentId} — ${reason} (success=${success})`);
+            log.info(`  [persona-designer] retired: ${agentId} — ${reason} (success=${success})`);
           }
         } else {
           result = { error: "unknown tool" };
@@ -676,9 +677,9 @@ ${pathCoverageStep}
       maxIterations: DEFAULT_PERSONA_DESIGNER_ITERATIONS,
       maxTokens: 1024,
     });
-    console.log("[persona-designer] done");
+    log.info("[persona-designer] done");
   } catch (e) {
-    console.error("[persona-designer] error:", e);
+    log.error("[persona-designer] error:", e);
   }
 }
 
@@ -771,7 +772,7 @@ async function runBrowserAgent(
     : assignment.lens
     ? `[lens: ${assignment.lens.slice(0, 30)}...]`
     : "[free exploration]";
-  console.log(`\n[${logPrefix}] ${agent.name} start ${assignmentLabel}`);
+  log.info(`\n[${logPrefix}] ${agent.name} start ${assignmentLabel}`);
 
   const agentLog: BrowserAgentLog = {
     agentName: agent.name,
@@ -889,7 +890,7 @@ ${untrustedContentPrompt()}`;
         scenario: assignment.scenario,
         closedIssues: extras.closedIssues ?? [],
       });
-      console.log(`  → ${formatToolCallLog(t.name, input, 60)}`);
+      log.info(`  → ${formatToolCallLog(t.name, input, 60)}`);
 
       if (siteMap) {
         try {
@@ -919,7 +920,7 @@ ${untrustedContentPrompt()}`;
             discoverBudget.used = ingested.usedBudget;
           }
         } catch (e) {
-          console.warn(`  [site-map] visit/discover update failed:`, e);
+          log.warn(`  [site-map] visit/discover update failed:`, e);
         }
       }
 
@@ -986,13 +987,13 @@ ${untrustedContentPrompt()}`;
   } catch (e) {
     agentLog.status = "error";
     agentLog.error = String(e);
-    console.error(`[${agent.name}] error:`, e);
+    log.error(`[${agent.name}] error:`, e);
   } finally {
     agentLog.completedAt = new Date().toISOString();
     updatePageHashes(host, pageHashUpdates);
   }
 
-  console.log(`[${logPrefix}] ${agent.name} done (feedback: ${agentLog.feedbacksSaved.length})`);
+  log.info(`[${logPrefix}] ${agent.name} done (feedback: ${agentLog.feedbacksSaved.length})`);
   return agentLog;
 }
 
@@ -1046,7 +1047,7 @@ async function runThresholdAgent(
   candidates: ThresholdCandidate[],
   authPlan: BrowserAuthPlan = { handoff: { kind: "guest" }, startPath: "/" },
 ): Promise<BrowserAgentLog> {
-  console.log(`\n[threshold] ${agent.name} start (${candidates.length} candidate(s))`);
+  log.info(`\n[threshold] ${agent.name} start (${candidates.length} candidate(s))`);
 
   const agentLog: BrowserAgentLog = {
     agentName: agent.name,
@@ -1141,7 +1142,7 @@ ${untrustedContentPrompt()}`;
         pageHashUpdates,
         closedIssues: [],
       });
-      console.log(`  → ${formatToolCallLog(t.name, input, 60)}`);
+      log.info(`  → ${formatToolCallLog(t.name, input, 60)}`);
 
       return sendToClaude && screenshot
         ? [
@@ -1206,13 +1207,13 @@ ${untrustedContentPrompt()}`;
   } catch (e) {
     agentLog.status = "error";
     agentLog.error = String(e);
-    console.error(`[${agent.name}] error:`, e);
+    log.error(`[${agent.name}] error:`, e);
   } finally {
     agentLog.completedAt = new Date().toISOString();
     updatePageHashes(host, pageHashUpdates);
   }
 
-  console.log(`[threshold] ${agent.name} done (feedback: ${agentLog.feedbacksSaved.length})`);
+  log.info(`[threshold] ${agent.name} done (feedback: ${agentLog.feedbacksSaved.length})`);
   return agentLog;
 }
 
@@ -1227,7 +1228,7 @@ async function runVerifyMode(
   scenarioOutcomes: ScenarioOutcome[],
   finding: VerifyFinding,
 ): Promise<void> {
-  console.log(`\n[verify] verifying fix for: "${finding.title}"`);
+  log.info(`\n[verify] verifying fix for: "${finding.title}"`);
   runLog.summary.totalAgents = 1;
 
   const verifier: Agent = {
@@ -1268,8 +1269,8 @@ async function runVerifyMode(
   const outPath = path.join(process.cwd(), "logs", `verify_${runLog.runId}.json`);
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
   fs.writeFileSync(outPath, JSON.stringify(result, null, 2), "utf-8");
-  console.log(`\n[verify] ${result.status}: ${result.reason}`);
-  console.log(`[verify] result saved: ${outPath}`);
+  log.info(`\n[verify] ${result.status}: ${result.reason}`);
+  log.info(`[verify] result saved: ${outPath}`);
 }
 
 export async function main() {
@@ -1279,7 +1280,7 @@ export async function main() {
   const retentionDays = getRetentionDays();
   const prunedCount = pruneRunArtifacts(process.cwd(), retentionDays);
   if (prunedCount > 0) {
-    console.log(`[retention] removed ${prunedCount} run artifact director(ies) older than ${retentionDays} day(s)`);
+    log.info(`[retention] removed ${prunedCount} run artifact director(ies) older than ${retentionDays} day(s)`);
   }
   // run log を最初期化しておくことで、どの段階でエラーが起きても finally で saveRunLog() が動く
   initRunLog(0, process.env.GITHUB_REPO ?? "");
@@ -1287,10 +1288,10 @@ export async function main() {
   // SHOAL_MAX_USD の推定コスト上限。超えた時点で以降の LLM 呼び出しを止める
   initBudget();
   const budgetLine = budgetStatusLine();
-  if (budgetLine) console.log(budgetLine);
+  if (budgetLine) log.info(budgetLine);
   // 価格表を先に読み込む（OpenRouter は実行時取得なので、これが無いと上限が無言で効かない）
   const budgetWarning = await prepareBudget(defaultModel, llmProvider);
-  if (budgetWarning) console.warn(budgetWarning);
+  if (budgetWarning) log.warn(budgetWarning);
 
   // 1. product discovery (cache or live)
   const browser = await chromium.launch({ headless: true });
@@ -1304,7 +1305,7 @@ export async function main() {
         : null;
       const ageStr = ageDays != null ? `${ageDays} day${ageDays !== 1 ? "s" : ""} old` : "unknown date";
       const staleHint = ageDays != null && ageDays >= 7 ? " — set REFRESH_SPEC=1 to re-run discovery" : "";
-      console.log(`\n[product-discovery] using cache (${ageStr}, confidence: ${cached.confidence})${staleHint}`);
+      log.info(`\n[product-discovery] using cache (${ageStr}, confidence: ${cached.confidence})${staleHint}`);
       productSpec = cached;
     } else {
       const discoveryContext = await browser.newContext({ viewport: VIEWPORT });
@@ -1322,11 +1323,11 @@ export async function main() {
     // 2. adoption feedback — 過去に起票した issue の close 状況を群れに還元する
     const closedIssues = await trackers.fetchClosedIssues();
     const adoptionSummary = updateAdoption(closedIssues);
-    if (adoptionSummary) console.log(`\n[adoption] ${adoptionSummary.split("\n")[1] ?? ""}`);
+    if (adoptionSummary) log.info(`\n[adoption] ${adoptionSummary.split("\n")[1] ?? ""}`);
 
     // 3. org design (coverage + adoption aware)
     const coverageSummary = computeWeightedSummary();
-    console.log(`\n[coverage] ${coverageSummary.formatted.split("\n")[0]}`);
+    log.info(`\n[coverage] ${coverageSummary.formatted.split("\n")[0]}`);
     const designContext = adoptionSummary
       ? `${coverageSummary.formatted}\n\n${adoptionSummary}`
       : coverageSummary.formatted;
@@ -1340,7 +1341,7 @@ export async function main() {
     // シードは shoal.config の credentials、なければ test-accounts/accounts.json。
     let testAccounts: TestAccount[] = [];
     const accountPlan = resolveAccountSetup(targetConfig.credentials);
-    for (const line of accountPlan.logs) console.log(line);
+    for (const line of accountPlan.logs) log.info(line);
     switch (accountPlan.action) {
       case "run": {
         const accountContext = await browser.newContext({ viewport: VIEWPORT });
@@ -1401,9 +1402,9 @@ export async function main() {
     const siteMapOrigin = new URL(BASE_URL).origin;
     const sharedSiteMap = loadSiteMap(siteMapOrigin);
     const sitemapSeed = await seedFromSitemap(sharedSiteMap);
-    for (const w of sitemapSeed.warnings) console.warn(`  [site-map] ${w}`);
-    if (sitemapSeed.seeded > 0) console.log(`  [site-map] seeded ${sitemapSeed.seeded} paths from sitemap`);
-    console.log(`  ${formatSiteMapLogLine(sharedSiteMap)}`);
+    for (const w of sitemapSeed.warnings) log.warn(`  [site-map] ${w}`);
+    if (sitemapSeed.seeded > 0) log.info(`  [site-map] seeded ${sitemapSeed.seeded} paths from sitemap`);
+    log.info(`  ${formatSiteMapLogLine(sharedSiteMap)}`);
     const discoverBudget = { used: 0 };
 
     // 5.5 HR agent
@@ -1415,13 +1416,13 @@ export async function main() {
       fixedCount: preFixed.length,
     });
     if (slots.maxBrowsers !== MAX_BROWSERS || slots.maxExplorers !== MAX_EXPLORERS) {
-      console.log(
+      log.info(
         `[roster] bumping caps for fixed members: browsers ${MAX_BROWSERS}→${slots.maxBrowsers}, explorers ${MAX_EXPLORERS}→${slots.maxExplorers} (fixed=${slots.F}, N=${slots.N}, effectiveN=${slots.effectiveN})`,
       );
       MAX_BROWSERS = slots.maxBrowsers;
       MAX_EXPLORERS = slots.maxExplorers;
     } else {
-      console.log(
+      log.info(
         `[roster] fixed=${slots.F} autoSlots=${slots.autoSlots} (N=${slots.N}, effectiveN=${slots.effectiveN})`,
       );
     }
@@ -1444,7 +1445,7 @@ export async function main() {
     const { fixed, autos } = partitionActiveAgents(loadAgents());
     const runRoster = buildRunRoster({ fixed, autos, autoSlots: slots.autoSlots });
     if (runRoster.length === 0) {
-      console.error("No agents found. Check agents.json or create fixed personas in the dashboard.");
+      log.error("No agents found. Check agents.json or create fixed personas in the dashboard.");
       process.exit(1);
     }
 
@@ -1453,10 +1454,10 @@ export async function main() {
 
     // 6.5. roster サイズを記録（実際に走った agent 数は run 終了時に runLog.agents.length で確定）
     runLog.summary.totalAgents = runRoster.length;
-    console.log(
+    log.info(
       `\nroster: ${runRoster.length} (fixed ${fixed.length} + auto ${Math.min(autos.length, slots.autoSlots)})`,
     );
-    console.log(`explorers: ${explorerAgents.length} (max: ${MAX_EXPLORERS}) / browsers: ${browserAgents.length} (max: ${MAX_BROWSERS})`);
+    log.info(`explorers: ${explorerAgents.length} (max: ${MAX_EXPLORERS}) / browsers: ${browserAgents.length} (max: ${MAX_BROWSERS})`);
 
     // agentId → assignment（coverage 計算・レポート生成に使う）
     const agentAssignments = new Map<string, Assignment>();
@@ -1470,7 +1471,7 @@ export async function main() {
     const CONCURRENCY = explorerConcurrency();
     for (let i = 0; i < explorerAgents.length; i += CONCURRENCY) {
       if (isBudgetExceeded()) {
-        console.log(`\n${budgetStopLine()}`);
+        log.info(`\n${budgetStopLine()}`);
         break;
       }
       const batch = explorerAgents.slice(i, i + CONCURRENCY);
@@ -1480,35 +1481,35 @@ export async function main() {
         return runExplorer(agent, productSpec, assignment, scenarioOutcomes);
       }));
       if (i + CONCURRENCY < explorerAgents.length) {
-        console.log("\n[batch done] waiting 5s before next batch...");
+        log.info("\n[batch done] waiting 5s before next batch...");
         await sleep(RUN_TIMINGS.betweenExplorerBatchesMs);
       }
     }
 
     if (closedIssues.length === 0) {
-      console.log("\n[regression] no closed issues — skipped");
+      log.info("\n[regression] no closed issues — skipped");
     } else if (MAX_BROWSERS === 0 && MAX_EXPLORERS > 0) {
       const { api } = partitionClosedIssues(closedIssues);
       const skippedUi = closedIssues.length - api.length;
       if (skippedUi > 0) {
-        console.log(`\n[regression] skipping ${skippedUi} UI-only issue(s) — API lane cannot verify them`);
+        log.info(`\n[regression] skipping ${skippedUi} UI-only issue(s) — API lane cannot verify them`);
       }
       if (api.length > 0) {
         await sleep(RUN_TIMINGS.beforeRegressionMs);
         await runRegressionAgent(makeRegressionProber(), api, productSpec);
       } else {
-        console.log("\n[regression] skipped (no API-verifiable closed issues)");
+        log.info("\n[regression] skipped (no API-verifiable closed issues)");
       }
     } else if (MAX_BROWSERS === 0) {
-      console.log("\n[regression] skipped (no browser or explorer lane)");
+      log.info("\n[regression] skipped (no browser or explorer lane)");
     } else {
-      console.log(`\n[regression] will run in the browser lane (${closedIssues.length} closed issue(s))`);
+      log.info(`\n[regression] will run in the browser lane (${closedIssues.length} closed issue(s))`);
     }
 
     // 8. browser agents
     const multiScenario = findMultiActorScenario(scenarios);
-    console.log(`\nlaunching ${browserAgents.length} browser agents in parallel (max: ${MAX_BROWSERS})`);
-    browserAgents.forEach((a) => console.log(`  - ${a.name} (${a.role}) [${agentOrigin(a)}]`));
+    log.info(`\nlaunching ${browserAgents.length} browser agents in parallel (max: ${MAX_BROWSERS})`);
+    browserAgents.forEach((a) => log.info(`  - ${a.name} (${a.role}) [${agentOrigin(a)}]`));
 
     // マルチアクターシナリオ: ペルソナ role と actor / テストアカウント role が合う 2 体を同時操作させる
     const pairAssignments = new Map<string, Assignment>();
@@ -1521,14 +1522,14 @@ export async function main() {
         const agent = browserAgents.find((a) => a.id === id);
         return `${agent?.name ?? id} (${agent?.role}) as ${actor.role}`;
       }).join(" × ");
-      console.log(`[multi-actor] "${multiScenario.title}" — ${pairLabel}`);
+      log.info(`[multi-actor] "${multiScenario.title}" — ${pairLabel}`);
     }
 
     await sleep(RUN_TIMINGS.beforeBrowserLaneMs);
 
     // コスト上限に達していたら、以降のレーンは起動せずスキップする
     const budgetStopped = isBudgetExceeded();
-    if (budgetStopped) console.log(`\n${budgetStopLine()}`);
+    if (budgetStopped) log.info(`\n${budgetStopLine()}`);
 
     const thresholdCandidates = sortThresholdCandidates(
       normalizeThresholdCandidates(productSpec.thresholdCandidates),
@@ -1536,18 +1537,18 @@ export async function main() {
     let thresholdAgents: Agent[] = [];
     let thresholdSlices: ThresholdCandidate[][] = [];
     if (budgetStopped) {
-      console.log("\n[threshold] skipped (spend cap reached)");
+      log.info("\n[threshold] skipped (spend cap reached)");
     } else if (MAX_THRESHOLDS <= 0) {
-      console.log("\n[threshold] skipped (MAX_THRESHOLDS=0)");
+      log.info("\n[threshold] skipped (MAX_THRESHOLDS=0)");
     } else if (thresholdCandidates.length === 0) {
-      console.log("\n[threshold] skipped (no thresholdCandidates — set REFRESH_SPEC=1 to rediscover)");
+      log.info("\n[threshold] skipped (no thresholdCandidates — set REFRESH_SPEC=1 to rediscover)");
     } else {
       const m = Math.min(MAX_THRESHOLDS, thresholdCandidates.length);
       thresholdAgents = makeThresholdProbers(m);
       thresholdSlices = assignThresholdCandidates(thresholdCandidates, m);
-      console.log(`\nlaunching ${thresholdAgents.length} threshold agents in parallel with browsers (max: ${MAX_THRESHOLDS})`);
+      log.info(`\nlaunching ${thresholdAgents.length} threshold agents in parallel with browsers (max: ${MAX_THRESHOLDS})`);
       thresholdAgents.forEach((a, i) =>
-        console.log(`  - ${a.name} (${thresholdSlices[i]?.length ?? 0} candidate(s))`),
+        log.info(`  - ${a.name} (${thresholdSlices[i]?.length ?? 0} candidate(s))`),
       );
     }
 
@@ -1568,14 +1569,14 @@ export async function main() {
           returningSessionPath: hasAgentSession(agent.id) ? agentSessionPath(agent.id) : undefined,
           preferAccountSession: Boolean(assignment.actor),
         });
-        console.log(describeAuthPlan(agent.name, authPlan));
+        log.info(describeAuthPlan(agent.name, authPlan));
         const baseOptions: Parameters<typeof browser.newContext>[0] = {
           viewport: VIEWPORT,
         };
         if (authPlan.storageStatePath) {
           baseOptions.storageState = authPlan.storageStatePath;
           if (!assignment.actor && hasAgentSession(agent.id)) {
-            console.log(`[session] ${agent.name} returns with their previous session`);
+            log.info(`[session] ${agent.name} returns with their previous session`);
           }
         }
         // ペルソナの環境プロファイル（デバイス・ロケール・配色）を重ねる
@@ -1587,7 +1588,7 @@ export async function main() {
           try {
             await context.tracing.start({ screenshots: true, snapshots: true });
           } catch (e) {
-            console.warn(`[trace] failed to start for ${agent.name}:`, e);
+            log.warn(`[trace] failed to start for ${agent.name}:`, e);
           }
         }
         const page = await context.newPage();
@@ -1605,7 +1606,7 @@ export async function main() {
               await context.tracing.stop({ path: tracePath });
               await scrubTraceZipSafely(tracePath, `agent trace ${agent.name}`);
             } catch (e) {
-              console.warn(`[trace] failed to save for ${agent.name}:`, e);
+              log.warn(`[trace] failed to save for ${agent.name}:`, e);
             }
           }
           await context.close();
@@ -1622,7 +1623,7 @@ export async function main() {
         returningSessionPath: undefined,
         preferAccountSession: false,
       });
-      console.log(describeAuthPlan(agent.name, authPlan));
+      log.info(describeAuthPlan(agent.name, authPlan));
       const baseOptions: Parameters<typeof browser.newContext>[0] = {
         viewport: VIEWPORT,
       };
@@ -1635,7 +1636,7 @@ export async function main() {
         try {
           await context.tracing.start({ screenshots: true, snapshots: true });
         } catch (e) {
-          console.warn(`[trace] failed to start for ${agent.name}:`, e);
+          log.warn(`[trace] failed to start for ${agent.name}:`, e);
         }
       }
       const page = await context.newPage();
@@ -1651,7 +1652,7 @@ export async function main() {
             await context.tracing.stop({ path: tracePath });
             await scrubTraceZipSafely(tracePath, `agent trace ${agent.name}`);
           } catch (e) {
-            console.warn(`[trace] failed to save for ${agent.name}:`, e);
+            log.warn(`[trace] failed to save for ${agent.name}:`, e);
           }
         }
         await context.close();
@@ -1661,7 +1662,7 @@ export async function main() {
     const regressionJobs: Promise<LaneResult>[] = [];
     if (!budgetStopped && MAX_BROWSERS > 0 && closedIssues.length > 0) {
       const regressionAgent = makeRegressionProber();
-      console.log(`\nlaunching regression in the browser lane (${closedIssues.length} closed issue(s), ${regressionMaxIterations(closedIssues.length)} turns)`);
+      log.info(`\nlaunching regression in the browser lane (${closedIssues.length} closed issue(s), ${regressionMaxIterations(closedIssues.length)} turns)`);
       regressionJobs.push((async (): Promise<LaneResult> => {
         const accountRole = pickThresholdAuthRole(testAccounts, regressionAgent.accountRole ?? "user");
         const authPlan = planBrowserAuth({
@@ -1671,7 +1672,7 @@ export async function main() {
           returningSessionPath: undefined,
           preferAccountSession: false,
         });
-        console.log(describeAuthPlan(regressionAgent.name, authPlan));
+        log.info(describeAuthPlan(regressionAgent.name, authPlan));
         const baseOptions: Parameters<typeof browser.newContext>[0] = {
           viewport: VIEWPORT,
         };
@@ -1684,7 +1685,7 @@ export async function main() {
           try {
             await context.tracing.start({ screenshots: true, snapshots: true });
           } catch (e) {
-            console.warn(`[trace] failed to start for ${regressionAgent.name}:`, e);
+            log.warn(`[trace] failed to start for ${regressionAgent.name}:`, e);
           }
         }
         const page = await context.newPage();
@@ -1728,7 +1729,7 @@ Rules:
               await context.tracing.stop({ path: tracePath });
               await scrubTraceZipSafely(tracePath, `agent trace ${regressionAgent.name}`);
             } catch (e) {
-              console.warn(`[trace] failed to save for ${regressionAgent.name}:`, e);
+              log.warn(`[trace] failed to save for ${regressionAgent.name}:`, e);
             }
           }
           await context.close();
@@ -1739,7 +1740,7 @@ Rules:
     const laneResults = await Promise.all([...browserJobs, ...thresholdJobs, ...regressionJobs]);
     const allVisitedPaths = laneResults.flatMap((r) => r.log.visitedPaths);
     saveSiteMap(sharedSiteMap);
-    console.log(`  ${formatSiteMapLogLine(sharedSiteMap)}`);
+    log.info(`  ${formatSiteMapLogLine(sharedSiteMap)}`);
     for (const result of laneResults) {
       switch (result.kind) {
         case "browser":
@@ -1765,20 +1766,20 @@ Rules:
 
     // 9. triage (API + browser + threshold findings)
     await sleep(RUN_TIMINGS.beforeTriageMs);
-    console.log(`\n[triage] collected findings: ${collectedFindings.length}`);
+    log.info(`\n[triage] collected findings: ${collectedFindings.length}`);
     let triageResult: TriageResult = {
       issued: [], skipped: [], unprocessed: [], issuesCreated: 0, edgeRisks: [], issues: [], skips: [],
     };
     if (isBudgetExceeded()) {
       // 起票せずに終える。findings は保存済みで、レポートと triage-only で後から処理できる
-      console.log("[triage] skipped (spend cap reached) — findings are saved; run `shoal triage` after raising SHOAL_MAX_USD");
+      log.info("[triage] skipped (spend cap reached) — findings are saved; run `shoal triage` after raising SHOAL_MAX_USD");
       triageResult.unprocessed = collectedFindings.map((f) => f.title);
     } else {
       try {
         triageResult = await runTriageAgent(collectedFindings, client, defaultModel, trackers, agentAssignments, productSpec.productEdge);
         runLog.summary.totalIssuesPosted += triageResult.issuesCreated;
       } catch (e) {
-        console.error("[triage] error:", e);
+        log.error("[triage] error:", e);
       }
     }
 
@@ -1801,9 +1802,9 @@ Rules:
 
     // 12. experience score + HTML report
     const experience = computeExperienceScore();
-    if (experience) console.log(`\n[experience] ${formatExperienceLine(experience)}`);
+    if (experience) log.info(`\n[experience] ${formatExperienceLine(experience)}`);
     const reportPath = generateReport(runLog, collectedFindings, triageResult, productSpec, scenarios, agentAssignments, scenarioOutcomes, experience);
-    console.log(`\n[report] ${reportPath}`);
+    log.info(`\n[report] ${reportPath}`);
 
   } finally {
     await browser.close();
@@ -1818,26 +1819,26 @@ Rules:
     saveRunLog();
   }
 
-  console.log("\nAll agents done.");
-  console.log(`  findings collected: ${collectedFindings.length}`);
-  console.log(`  tokens: ${runLog.summary.cost.inputTokens} in / ${runLog.summary.cost.outputTokens} out — estimated cost: ${formatCostUSD(runLog.summary.cost.estimatedUSD)}`);
+  log.print("\nAll agents done.");
+  log.print(`  findings collected: ${collectedFindings.length}`);
+  log.print(`  tokens: ${runLog.summary.cost.inputTokens} in / ${runLog.summary.cost.outputTokens} out — estimated cost: ${formatCostUSD(runLog.summary.cost.estimatedUSD)}`);
   // Screenshots are usually most of the input. Saying so points at the right
   // lever: shorter prompts and fewer turns pull in opposite directions.
   if (runLog.summary.cost.imageInputTokens > 0 && runLog.summary.cost.inputTokens > 0) {
     const image = runLog.summary.cost.imageInputTokens;
     const share = Math.round((image / runLog.summary.cost.inputTokens) * 100);
-    console.log(`    of which ~${image} (${share}%) from screenshots, ~${runLog.summary.cost.inputTokens - image} from text (estimated)`);
+    log.print(`    of which ~${image} (${share}%) from screenshots, ~${runLog.summary.cost.inputTokens - image} from text (estimated)`);
   }
-  console.log(`  ${formatIssuesCreatedLine(trackers.enabledNames(), runLog.summary.totalIssuesPosted)}`);
-  console.log(`  regression checks: ${runLog.summary.regressionChecked} (regressed: ${runLog.summary.regressionFailed})`);
-  console.log(`  screenshots: ${screenshotDir}`);
+  log.print(`  ${formatIssuesCreatedLine(trackers.enabledNames(), runLog.summary.totalIssuesPosted)}`);
+  log.print(`  regression checks: ${runLog.summary.regressionChecked} (regressed: ${runLog.summary.regressionFailed})`);
+  log.print(`  screenshots: ${screenshotDir}`);
 
   if (scenarioOutcomes.length > 0) {
     const failed = scenarioOutcomes.filter((o) => !o.achieved);
-    console.log(`  scenarios: ${scenarioOutcomes.length - failed.length}/${scenarioOutcomes.length} achieved`);
+    log.print(`  scenarios: ${scenarioOutcomes.length - failed.length}/${scenarioOutcomes.length} achieved`);
     if (failed.length > 0) {
-      console.log(`  ⚠ failed scenarios:`);
-      failed.forEach((o) => console.log(`    ✗ ${o.scenarioTitle} — ${o.reason}`));
+      log.print(`  ⚠ failed scenarios:`);
+      failed.forEach((o) => log.print(`    ✗ ${o.scenarioTitle} — ${o.reason}`));
       process.exitCode = 1;
     }
   }
@@ -1851,12 +1852,12 @@ Rules:
  */
 export function handleFatalRunError(e: unknown): void {
   if (e instanceof BudgetExceededError) {
-    console.error(`\n${e.message}`);
-    console.error("Raise SHOAL_MAX_USD (or unset it) to continue exploring.");
+    log.error(`\n${e.message}`);
+    log.error("Raise SHOAL_MAX_USD (or unset it) to continue exploring.");
     process.exitCode = 1;
     return;
   }
-  console.error(e);
+  log.error(e);
   process.exitCode = 1;
 }
 

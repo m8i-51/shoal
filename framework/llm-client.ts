@@ -15,6 +15,7 @@ import OpenAI from "openai";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import * as log from "./log";
 
 // ---- 型定義（Anthropic 互換） ----
 
@@ -525,7 +526,7 @@ export function createLLMClient(): { client: LLMClient; defaultModel: string; pr
   // Bedrock
   if (provider === "bedrock") {
     const effectiveModel = model ?? PROVIDER_DEFAULT_MODELS.bedrock;
-    console.log(`[LLM] provider: Amazon Bedrock (region: ${process.env.AWS_REGION ?? "us-east-1"}), model: ${effectiveModel}`);
+    log.info(`[LLM] provider: Amazon Bedrock (region: ${process.env.AWS_REGION ?? "us-east-1"}), model: ${effectiveModel}`);
     return {
       client: new BedrockClient(),
       defaultModel: effectiveModel,
@@ -536,7 +537,7 @@ export function createLLMClient(): { client: LLMClient; defaultModel: string; pr
   // Codex は独自クライアント
   if (provider === "codex") {
     const effectiveModel = model ?? PROVIDER_DEFAULT_MODELS.codex;
-    console.log(`[LLM] provider: Codex (ChatGPT subscription), model: ${effectiveModel}`);
+    log.info(`[LLM] provider: Codex (ChatGPT subscription), model: ${effectiveModel}`);
     return {
       client: new CodexClient(effectiveModel),
       defaultModel: effectiveModel,
@@ -547,7 +548,7 @@ export function createLLMClient(): { client: LLMClient; defaultModel: string; pr
   // Claude CLI / Agent SDK（Claude Code ログイン）。Messages createMessage は使わない。
   if (provider === "claude-cli") {
     const effectiveModel = model ?? PROVIDER_DEFAULT_MODELS["claude-cli"];
-    console.log(`[LLM] provider: Claude CLI (Claude Code login), model: ${effectiveModel}`);
+    log.info(`[LLM] provider: Claude CLI (Claude Code login), model: ${effectiveModel}`);
     return {
       client: {
         createMessage: async () => {
@@ -567,7 +568,7 @@ export function createLLMClient(): { client: LLMClient; defaultModel: string; pr
     const apiKey = process.env.LLM_API_KEY ?? process.env.OPENAI_API_KEY ?? "";
     const effectiveBaseURL = baseURL ?? compatDefaults?.baseURL ?? "https://api.openai.com/v1";
     const effectiveModel = model ?? compatDefaults?.defaultModel ?? PROVIDER_DEFAULT_MODELS.openai;
-    console.log(`[LLM] provider: ${provider} (${effectiveBaseURL}), model: ${effectiveModel}`);
+    log.info(`[LLM] provider: ${provider} (${effectiveBaseURL}), model: ${effectiveModel}`);
     return {
       client: new OpenAICompatClient(apiKey, effectiveBaseURL, effectiveModel),
       defaultModel: effectiveModel,
@@ -578,7 +579,7 @@ export function createLLMClient(): { client: LLMClient; defaultModel: string; pr
   // Anthropic (default)
   const apiKey = process.env.ANTHROPIC_API_KEY ?? "";
   const effectiveModel = model ?? PROVIDER_DEFAULT_MODELS.anthropic;
-  console.log(`[LLM] provider: Anthropic, model: ${effectiveModel}`);
+  log.info(`[LLM] provider: Anthropic, model: ${effectiveModel}`);
   return {
     client: new AnthropicClient(apiKey),
     defaultModel: effectiveModel,

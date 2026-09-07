@@ -1,5 +1,6 @@
 import type { IssueTracker, OpenIssue, ClosedIssue } from "./types";
 import { normalizeCloseReason } from "./close-reason";
+import * as log from "../log";
 
 export class NotionTracker implements IssueTracker {
   readonly name = "notion";
@@ -42,12 +43,12 @@ export class NotionTracker implements IssueTracker {
     });
     if (!res.ok) {
       const msg = await res.text().catch(() => "");
-      console.error(`[notion] failed to create page (${res.status}): ${msg.slice(0, 200)}`);
+      log.error(`[notion] failed to create page (${res.status}): ${msg.slice(0, 200)}`);
       return null;
     }
     const data = await res.json() as { url?: string };
     const url = data.url ?? null;
-    console.log(`[notion] page created: ${url}`);
+    log.info(`[notion] page created: ${url}`);
     return url;
   }
 
@@ -62,7 +63,7 @@ export class NotionTracker implements IssueTracker {
     });
     if (!res.ok) {
       const msg = await res.text().catch(() => "");
-      console.error(`[notion] failed to comment on page ${issueNumber} (${res.status}): ${msg.slice(0, 200)}`);
+      log.error(`[notion] failed to comment on page ${issueNumber} (${res.status}): ${msg.slice(0, 200)}`);
     }
     return res.ok;
   }

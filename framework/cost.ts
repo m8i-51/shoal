@@ -1,4 +1,5 @@
 // Per-token USD prices (as of 2026-04)
+import * as log from "./log";
 const ANTHROPIC_PRICING: Record<string, { input: number; output: number }> = {
   // Claude 5.x
   "claude-fable-5":             { input: 10 / 1e6,  output: 50 / 1e6  },
@@ -150,10 +151,10 @@ async function fetchOpenRouterPricing(): Promise<Map<string, { input: number; ou
     }
     openrouterCache = map;
     openrouterCachedAt = Date.now();
-    console.log(`[cost] OpenRouter pricing loaded (${map.size} models)`);
+    log.info(`[cost] OpenRouter pricing loaded (${map.size} models)`);
     return map;
   } catch (e) {
-    console.warn("[cost] OpenRouter pricing fetch failed:", String(e));
+    log.warn("[cost] OpenRouter pricing fetch failed:", String(e));
     return openrouterCache ?? new Map();
   }
 }

@@ -4,6 +4,7 @@ import { runLog } from "./findings";
 import { assertWithinBudget, recordSpend } from "./budget";
 import { withOutputLanguage } from "./language";
 import { estimateImageTokensInMessages } from "./image-tokens";
+import * as log from "./log";
 
 export let rateLimitRetries = 0;
 
@@ -142,7 +143,7 @@ export async function createMessageWithRetry(
         const err = e as RetryableErrorShape;
         const waitMs = parseRetryAfterMs(err?.headers?.get?.("retry-after")) ?? backoffMs(i);
         const label = typeof err?.status === "number" ? `status ${err.status}` : (err?.name ?? err?.code ?? "network error");
-        console.log(`  [retry] ${label} — waiting ${(waitMs / 1000).toFixed(1)}s (attempt ${i + 1}/${retries})`);
+        log.info(`  [retry] ${label} — waiting ${(waitMs / 1000).toFixed(1)}s (attempt ${i + 1}/${retries})`);
         rateLimitRetries++;
         await sleep(waitMs);
         continue;

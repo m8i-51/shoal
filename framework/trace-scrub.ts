@@ -11,6 +11,7 @@
  */
 import * as fs from "fs";
 import { zipSync, unzipSync } from "fflate";
+import * as log from "./log";
 
 const MIN_SECRET_LENGTH = 4;
 export const REDACTED = "********";
@@ -106,9 +107,9 @@ export async function scrubTraceZipSafely(zipPath: string, label: string): Promi
     if (secrets.length === 0) return;
     const { replaced } = await scrubTraceZip(zipPath, secrets);
     if (replaced > 0) {
-      console.log(`  [trace-scrub] redacted ${replaced} occurrence(s) in ${label}`);
+      log.info(`  [trace-scrub] redacted ${replaced} occurrence(s) in ${label}`);
     }
   } catch (e) {
-    console.warn(`  [trace-scrub] failed to scrub ${label}:`, e);
+    log.warn(`  [trace-scrub] failed to scrub ${label}:`, e);
   }
 }

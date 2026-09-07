@@ -316,6 +316,7 @@ shoal serve --env-file apps/shoal/.env
 | `SHOAL_RETENTION_DAYS` | `30` | Days of `logs/screenshots/run_*` and `logs/traces/run_*` to keep; older run directories are deleted at the start of each run. `0` disables pruning |
 | `SHOAL_MAX_USD` | — | Hard spend cap for a run (estimated USD). Once reached, no further LLM call starts and the remaining lanes are skipped — findings already collected are still saved and reported |
 | `SHOAL_LANG` | — | Language agents write findings, issue titles and bodies in. Accepts a code (`ja`, `pt-BR`, `zh-TW`) or a plain name. Unset means the model decides from the app it is looking at |
+| `SHOAL_LOG_LEVEL` | `info` | How much shoal prints: `silent`, `error`, `warn`, `info`, `debug`. `error` is the quiet CI setting — progress and warnings go, but the run summary, dashboard URL and report path still print; only `silent` suppresses those |
 | `SHOAL_HOST` | `127.0.0.1` | Dashboard bind address. Loopback by default; set it to expose the dashboard (see [Dashboard access](#dashboard-access)) |
 | `SHOAL_TOKEN` | — | Dashboard token. Required whenever `SHOAL_HOST` is not loopback or `SHOAL_ALLOWED_HOSTS` is set; generated and printed at startup if unset |
 | `SHOAL_ALLOWED_HOSTS` | — | Comma-separated public hostname(s) of a reverse proxy in front of the dashboard (see [Dashboard access](#dashboard-access)) |

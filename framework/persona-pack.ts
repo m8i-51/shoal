@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { parse as parseYaml } from "yaml";
+import * as log from "./log";
 
 export interface PersonaTemplate {
   name: string;
@@ -31,7 +32,7 @@ function normalizeTemplate(raw: PersonaTemplate): PersonaTemplate {
 
 function parseRaw(raw: unknown, source: string): PersonaPack | null {
   if (typeof raw !== "object" || raw === null) {
-    console.warn(`[persona-pack] ${source}: expected an object, got ${typeof raw}`);
+    log.warn(`[persona-pack] ${source}: expected an object, got ${typeof raw}`);
     return null;
   }
   const obj = raw as Record<string, unknown>;
@@ -39,20 +40,20 @@ function parseRaw(raw: unknown, source: string): PersonaPack | null {
   // Support { personas: [...] } or bare array
   const list = Array.isArray(obj) ? obj : Array.isArray(obj.personas) ? obj.personas : null;
   if (!list) {
-    console.warn(`[persona-pack] ${source}: no "personas" array found`);
+    log.warn(`[persona-pack] ${source}: no "personas" array found`);
     return null;
   }
 
   const personas = list.filter((v) => {
     if (!isPersonaTemplate(v)) {
-      console.warn(`[persona-pack] ${source}: skipping invalid entry (missing name/role/persona)`);
+      log.warn(`[persona-pack] ${source}: skipping invalid entry (missing name/role/persona)`);
       return false;
     }
     return true;
   }).map((v) => normalizeTemplate(v as PersonaTemplate));
 
   if (personas.length === 0) {
-    console.warn(`[persona-pack] ${source}: 0 valid personas found`);
+    log.warn(`[persona-pack] ${source}: 0 valid personas found`);
     return null;
   }
 
@@ -67,7 +68,7 @@ function loadFromFile(filePath: string): PersonaPack | null {
     : path.join(process.cwd(), filePath);
 
   if (!fs.existsSync(resolved)) {
-    console.warn(`[persona-pack] file not found: ${resolved}`);
+    log.warn(`[persona-pack] file not found: ${resolved}`);
     return null;
   }
 
@@ -77,7 +78,7 @@ function loadFromFile(filePath: string): PersonaPack | null {
   try {
     raw = ext === ".json" ? JSON.parse(content) : parseYaml(content);
   } catch (e) {
-    console.warn(`[persona-pack] failed to parse ${resolved}: ${e}`);
+    log.warn(`[persona-pack] failed to parse ${resolved}: ${e}`);
     return null;
   }
   return parseRaw(raw, resolved);
@@ -90,7 +91,7 @@ async function loadFromPackage(packageName: string): Promise<PersonaPack | null>
     const raw = mod?.default ?? mod?.personas ? { personas: mod.personas } : mod;
     return parseRaw(raw, packageName);
   } catch (e) {
-    console.warn(`[persona-pack] failed to load package "${packageName}": ${e}`);
+    log.warn(`[persona-pack] failed to load package "${packageName}": ${e}`);
     return null;
   }
 }
@@ -109,20 +110,20 @@ export async function loadPersonaPack(): Promise<PersonaPack | null> {
   if (!source) {
     // Auto-discover personas.yaml / personas.yml / personas.json in cwd
     const pack = lookupLocalDefault();
-    if (pack) console.log(`[persona-pack] loaded "${pack.name}" (${pack.personas.length} templates)`);
+    if (pack) log.info(`[persona-pack] loaded "${pack.name}" (${pack.personas.length} templates)`);
     return pack;
   }
 
   // Looks like a file path
   if (source.startsWith(".") || source.startsWith("/")) {
     const pack = loadFromFile(source);
-    if (pack) console.log(`[persona-pack] loaded "${pack.name}" (${pack.personas.length} templates) from ${source}`);
+    if (pack) log.info(`[persona-pack] loaded "${pack.name}" (${pack.personas.length} templates) from ${source}`);
     return pack;
   }
 
   // Treat as npm package name
   const pack = await loadFromPackage(source);
-  if (pack) console.log(`[persona-pack] loaded "${pack.name}" (${pack.personas.length} templates) from package ${source}`);
+  if (pack) log.info(`[persona-pack] loaded "${pack.name}" (${pack.personas.length} templates) from package ${source}`);
   return pack;
 }
 

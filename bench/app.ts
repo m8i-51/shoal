@@ -13,6 +13,7 @@
  * - broken-help-link:    ナビの Help リンクが 404
  */
 import express from "express";
+import * as log from "../framework/log";
 
 interface Item {
   id: number;
@@ -133,5 +134,5 @@ ${body}
 
 if (process.env.NODE_ENV !== "test" && process.argv[1]?.endsWith("app.ts")) {
   const port = parseInt(process.env.BENCH_PORT ?? "4319", 10);
-  createBenchApp().listen(port, () => console.log(`[bench] sample app → http://localhost:${port}`));
+  createBenchApp().listen(port, () => log.info(`[bench] sample app → http://localhost:${port}`));
 }

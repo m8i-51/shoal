@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { BrowserContext } from "playwright";
+import * as log from "./log";
 
 /**
  * Session store — 「翌日また来るユーザー」を再現する。
@@ -32,7 +33,7 @@ export async function saveAgentSession(context: BrowserContext, agentId: string)
     fs.mkdirSync(SESSIONS_DIR, { recursive: true });
     await context.storageState({ path: agentSessionPath(agentId) });
   } catch (e) {
-    console.warn(`[session] failed to save session for ${agentId}:`, e);
+    log.warn(`[session] failed to save session for ${agentId}:`, e);
   }
 }
 

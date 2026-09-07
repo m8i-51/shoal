@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from "child_process";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { existsSync, mkdirSync, writeFileSync, appendFileSync, unlinkSync } from "fs";
+import * as log from "../framework/log.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const packageRoot = join(__dirname, "..");
@@ -64,7 +65,7 @@ export function spawnRun(opts: {
 
   // ログをリアルタイムでファイルに書き出す（サーバー再起動後もポーリングで読める）
   const logFilePath = join(logsDir, `log_${sessionId}.txt`);
-  console.log(`[runner] spawning ${sessionId}, log → ${logFilePath}`);
+  log.info(`[runner] spawning ${sessionId}, log → ${logFilePath}`);
 
   // running_*.json で実行中フラグをディスクに残す
   const pendingPath = join(logsDir, `running_${sessionId}.json`);

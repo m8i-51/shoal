@@ -294,6 +294,7 @@ shoal serve --env-file apps/shoal/.env
 | `SHOAL_RETENTION_DAYS` | `30` | `logs/screenshots/run_*` と `logs/traces/run_*` の保持日数。各 run の開始時に、これより古い run ディレクトリを削除する。`0` で無効化 |
 | `SHOAL_MAX_USD` | — | 1 run のコスト上限（推定 USD）。到達時点で以降の LLM 呼び出しを止め、残りのレーンをスキップする（それまでの findings は保存・レポートされる） |
 | `SHOAL_LANG` | — | エージェントが findings・issue のタイトル/本文を書く言語。コード（`ja`、`pt-BR`、`zh-TW`）でも言語名でも可。未設定なら対象アプリからモデルが推測する（従来どおり） |
+| `SHOAL_LOG_LEVEL` | `info` | 出力量: `silent`・`error`・`warn`・`info`・`debug`。CI で静かにしたいときは `error` — 進捗と警告は消えるが、run サマリ・ダッシュボード URL・レポートパスは出続ける（消えるのは `silent` のときだけ） |
 | `SHOAL_HOST` | `127.0.0.1` | ダッシュボードの bind アドレス。既定はループバックのみ。外部公開する場合に設定する（[ダッシュボードへのアクセス](#ダッシュボードへのアクセス)参照） |
 | `SHOAL_TOKEN` | — | ダッシュボードのトークン。`SHOAL_HOST` がループバック以外、または `SHOAL_ALLOWED_HOSTS` 設定時は必須。未設定なら起動時に自動生成して表示する |
 | `SHOAL_ALLOWED_HOSTS` | — | ダッシュボード前段のリバースプロキシの公開ホスト名（カンマ区切り、[ダッシュボードへのアクセス](#ダッシュボードへのアクセス) 参照） |

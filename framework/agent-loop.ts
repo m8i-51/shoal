@@ -4,6 +4,7 @@ import { runLog } from "./findings";
 import { runToolSession } from "./tool-session";
 import { createMessageWithRetry, sleep, rateLimitRetries } from "./llm-retry";
 import { formatToolCallLog } from "./redact";
+import * as log from "./log";
 
 export { createMessageWithRetry, sleep, rateLimitRetries };
 
@@ -23,7 +24,7 @@ export async function runAgentLoop(
       description: t.description ?? t.name,
       input_schema: t.input_schema as Record<string, unknown>,
       execute: async (input: Record<string, unknown>) => {
-        console.log(`  → ${formatToolCallLog(t.name, input)}`);
+        log.info(`  → ${formatToolCallLog(t.name, input)}`);
         return executeToolFn(t.name, input);
       },
     }));
@@ -51,7 +52,7 @@ export async function runAgentLoop(
     agentLog.status = "error";
     agentLog.error = String(e);
     runLog.summary.errors++;
-    console.error(`[${agentLog.agentName}] error:`, e);
+    log.error(`[${agentLog.agentName}] error:`, e);
   } finally {
     agentLog.completedAt = new Date().toISOString();
   }

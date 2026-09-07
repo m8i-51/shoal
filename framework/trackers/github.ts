@@ -1,5 +1,6 @@
 import type { IssueTracker, OpenIssue, ClosedIssue } from "./types";
 import { postGitHubIssue, fetchOpenIssues as ghFetchOpen, fetchClosedIssues as ghFetchClosed } from "../github";
+import * as log from "../log";
 
 export class GitHubTracker implements IssueTracker {
   readonly name = "github";
@@ -35,7 +36,7 @@ export class GitHubTracker implements IssueTracker {
     });
     if (!res.ok) {
       const msg = await res.text().catch(() => "");
-      console.error(`[github] failed to comment on issue #${issueNumber} (${res.status}): ${msg.slice(0, 200)}`);
+      log.error(`[github] failed to comment on issue #${issueNumber} (${res.status}): ${msg.slice(0, 200)}`);
     }
     return res.ok;
   }

@@ -1,6 +1,7 @@
 import type { BrowserContext, Page } from "playwright";
 import type { Tool } from "./llm-client";
 import { resolveClickLocator } from "./click-target";
+import * as log from "./log";
 
 /**
  * Guardrails — 探索エージェントの書き込み操作を制御する安全装置。
@@ -22,7 +23,7 @@ export const SHOAL_MODES: ShoalMode[] = ["read-only", "safe", "full"];
 export function getShoalMode(env: NodeJS.ProcessEnv = process.env): ShoalMode {
   const raw = (env.SHOAL_MODE ?? "safe").trim().toLowerCase();
   if ((SHOAL_MODES as string[]).includes(raw)) return raw as ShoalMode;
-  console.warn(`[guardrails] unknown SHOAL_MODE "${raw}" — falling back to "safe"`);
+  log.warn(`[guardrails] unknown SHOAL_MODE "${raw}" — falling back to "safe"`);
   return "safe";
 }
 
@@ -41,7 +42,7 @@ export async function applyBrowserGuardrails(context: BrowserContext, mode: Shoa
   await context.route("**/*", (route) => {
     const method = route.request().method();
     if (shouldBlockRequest(method, mode)) {
-      console.log(`  [guardrails] blocked ${method} ${route.request().url().slice(0, 120)}`);
+      log.info(`  [guardrails] blocked ${method} ${route.request().url().slice(0, 120)}`);
       return route.abort("accessdenied");
     }
     return route.continue();
@@ -100,7 +101,7 @@ function loadEnvDestructivePatterns(env: NodeJS.ProcessEnv = process.env): RegEx
     try {
       patterns.push(new RegExp(source, "i"));
     } catch {
-      console.warn(`[guardrails] invalid SHOAL_DESTRUCTIVE_PATTERNS entry, skipping: ${source}`);
+      log.warn(`[guardrails] invalid SHOAL_DESTRUCTIVE_PATTERNS entry, skipping: ${source}`);
     }
   }
   return patterns;
@@ -169,7 +170,7 @@ export function filterAppTools(tools: AppTool[], mode: ShoalMode): Tool[] {
   const allowed = mode === "full" ? tools : tools.filter((t) => !t.destructive);
   const excluded = tools.length - allowed.length;
   if (excluded > 0) {
-    console.log(`[guardrails] mode=${mode}: ${excluded} destructive tool(s) excluded`);
+    log.info(`[guardrails] mode=${mode}: ${excluded} destructive tool(s) excluded`);
   }
   return allowed.map(({ destructive: _destructive, ...tool }) => tool as Tool);
 }

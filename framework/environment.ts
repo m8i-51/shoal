@@ -1,5 +1,6 @@
 import { devices } from "playwright";
 import type { BrowserContextOptions, Page } from "playwright";
+import * as log from "./log";
 
 /**
  * Environment personas — デバイス・ロケール・配色・回線もペルソナの一部にする。
@@ -33,7 +34,7 @@ export function sanitizeEnvironment(env: EnvironmentProfile | undefined): Enviro
   const clean: EnvironmentProfile = {};
   if (typeof env.device === "string" && env.device) {
     if (isValidDevice(env.device)) clean.device = env.device;
-    else console.warn(`[environment] unknown device "${env.device}" — using desktop`);
+    else log.warn(`[environment] unknown device "${env.device}" — using desktop`);
   }
   if (typeof env.locale === "string" && env.locale) clean.locale = env.locale;
   if (env.colorScheme === "dark" || env.colorScheme === "light") clean.colorScheme = env.colorScheme;
@@ -75,7 +76,7 @@ export async function applyNetworkThrottle(page: Page, throttle: EnvironmentProf
     const cdp = await page.context().newCDPSession(page);
     await cdp.send("Network.emulateNetworkConditions", { offline: false, ...THROTTLE_PROFILES[throttle] });
   } catch (e) {
-    console.warn(`[environment] failed to apply network throttle "${throttle}":`, e);
+    log.warn(`[environment] failed to apply network throttle "${throttle}":`, e);
   }
 }
 

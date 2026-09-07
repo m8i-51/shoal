@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { ClosedIssue } from "./trackers/index";
+import * as log from "./log";
 
 /**
  * Adoption feedback — 起票した issue がチームにどう扱われたかを群れに還元する。
@@ -118,7 +119,7 @@ export function updateAdoption(closedIssues: ClosedIssue[]): string {
   if (resolved > 0) {
     writeJson(LINKS_PATH, links);
     writeJson(ADOPTION_PATH, stats);
-    console.log(`[adoption] resolved ${resolved} issue link(s) from tracker feedback`);
+    log.info(`[adoption] resolved ${resolved} issue link(s) from tracker feedback`);
   }
 
   return formatAdoptionSummary(stats);
