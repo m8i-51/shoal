@@ -12,6 +12,73 @@ to `0.1.20` or earlier, so those releases are not separately documented here.
 
 ## [Unreleased]
 
+### Security
+
+- **Playwright errors bypassed the untrusted-content fence.** Every
+  page-derived tool result went through `wrapUntrusted` except the catch-all
+  in `executeBrowserTool`, and Playwright embeds page-authored text verbatim
+  in its errors — a page rendering two identical buttons produces a
+  strict-mode dump quoting their contents. Verified against a real browser
+  carrying an injected instruction straight into the model's context.
+- **Product discovery fenced nothing.** `navigate_and_read` returned raw page
+  text and ARIA tree, `fetch_url` returned raw body text, and the discovery
+  system prompt had no untrusted-content section — despite producing the
+  `ProductSpec` that defines appGoals, features and productEdge for every
+  downstream lane, cached and reused across runs.
+- **`fetch_url` was an unguarded SSRF.** It fetched any URL the model named,
+  with no scheme check and no address filtering, while the model's choice was
+  steered by the page content above. Verified reachable: a local service
+  returned its contents into the model's context, and 169.254.169.254 was
+  reachable the same way. New `framework/safe-fetch.ts` blocks non-http(s)
+  schemes, loopback, link-local, private v4, unique-local v6 and the
+  unspecified address, resolving hostnames first. It deliberately allows the
+  configured `BASE_URL` origin, since the app under test is routinely
+  localhost. HTTP redirects are refused (`redirect: "error"`) so a
+  same-origin 302 cannot skip the check onto 169.254.169.254 or RFC1918.
+  DNS rebinding between check and fetch remains open and is documented
+  rather than papered over.
+- **The shared artifact was the least protected one.** Trace zips were
+  scrubbed of registered secrets; the standalone HTML report — the file meant
+  to be attached to a ticket — was not scrubbed at all. Its rendered text now
+  goes through the same registry and the same replacement, with base64 image
+  URIs lifted out first so a colliding secret cannot corrupt a screenshot.
+  Screenshot pixels cannot be scrubbed: a banner in the report and a new
+  SECURITY.md section say so plainly rather than implying more protection
+  than exists.
+
+### Fixed
+
+- **State files were written non-atomically and read back silently.** Every
+  persistent store used a bare `writeFileSync`, and every reader swallowed
+  corruption — a truncated `agents.json` made `loadAgents()` return `[]` with
+  no warning. Since that file holds the LLM-built persona roster and its
+  accumulated memory, a process killed mid-write meant the next run quietly
+  rebuilt everything with fresh spend and no error shown. Writes now go
+  through `framework/atomic-write.ts` (sibling temp file, then rename), and a
+  corrupt file is warned about and quarantined to a `.corrupt` sibling
+  instead of being overwritten.
+- **A local install of the published package could not start.** `bin/shoal.js`
+  looked only for `<packageRoot>/node_modules/.bin/tsx`, which npm hoists to
+  the top level on a local install, then fell back to a bare `tsx` that is not
+  on PATH — `spawn tsx ENOENT`. Global installs were unaffected. Both `tsx`
+  and `vite` are now resolved through Node's own resolution.
+- **Four tests could not detect the bug they existed to prevent.** The
+  `waitForSessionsToExit` tests only awaited the promise, so they passed
+  identically against an implementation that never waited at all — the exact
+  failure that leaves an orphaned swarm running after `shoal serve` exits.
+  They now assert the promise is still pending before the settling event, and
+  cover the multi-session branch that had no coverage.
+
+### Changed
+
+- **The Japanese locale is no longer half-English.** Thirteen `ja` values were
+  still the English string, including main dashboard labels and the severity
+  badge added in 0.2.2. A new parity test asserts matching key sets and that
+  no `ja` value equals its `en` counterpart outside a small explicit
+  allowlist — a product name, placeholders, a duration format and a literal
+  shell command — which is what stops the next English-only entry going in
+  unnoticed.
+
 ## [0.2.2] — 2026-09-07
 
 ### Added

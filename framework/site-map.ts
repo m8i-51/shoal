@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import { writeFileAtomic, quarantineCorruptFile } from "./atomic-write";
 
 export type PathStatus = "unvisited" | "reached" | "explored";
 export type PathSource = "sitemap" | "discovered";
@@ -150,9 +151,9 @@ export function normalizePath(urlOrPath: string, origin: string): string | null 
 
 export function loadSiteMap(origin: string): SiteMap {
   const expectedOrigin = origin.replace(/\/$/, "");
-  try {
-    const filePath = siteMapFilePath();
-    if (fs.existsSync(filePath)) {
+  const filePath = siteMapFilePath();
+  if (fs.existsSync(filePath)) {
+    try {
       const parsed = JSON.parse(fs.readFileSync(filePath, "utf-8")) as SiteMap;
       if (parsed && typeof parsed === "object" && parsed.entries && typeof parsed.entries === "object") {
         if (!parsed.origin || parsed.origin === expectedOrigin) {
@@ -164,9 +165,9 @@ export function loadSiteMap(origin: string): SiteMap {
         }
         return emptySiteMap(expectedOrigin);
       }
+    } catch (err) {
+      quarantineCorruptFile(filePath, "the site map (discovered/visited paths)", err);
     }
-  } catch {
-    /* ignore corrupt file */
   }
   return emptySiteMap(expectedOrigin);
 }
@@ -175,7 +176,7 @@ export function saveSiteMap(map: SiteMap): void {
   map.updatedAt = new Date().toISOString();
   const filePath = siteMapFilePath();
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(map, null, 2), "utf-8");
+  writeFileAtomic(filePath, JSON.stringify(map, null, 2), "utf-8");
 }
 
 export function ensurePath(map: SiteMap, pathname: string, source: PathSource): SiteMapEntry | null {

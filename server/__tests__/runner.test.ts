@@ -6,7 +6,7 @@ vi.mock("fs");
 
 import { spawn } from "child_process";
 import * as fs from "fs";
-import { spawnRun, cancelSession, cancelAllSessions, waitForSessionsToExit, activeSessions, SESSION_RETENTION_MS, hasActiveRun } from "../runner";
+import { spawnRun, cancelSession, cancelAllSessions, waitForSessionsToExit, activeSessions, SESSION_RETENTION_MS, hasActiveRun, type Session } from "../runner";
 
 function createFakeChild() {
   const child = new EventEmitter() as EventEmitter & { stdout: EventEmitter; stderr: EventEmitter; kill: ReturnType<typeof vi.fn> };
@@ -381,36 +381,118 @@ describe("cancelAllSessions / waitForSessionsToExit", () => {
     expect(live.kill).toHaveBeenCalledWith("SIGTERM");
   });
 
-  it("全ての session が exit したら resolve する", async () => {
-    const fakeChild = createFakeChild();
-    vi.mocked(spawn).mockReturnValue(fakeChild as never);
-    spawnRun({});
-    const waiting = cancelAllSessions();
-    const done = waitForSessionsToExit(waiting, 5000);
-    fakeChild.emit("exit", 0);
-    await done;
-  });
+  // These tests must be able to tell "waits correctly" apart from "does not
+  // wait at all" — a stubbed `waitForSessionsToExit` that just returns
+  // `Promise.resolve()` immediately would make `shoal serve`'s SIGTERM
+  // handler call process.exit(0) before the 4s SIGKILL timer in
+  // cancelSession() ever fires, orphaning the agent swarm. Merely `await`ing
+  // the returned promise (as these tests used to do) cannot catch that: it
+  // also passes against the stub. Instead we track whether the promise has
+  // already settled via a `.then()` flag, and check that flag both before
+  // and after the event that is supposed to settle it — using
+  // `vi.advanceTimersByTimeAsync` to flush microtasks without allowing real
+  // wall-clock time (or the fake timer) to advance past what's asserted.
 
-  it("timeout までに exit しなくても resolve する", async () => {
+  it("session が exit するまでは resolve せず、exit 後に resolve する", async () => {
     vi.useFakeTimers();
     const fakeChild = createFakeChild();
     vi.mocked(spawn).mockReturnValue(fakeChild as never);
     spawnRun({});
     const waiting = cancelAllSessions();
-    const done = waitForSessionsToExit(waiting, 5000);
-    await vi.advanceTimersByTimeAsync(5000);
-    await done;
+
+    let resolved = false;
+    void waitForSessionsToExit(waiting, 5000).then(() => { resolved = true; });
+
+    // Flush pending microtasks without advancing time — a promise that
+    // resolved eagerly (the stub) would already show `resolved === true` here.
+    await vi.advanceTimersByTimeAsync(0);
+    expect(resolved).toBe(false);
+
+    fakeChild.emit("exit", 0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(resolved).toBe(true);
+
     vi.useRealTimers();
   });
 
-  it("待ち対象が空なら即座に resolve する", async () => {
-    await waitForSessionsToExit([]);
+  it("複数 session のうち一部しか exit していない間は resolve せず、全て exit してから resolve する", async () => {
+    vi.useFakeTimers();
+    // spawnRun() ids sessions off Date.now(), so two calls in the same
+    // millisecond collide — register two distinct sessions directly instead.
+    // Bypassing spawnRun also means nothing wires a real child "exit" event
+    // to session.done / doneListeners, so exitSession() below reproduces
+    // exactly what spawnRun's own child.on("exit", ...) handler does.
+    const sessionA: Session = {
+      sessionId: "run_a", startedAt: "", completedAt: null, done: false,
+      exitCode: null, lines: [], listeners: [], doneListeners: [], child: createFakeChild() as never,
+    };
+    const sessionB: Session = {
+      sessionId: "run_b", startedAt: "", completedAt: null, done: false,
+      exitCode: null, lines: [], listeners: [], doneListeners: [], child: createFakeChild() as never,
+    };
+    activeSessions.set("run_a", sessionA);
+    activeSessions.set("run_b", sessionB);
+    const exitSession = (s: Session) => {
+      s.done = true;
+      for (const l of s.doneListeners) l();
+    };
+
+    const waiting = cancelAllSessions();
+    expect(waiting).toHaveLength(2);
+
+    let resolved = false;
+    void waitForSessionsToExit(waiting, 5000).then(() => { resolved = true; });
+
+    exitSession(sessionA);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(resolved).toBe(false); // sessionB is still running
+
+    exitSession(sessionB);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(resolved).toBe(true);
+
+    vi.useRealTimers();
   });
 
-  it("すでに done な session だけなら即座に resolve する", async () => {
-    await waitForSessionsToExit([{
+  it("timeout までは resolve せず、timeout ちょうどで resolve する（exit しなくても）", async () => {
+    vi.useFakeTimers();
+    const fakeChild = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(fakeChild as never);
+    spawnRun({});
+    const waiting = cancelAllSessions();
+
+    let resolved = false;
+    void waitForSessionsToExit(waiting, 5000).then(() => { resolved = true; });
+
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(resolved).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(resolved).toBe(true);
+
+    vi.useRealTimers();
+  });
+
+  it("待ち対象が空なら、どの session の doneListener にも登録せず resolve する", async () => {
+    let resolved = false;
+    void waitForSessionsToExit([]).then(() => { resolved = true; });
+    await Promise.resolve(); // then() callbacks always land on a microtask, even for an eagerly-resolved promise
+    expect(resolved).toBe(true);
+  });
+
+  it("すでに done な session だけなら、doneListener を登録せずに resolve する", async () => {
+    const alreadyDone: Session = {
       sessionId: "run_done", startedAt: "", completedAt: "", done: true,
       exitCode: 0, lines: [], listeners: [], doneListeners: [], child: null,
-    }]);
+    };
+
+    let resolved = false;
+    void waitForSessionsToExit([alreadyDone]).then(() => { resolved = true; });
+    await Promise.resolve();
+
+    expect(resolved).toBe(true);
+    // A session that is already done must never get a listener pushed onto
+    // it — only sessions still being waited on do.
+    expect(alreadyDone.doneListeners).toHaveLength(0);
   });
 });

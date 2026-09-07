@@ -1,7 +1,8 @@
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { spawnRun, hasActiveRun } from "./runner.js";
 import * as log from "../framework/log.js";
+import { writeFileAtomic, quarantineCorruptFile } from "../framework/atomic-write.js";
 
 export interface ScheduleConfig {
   enabled: boolean;
@@ -31,13 +32,14 @@ export function loadSchedule(): ScheduleConfig {
   if (!existsSync(p)) return { ...DEFAULT_CONFIG };
   try {
     return { ...DEFAULT_CONFIG, ...JSON.parse(readFileSync(p, "utf-8")) };
-  } catch {
+  } catch (err) {
+    quarantineCorruptFile(p, "the weekly schedule config (falling back to defaults)", err);
     return { ...DEFAULT_CONFIG };
   }
 }
 
 export function saveSchedule(config: ScheduleConfig): void {
-  writeFileSync(configPath(), JSON.stringify(config, null, 2), "utf-8");
+  writeFileAtomic(configPath(), JSON.stringify(config, null, 2), "utf-8");
 }
 
 export function startScheduler(): void {

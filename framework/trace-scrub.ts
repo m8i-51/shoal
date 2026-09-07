@@ -83,7 +83,14 @@ function isBinaryEntry(entryName: string): boolean {
   return entryName.startsWith("resources/") || entryName.startsWith("resources\\");
 }
 
-function replaceAllLiteral(haystack: string, needle: string): { text: string; count: number } {
+/**
+ * Exported so report.ts can redact the same known secrets out of the HTML
+ * report's rendered text using the exact same literal string-replace this
+ * module applies to trace zips, rather than a second, differently-behaving
+ * implementation. Pure string function — exporting it changes nothing about
+ * this module's own behaviour.
+ */
+export function replaceAllLiteral(haystack: string, needle: string): { text: string; count: number } {
   if (!needle) return { text: haystack, count: 0 };
   const parts = haystack.split(needle);
   const count = parts.length - 1;

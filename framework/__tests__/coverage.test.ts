@@ -55,6 +55,26 @@ describe("loadCoverage", () => {
     expect(result.entries).toHaveLength(1);
     expect(result.entries[0].runId).toBe("run_1");
   });
+
+  it("壊れた JSON の場合は警告を出し、破損ファイルを退避したうえで空のエントリーを返す", () => {
+    vi.mocked(fs.existsSync).mockImplementation((p: unknown) => String(p).endsWith("coverage.json"));
+    vi.mocked(fs.readFileSync).mockReturnValue("{not-valid-json" as unknown as ReturnType<typeof fs.readFileSync>);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = loadCoverage();
+
+    expect(result).toEqual({ entries: [] });
+    expect(warnSpy).toHaveBeenCalled();
+    const message = warnSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+    expect(message).toContain("coverage.json");
+    expect(message.toLowerCase()).toContain("coverage history");
+    expect(fs.renameSync).toHaveBeenCalled();
+    const [fromArg, toArg] = vi.mocked(fs.renameSync).mock.calls.at(-1)!;
+    expect(String(fromArg)).toContain("coverage.json");
+    expect(String(toArg)).toContain(".corrupt-");
+
+    warnSpy.mockRestore();
+  });
 });
 
 describe("computeWeightedSummary", () => {

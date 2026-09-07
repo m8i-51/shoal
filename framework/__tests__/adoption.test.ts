@@ -50,10 +50,28 @@ function setupFs(initial: Record<string, unknown>) {
   });
   vi.mocked(fs.readFileSync).mockImplementation(((p: unknown) => files.get(keyFor(p) ?? "") ?? "") as unknown as typeof fs.readFileSync);
   vi.mocked(fs.mkdirSync).mockReturnValue(undefined);
+
+  // writeFileAtomic (framework/atomic-write.ts) writes the new content to a
+  // `<dir>/.<basename>.tmp-...` sibling first, then renames it onto the
+  // real path — it never calls fs.writeFileSync with the final path
+  // directly. Track pending temp-path writes by their exact path, and only
+  // "commit" them into `files` (keyed the same way existsSync/readFileSync
+  // look things up, via keyFor) when renameSync moves one onto a known file.
+  const pending = new Map<string, string>();
   vi.mocked(fs.writeFileSync).mockImplementation(((p: unknown, content: unknown) => {
-    const key = keyFor(p);
-    if (key) files.set(key, String(content));
+    pending.set(String(p), String(content));
   }) as typeof fs.writeFileSync);
+  vi.mocked(fs.renameSync).mockImplementation(((from: unknown, to: unknown) => {
+    const content = pending.get(String(from));
+    pending.delete(String(from));
+    const key = keyFor(to);
+    if (key && content !== undefined) files.set(key, content);
+  }) as typeof fs.renameSync);
+  vi.mocked(fs.openSync).mockReturnValue(0 as unknown as number);
+  vi.mocked(fs.fsyncSync).mockReturnValue(undefined);
+  vi.mocked(fs.closeSync).mockReturnValue(undefined as unknown as void);
+  vi.mocked(fs.rmSync).mockReturnValue(undefined);
+
   return files;
 }
 
@@ -202,5 +220,24 @@ describe("loadIssueLinks", () => {
   it("ファイルがなければ空配列", () => {
     setupFs({});
     expect(loadIssueLinks()).toEqual([]);
+  });
+
+  it("壊れた JSON の場合は警告を出し破損ファイルを退避したうえで空配列を返す", () => {
+    vi.mocked(fs.existsSync).mockImplementation((p: unknown) => String(p).endsWith(LINKS));
+    vi.mocked(fs.readFileSync).mockReturnValue("{not-json" as unknown as ReturnType<typeof fs.readFileSync>);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = loadIssueLinks();
+
+    expect(result).toEqual([]);
+    expect(warnSpy).toHaveBeenCalled();
+    const message = warnSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+    expect(message).toContain("issue-links.json");
+    expect(fs.renameSync).toHaveBeenCalled();
+    const [fromArg, toArg] = vi.mocked(fs.renameSync).mock.calls.at(-1)!;
+    expect(String(fromArg)).toContain("issue-links.json");
+    expect(String(toArg)).toContain(".corrupt-");
+
+    warnSpy.mockRestore();
   });
 });

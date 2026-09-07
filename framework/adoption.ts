@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import type { ClosedIssue } from "./trackers/index";
 import * as log from "./log";
+import { writeFileAtomic, quarantineCorruptFile } from "./atomic-write";
 
 /**
  * Adoption feedback — 起票した issue がチームにどう扱われたかを群れに還元する。
@@ -40,26 +41,28 @@ const LINKS_PATH = path.join(process.cwd(), "coverage", "issue-links.json");
 const ADOPTION_PATH = path.join(process.cwd(), "coverage", "adoption.json");
 const MAX_LINKS = 200;
 
-function readJson<T>(filePath: string, fallback: T): T {
-  try {
-    if (fs.existsSync(filePath)) {
+function readJson<T>(filePath: string, fallback: T, whatWasLost: string): T {
+  if (fs.existsSync(filePath)) {
+    try {
       return JSON.parse(fs.readFileSync(filePath, "utf-8")) as T;
+    } catch (err) {
+      quarantineCorruptFile(filePath, whatWasLost, err);
     }
-  } catch { /* ignore */ }
+  }
   return fallback;
 }
 
 function writeJson(filePath: string, data: unknown): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf-8");
+  writeFileAtomic(filePath, JSON.stringify(data, null, 2), "utf-8");
 }
 
 export function loadIssueLinks(): IssueLink[] {
-  return readJson<IssueLink[]>(LINKS_PATH, []);
+  return readJson<IssueLink[]>(LINKS_PATH, [], "issue-tracker links (which findings became which issues)");
 }
 
 export function loadAdoptionStats(): AdoptionStats {
-  return readJson<AdoptionStats>(ADOPTION_PATH, { byLens: {}, byCategory: {} });
+  return readJson<AdoptionStats>(ADOPTION_PATH, { byLens: {}, byCategory: {} }, "adoption stats (how the team acted on past findings)");
 }
 
 /** triage が issue を作成したときに呼ぶ */

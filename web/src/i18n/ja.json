@@ -14,7 +14,7 @@
     "status": "ステータス",
     "started": "開始日時",
     "duration": "所要時間",
-    "findings": "Findings",
+    "findings": "指摘",
     "agents": "エージェント",
     "cost": "コスト",
     "actions": "",
@@ -96,7 +96,7 @@
     "saved": "保存しました"
   },
   "hall": {
-    "title": "Hall of Issues",
+    "title": "指摘の殿堂",
     "subtitle": "全 run の findings を横断表示",
     "export": "JSON をエクスポート",
     "searchPlaceholder": "findings を検索…",
@@ -108,7 +108,7 @@
     "importedBadge": "+{{count}} 件インポート済み",
     "noFindings": "まだ findings がありません。実行を開始して問題を発見しましょう。",
     "noResults": "検索結果がありません。",
-    "navLink": "Hall",
+    "navLink": "殿堂",
     "totalCount": "{{count}} 件の findings",
     "duplicatesTitle": "run 横断の重複",
     "duplicatesSubtitle": "複数 run で報告された類似 finding",
@@ -118,7 +118,7 @@
     "traceCommand": "npx playwright show-trace {{path}}"
   },
   "goals": {
-    "title": "App Goals",
+    "title": "アプリゴール",
     "noSpec": "プロダクト仕様がまだありません。実行を開始するとゴールが自動推論されます。",
     "noGoals": "ゴールが未設定です。",
     "edit": "編集",
@@ -169,19 +169,19 @@
     "saveFailed": "ペルソナを保存できませんでした"
   },
   "experience": {
-    "title": "Experience Score",
+    "title": "体験スコア",
     "runCount": "直近 {{count}} run",
     "achievement": "シナリオ達成率",
     "friction": "平均手数",
     "regression": "リグレッション率"
   },
   "siteMap": {
-    "title": "Site Map Coverage",
+    "title": "サイトマップカバレッジ",
     "exploredRate": "explored 率",
     "known": "既知 path",
     "unvisited": "未訪問",
-    "reached": "reached",
-    "explored": "explored",
+    "reached": "到達",
+    "explored": "探索済み",
     "tabUnvisited": "未訪問",
     "tabThin": "浅い訪問",
     "tabAll": "すべて",
@@ -189,14 +189,14 @@
     "emptyHint": "初回 run 後、sitemap.xml と探索で発見した path から地図が構築されます。",
     "updatedAt": "更新",
     "visits": "{{count}} 回訪問",
-    "sourceSitemap": "sitemap",
+    "sourceSitemap": "サイトマップ記載",
     "sourceDiscovered": "探索で発見",
     "noUnvisited": "既知 path はすべて一度は訪問されています。",
     "noThin": "浅い訪問（reached のみ）の path はありません。",
     "status": {
       "unvisited": "未訪問",
-      "reached": "reached",
-      "explored": "explored"
+      "reached": "到達",
+      "explored": "探索済み"
     }
   },
   "triage": {
@@ -207,7 +207,7 @@
     "statIssued": "起票された finding",
     "statSkipped": "スキップ",
     "statUnprocessed": "未処理",
-    "statCritical": "Critical",
+    "statCritical": "クリティカル",
     "statEdgeRisks": "尖りリスク",
     "issuesTitle": "起票した issue",
     "mergedFrom": "{{count}} 件の finding をまとめた",
@@ -231,7 +231,7 @@
     "recent": "直近の判定",
     "noLens": "観点別の実績はまだありません。",
     "markAdopted": "修正済み",
-    "markRejected": "not planned"
+    "markRejected": "不採用"
   },
   "cost": {
     "title": "LLM コスト",

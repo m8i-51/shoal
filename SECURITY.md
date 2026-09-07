@@ -90,6 +90,35 @@ staging environment with synthetic data, or at production data that has been
 anonymised, rather than at an app carrying real personal data you would not
 otherwise send to a third-party API.
 
+## Sharing the HTML report
+
+The HTML report (`logs/report_<runId>.html`) is deliberately self-contained —
+it embeds screenshots as base64 so the file still opens with nothing else
+attached, which is exactly what makes it the artifact most likely to be
+emailed, attached to a ticket, or dropped in a chat outside the machine that
+produced it. Before sharing it, it's worth being precise about what
+protection it does and does not carry:
+
+- **Scrubbed:** known secrets — test-account passwords and any value shoal
+  saw typed into a field it detected as a password — are redacted out of the
+  report's rendered text (finding titles and bodies, agent names, everything
+  the HTML actually displays), using the same registry and the same
+  string-replace that Playwright trace zips are already scrubbed with.
+- **Not scrubbed:** screenshot **pixels**. The redaction above only rewrites
+  text; it cannot detect or blur anything visible in an embedded image. If a
+  screen an agent visited showed a secret, personal data, or anything else
+  sensitive, it is still there in the picture. A banner at the top of every
+  generated report says this explicitly.
+- **Not scrubbed either:** anything the secret registry was never told
+  about. shoal only knows the values it explicitly registered (test-account
+  credentials, password-field fills) — a credential entered some other way,
+  or sensitive data the target app displayed on its own, is invisible to
+  this scrub, in text or in images alike.
+
+Treat the report the way you'd treat a screen recording of the run: fine to
+share with people who are meant to see that authenticated session, not
+something to post publicly or attach anywhere search-indexed.
+
 ## The dashboard is an authenticated control surface
 
 `shoal serve` is not a read-only viewer. `POST /api/runs/start` launches a run

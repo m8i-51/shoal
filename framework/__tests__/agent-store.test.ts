@@ -54,6 +54,26 @@ describe("loadAgents", () => {
     vi.mocked(fs.readFileSync).mockReturnValue("not json" as unknown as ReturnType<typeof fs.readFileSync>);
     expect(loadAgents()).toEqual([]);
   });
+
+  it("壊れた JSON の場合は警告を出し、破損ファイルを .corrupt サイドに退避する", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue("not json" as unknown as ReturnType<typeof fs.readFileSync>);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = loadAgents();
+
+    expect(result).toEqual([]);
+    expect(warnSpy).toHaveBeenCalled();
+    const message = warnSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+    expect(message).toContain("agents.json");
+    expect(message.toLowerCase()).toContain("agent roster");
+    expect(fs.renameSync).toHaveBeenCalled();
+    const [fromArg, toArg] = vi.mocked(fs.renameSync).mock.calls.at(-1)!;
+    expect(String(fromArg)).toContain("agents.json");
+    expect(String(toArg)).toContain(".corrupt-");
+
+    warnSpy.mockRestore();
+  });
 });
 
 describe("addAgent", () => {

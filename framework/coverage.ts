@@ -5,6 +5,7 @@ import type { Scenario, ScenarioOutcome } from "./scenario-designer";
 import { extractFindingPath } from "./findings";
 import { formatAdoptionSummary, lensAdoptionWeight, categoryAdoptionWeight, loadAdoptionStats } from "./adoption";
 import * as log from "./log";
+import { writeFileAtomic, quarantineCorruptFile } from "./atomic-write";
 
 export interface OutcomeRecord {
   scenarioTitle: string;
@@ -49,17 +50,19 @@ const REPETITION_BONUS = 0.005;
 const REPETITION_EXPONENT = 3;
 
 export function loadCoverage(): Coverage {
-  try {
-    if (fs.existsSync(COVERAGE_PATH)) {
+  if (fs.existsSync(COVERAGE_PATH)) {
+    try {
       return JSON.parse(fs.readFileSync(COVERAGE_PATH, "utf-8")) as Coverage;
+    } catch (err) {
+      quarantineCorruptFile(COVERAGE_PATH, "coverage history (past runs' findings coverage)", err);
     }
-  } catch { /* ignore */ }
+  }
   return { entries: [] };
 }
 
 function saveCoverage(coverage: Coverage): void {
   fs.mkdirSync(path.dirname(COVERAGE_PATH), { recursive: true });
-  fs.writeFileSync(COVERAGE_PATH, JSON.stringify(coverage, null, 2), "utf-8");
+  writeFileAtomic(COVERAGE_PATH, JSON.stringify(coverage, null, 2), "utf-8");
 }
 
 export function getLastRunPaths(): { visitedPaths: string[]; runId: string } | null {

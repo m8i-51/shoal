@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import type { EnvironmentProfile } from "./environment";
 import * as log from "./log";
+import { writeFileAtomic, quarantineCorruptFile } from "./atomic-write";
 
 /** 1 run 分のエージェント個人の体験記録 */
 export interface AgentMemory {
@@ -56,13 +57,14 @@ export function loadAgents(): Agent[] {
   if (!fs.existsSync(STORE_PATH)) return [];
   try {
     return JSON.parse(fs.readFileSync(STORE_PATH, "utf-8")) as Agent[];
-  } catch {
+  } catch (err) {
+    quarantineCorruptFile(STORE_PATH, "the agent roster (personas + memory)", err);
     return [];
   }
 }
 
 function saveAgents(agents: Agent[]): void {
-  fs.writeFileSync(STORE_PATH, JSON.stringify(agents, null, 2), "utf-8");
+  writeFileAtomic(STORE_PATH, JSON.stringify(agents, null, 2), "utf-8");
 }
 
 function requireNonEmptyString(value: unknown, field: string): string {
