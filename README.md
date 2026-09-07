@@ -14,9 +14,49 @@
 
 **AI agents that experience your app — and help it grow.**
 
-shoal drops a swarm of AI agents onto a web app. Each agent has a distinct persona and explores the app as a real user would — navigating pages, taking actions, noticing friction. They surface bugs, usability issues, missing features, and gaps between what the app does and what it's meant to achieve.
+Your test suite checks the things someone already thought to check. The bugs
+that reach users are usually in the paths nobody wrote a test for: the flow
+that works but is confusing, the empty state nobody designed, the admin screen
+that breaks when a field is blank.
 
-No test scripts. No test data. No prior knowledge of the app required. Just a URL.
+shoal drops a swarm of AI agents onto a running web app. Each has a distinct
+persona and explores as a real user would — navigating, taking actions,
+noticing friction — then triage merges what they found and files it as issue
+tickets. No test scripts, no test data, no prior knowledge of the app. Just a
+URL.
+
+```bash
+npm install -g @m8i-51/shoal && shoal init && shoal
+```
+
+### Who it's for
+
+Teams with a staging or preview environment who want exploratory coverage they
+do not have time to write by hand — a weekly pass over the whole app that
+files what it finds, in front of the people who can fix it.
+
+### What it will not do
+
+Worth knowing before you install it:
+
+- **It costs real money per run.** Every agent turn is an LLM call. `SHOAL_MAX_USD`
+  caps a run, and `shoal doctor` warns when your model has no published price
+  and the cap therefore cannot fire.
+- **It finds some of the bugs, not all of them.** On shoal's own benchmark —
+  a sample app with seeded bugs and ground-truth labels — the measured
+  detection rate is **71%** (7 seeded bugs, `claude-sonnet-4`). See
+  [shoal-bench](#shoal-bench); you can run it yourself.
+- **Two runs differ.** Agents are LLM-driven, so this is exploration, not a
+  regression suite. Coverage is tracked across runs so successive sessions
+  push into unexplored areas rather than repeating each other.
+- **Some findings will be wrong.** Triage merges duplicates and skips what
+  matches an existing issue, but a human still decides. The bench reports
+  precision alongside detection for exactly this reason.
+- **It never reads your code.** It only sees the app the way a user does. That
+  is the point, and it is also the limit: it can tell you a flow is broken, not
+  which commit broke it.
+
+It complements a deterministic test suite. It does not replace one.
 
 ---
 
