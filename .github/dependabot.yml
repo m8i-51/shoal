@@ -11,13 +11,20 @@ updates:
       day: monday
       time: "09:00"
       timezone: Asia/Tokyo
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 8
     commit-message:
       prefix: "chore(deps)"
       prefix-development: "chore(deps-dev)"
+    # typescript-eslint@8 still peers typescript <6.1. A TS 7 PR fails
+    # `npm ci` (ERESOLVE) even as a standalone bump. Drop this ignore when
+    # typescript-eslint publishes a range that includes ^7.
+    ignore:
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
     groups:
-      # One PR per family keeps CI cost down and makes a breaking change easy to
-      # spot: if the group PR is red, the family is the cause.
+      # One PR per family keeps CI cost down and makes a breaking change easy
+      # to spot. Majors in different families (vitest 5 vs typescript 7) must
+      # not share a group — that is what made #85 unmergeable.
       llm-sdks:
         patterns:
           - "@anthropic-ai/*"
@@ -29,15 +36,22 @@ updates:
           - "react-dom"
           - "react-router*"
           - "@types/react*"
-      dev-tooling:
+      i18n:
         patterns:
-          - "vite"
+          - "i18next"
+          - "react-i18next"
+      test-runner:
+        patterns:
           - "vitest"
           - "@vitest/*"
-          - "@vitejs/*"
-          - "typescript"
-          - "typescript-eslint"
+      eslint-tooling:
+        patterns:
           - "eslint*"
+          - "typescript-eslint"
+          - "@eslint/*"
+          - "@typescript-eslint/*"
+      types:
+        patterns:
           - "@types/*"
         exclude-patterns:
           - "@types/react*"
