@@ -105,6 +105,27 @@ describe("commentReturningUserReReports", () => {
     expect(body).not.toMatch(/[^`]@release-managers/);
   });
 
+  it("署名行のペルソナ名の @mention も無害化する", async () => {
+    const tracker: IssueTracker = {
+      name: "fake",
+      isEmpty: false,
+      createIssue: vi.fn(),
+      fetchOpenIssues: vi.fn(),
+      fetchClosedIssues: vi.fn(),
+      commentOnIssue: vi.fn().mockResolvedValue(true),
+    };
+
+    await commentReturningUserReReports(
+      [makeFinding({ agentName: "@release-bot", body: "still broken since last visit" })],
+      [{ number: 7, title: "Checkout still broken", labels: [] }],
+      tracker,
+    );
+
+    const [, body] = vi.mocked(tracker.commentOnIssue).mock.calls[0];
+    expect(body).toContain("`@release-bot`");
+    expect(body).not.toMatch(/[^`]@release-bot/);
+  });
+
   it("tracker が空または open issue がなければ何もしない", async () => {
     const tracker: IssueTracker = {
       name: "fake",

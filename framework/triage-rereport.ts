@@ -39,7 +39,7 @@ export function formatReReportComment(finding: Finding): string {
     "",
     neutralizeMentions(finding.body),
     "",
-    `— ${finding.agentName} (${finding.role}), run \`${finding.runId}\``,
+    `— ${neutralizeMentions(`${finding.agentName} (${finding.role})`)}, run \`${finding.runId}\``,
   ].join("\n");
 }
 
