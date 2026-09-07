@@ -355,7 +355,11 @@ export async function executeBrowserTool(
     }
   } catch (e) {
     isError = true;
-    resultText = `error: ${String(e)}`;
+    // Errors thrown by Playwright frequently embed page-authored text verbatim
+    // (locator descriptions, strict-mode-violation dumps of matched elements),
+    // so this is target-derived content like any other and must go through
+    // the same fence as read_page_text / read_accessibility_tree / etc.
+    resultText = `error: ${wrapUntrusted("tool error", String(e))}`;
     try {
       screenshot = await ctx.takeScreenshot(page, `error_${toolName}`);
     } catch { /* ignore */ }

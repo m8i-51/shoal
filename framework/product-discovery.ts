@@ -7,6 +7,8 @@ import * as fs from "fs";
 import * as path from "path";
 import Anthropic from "@anthropic-ai/sdk";
 import * as log from "./log";
+import { wrapUntrusted, untrustedContentPrompt } from "./untrusted";
+import { checkUrlSafety } from "./safe-fetch";
 
 export type { ThresholdCandidate } from "./threshold";
 export type { ProductEdge } from "./product-edge";
@@ -409,7 +411,9 @@ Guidelines for output_spec:
 - appGoals: 3–6 outcome sentences from user + business perspective. Write results ("can complete X without training"), never widget names ("using search and filter"). Agents use these as goal-gap criteria, so UI checklists create false visual-regression findings.
 - productEdge: only when the app itself shows it — a deliberate choice a competitor would call a flaw (sharpEdges) and what it gives up for that (tradeoffs). Omit or leave empty rather than guessing; the team corrects this draft in the dashboard, and triage uses it to flag tickets whose fix would flatten the product
 - thresholdCandidates: infer 8–12 (or fewer) probe-worthy boundaries from UI copy, forms (maxlength, required), plan/billing/permission wording, empty/heavy states. Kinds: input | business | experience. priority 1–3 (business edges usually 1). Empty array if unclear — do not invent limits.
-- When evidence is UI observation only: set confidence to low; write at most 2–3 high-level outcome drafts (no control names); treat them as Hall-editable drafts, not verified product goals`
+- When evidence is UI observation only: set confidence to low; write at most 2–3 high-level outcome drafts (no control names); treat them as Hall-editable drafts, not verified product goals
+
+${untrustedContentPrompt()}`;
 
   const docs = await gatherDocumentation(projectPath);
   const initialContent = docs
@@ -445,21 +449,31 @@ Guidelines for output_spec:
             observedLinkPath = detected.linkPath;
             log.info(`  [product-discovery] login link: ${observedLinkPath}`);
           }
-          return `[${pathArg} text]\n${text}\n\n[ARIA tree]\n${aria}`;
+          return wrapUntrusted(`page:${pathArg}`, `[${pathArg} text]\n${text}\n\n[ARIA tree]\n${aria}`);
         } catch (e) {
-          return `fetch failed: ${String(e)}`;
+          // Page-derived (the target app can shape what a Playwright error embeds) — fence it too.
+          return wrapUntrusted(`page:${pathArg}`, `fetch failed: ${String(e)}`);
         }
       }
       if (t.name === "fetch_url") {
         const url = input.url as string | undefined;
         if (!url) return "fetch_url: missing url";
+        // The model's choice of URL is steered by untrusted page content (see
+        // untrusted.ts), so it cannot be trusted to avoid internal/private
+        // addresses on its own — check before touching the network.
+        const safety = await checkUrlSafety(url, { allowedOrigin: new URL(baseUrl).origin });
+        if (!safety.ok) {
+          log.info(`  [product-discovery] ${safety.reason}`);
+          return safety.reason;
+        }
         try {
           const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
           const text = await res.text();
           log.info(`  [product-discovery] fetched: ${url}`);
-          return text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 2000);
+          const cleaned = text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 2000);
+          return wrapUntrusted(`url:${url}`, cleaned);
         } catch (e) {
-          return `fetch failed: ${String(e)}`;
+          return wrapUntrusted(`url:${url}`, `fetch failed: ${String(e)}`);
         }
       }
       if (t.name === "output_spec") {
