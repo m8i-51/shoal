@@ -219,6 +219,13 @@ function checkTracker(env: NodeJS.ProcessEnv): Check {
   if (enabled.includes("github") && !(env.GITHUB_TOKEN && env.GITHUB_REPO)) missing.push("github (GITHUB_TOKEN, GITHUB_REPO)");
   if (enabled.includes("jira") && !(env.JIRA_BASE_URL && env.JIRA_EMAIL && env.JIRA_API_TOKEN && env.JIRA_PROJECT_KEY)) missing.push("jira (JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN, JIRA_PROJECT_KEY)");
   if (enabled.includes("notion") && !(env.NOTION_API_KEY && env.NOTION_DATABASE_ID)) missing.push("notion (NOTION_API_KEY, NOTION_DATABASE_ID)");
+  if (enabled.includes("backlog")) {
+    const projectId = parseInt(env.BACKLOG_PROJECT_ID ?? "", 10);
+    if (!(env.BACKLOG_SPACE && env.BACKLOG_API_KEY && !Number.isNaN(projectId))) {
+      missing.push("backlog (BACKLOG_SPACE, BACKLOG_API_KEY, BACKLOG_PROJECT_ID numeric)");
+    }
+  }
+  if (enabled.includes("asana") && !(env.ASANA_ACCESS_TOKEN && env.ASANA_PROJECT_ID)) missing.push("asana (ASANA_ACCESS_TOKEN, ASANA_PROJECT_ID)");
   if (missing.length > 0) {
     return { name, status: "fail", detail: `enabled but incompletely configured: ${missing.join("; ")}`, fix: "fill in the listed variables, or remove the tracker from ISSUE_TRACKERS" };
   }

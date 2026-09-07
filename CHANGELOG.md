@@ -18,11 +18,13 @@ to `0.1.20` or earlier, so those releases are not separately documented here.
   nothing: Node version, whether `.env` exists and is readable only by you,
   the provider's credential, whether `SHOAL_MAX_USD` can actually be enforced
   against the configured model, the Playwright browser, `BASE_URL`, any
-  enabled tracker, and the dashboard build. It exits non-zero only when
-  something would genuinely stop a run, so CI can gate on it. Two checks earn
-  it its place: a cap configured against an unpriced model can never fire, and
-  `LLM_PROVIDER=claude-cli` with `ANTHROPIC_API_KEY` still set bills the
-  metered API rather than the subscription the operator chose it for.
+  enabled tracker (github, jira, notion, backlog, asana — the same variables
+  the runtime requires, including a numeric `BACKLOG_PROJECT_ID`), and the
+  dashboard build. It exits non-zero only when something would genuinely stop
+  a run, so CI can gate on it. Two checks earn it its place: a cap configured
+  against an unpriced model can never fire, and `LLM_PROVIDER=claude-cli` with
+  `ANTHROPIC_API_KEY` still set bills the metered API rather than the
+  subscription the operator chose it for.
 - **Severity on filed issues.** `create_issue` now requires one of `critical`,
   `major`, `minor` or `trivial`, judged from observed user impact rather than
   fix difficulty. It is written into the issue body and applied as a
@@ -41,10 +43,11 @@ to `0.1.20` or earlier, so those releases are not separately documented here.
 - **Screenshot share of LLM cost.** The run log split a single `inputTokens`
   figure, so a surprising bill gave no hint whether the cause was chatty
   prompts or screenshot volume. Input tokens are now also reported as an
-  estimated screenshot/text split, derived from the images actually sent and
-  modelling the API's downscale — without which a routine 1280x13666 full-page
-  capture would be priced 75x too high. The estimate is never used for billing
-  or for the spend cap.
+  estimated screenshot/text split, derived from the images actually sent —
+  including those nested inside `tool_result` blocks, which is where browser
+  screenshots live — and modelling the API's downscale, without which a
+  routine 1280x13666 full-page capture would be priced 75x too high. The
+  estimate is never used for billing or for the spend cap.
 
 - **Retention for run artifacts.** `logs/screenshots/run_*` and
   `logs/traces/run_*` accumulated one directory per run forever, with nothing
@@ -78,9 +81,18 @@ to `0.1.20` or earlier, so those releases are not separately documented here.
 ### Fixed
 
 - **`@mentions` in LLM-generated persona names.** Persona names are written by
-  the model, and reached the issue body's "Reported by:" line and the re-report
-  comment signature unescaped, so an injected page could make every issue a
-  persona filed ping a real team.
+  the model, and reached the issue body's "Reported by:" line, the Screenshots
+  list, and the re-report comment signature unescaped, so an injected page
+  could make every issue a persona filed ping a real team. Issue titles are
+  left as-is: GitHub does not notify on mentions in titles.
+
+- **Triage accepted any `category` string.** The `create_issue` schema listed
+  four values, but execute only checked truthiness, so a hallucinated category
+  became a GitHub label. Unknown values are now rejected so the model retries.
+
+- **An unenforceable `SHOAL_MAX_USD` warning vanished at `error` log level.**
+  The "cap cannot be enforced" line now goes through `log.error`, so a quiet
+  CI run still sees that the cap is theatre.
 
 - **Every navigation could hang for 30s on a page holding an open
   SSE/WebSocket connection.** Every `page.goto()` shoal issues — the

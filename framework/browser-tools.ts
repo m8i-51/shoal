@@ -38,9 +38,10 @@ import type { ClosedIssue } from "./trackers/types";
 import type { Finding, RegressionCheck } from "./types";
 import type { RunTimings } from "./run-config";
 import { neutralizeMentions } from "./mentions";
+import { ISSUE_CATEGORIES, isIssueCategory } from "./issue-category";
 import * as log from "./log";
 
-export const VALID_CATEGORIES = ["ux", "feature-request", "bug", "goal-gap"];
+export const VALID_CATEGORIES: readonly string[] = ISSUE_CATEGORIES;
 
 /** Tools whose result is worth sending back with a fresh screenshot. */
 export const TOOLS_THAT_SEND_SCREENSHOT = new Set(["navigate", "post_feedback", "view_screen"]);
@@ -269,7 +270,8 @@ export async function executeBrowserTool(
       }
       case "post_feedback": {
         const { title, body, category } = input as { title: string; body: string; category: string };
-        const safeCategory = VALID_CATEGORIES.includes(String(category)) ? String(category) : "ux";
+        const rawCategory = String(category);
+        const safeCategory = isIssueCategory(rawCategory) ? rawCategory : "ux";
         screenshot = await ctx.takeScreenshot(page, `feedback_${String(title).slice(0, 20)}`);
         const findingId = `${agentId}_${Date.now()}`;
         let findingTracePath: string | undefined;

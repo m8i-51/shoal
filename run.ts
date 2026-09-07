@@ -67,10 +67,10 @@ import {
 import { formatToolCallLog, redactToolInput } from "./framework/redact";
 import {
   executeBrowserTool,
-  VALID_CATEGORIES,
   type BrowserAgentLog,
   type BrowserToolContext,
 } from "./framework/browser-tools";
+import { isIssueCategory } from "./framework/issue-category";
 import { untrustedContentPrompt, wrapUntrusted } from "./framework/untrusted";
 import {
   MARK_VERIFIED_TOOL,
@@ -281,7 +281,8 @@ function makeExecutor(
         }
         case "post_feedback": {
           const { title, body, category } = input as { title: string; body: string; category: string };
-          const safeCategory = VALID_CATEGORIES.includes(String(category)) ? String(category) : "ux";
+          const rawCategory = String(category);
+          const safeCategory = isIssueCategory(rawCategory) ? rawCategory : "ux";
           const finding: Finding = {
             id: `${agentLog.agentId}_${Date.now()}`,
             runId: runLog.runId,
@@ -1291,7 +1292,9 @@ export async function main() {
   if (budgetLine) log.info(budgetLine);
   // 価格表を先に読み込む（OpenRouter は実行時取得なので、これが無いと上限が無言で効かない）
   const budgetWarning = await prepareBudget(defaultModel, llmProvider);
-  if (budgetWarning) log.warn(budgetWarning);
+  // Unenforceable-cap is operator-facing, not progress chatter: SHOAL_LOG_LEVEL=error
+  // must still surface that the spend cap is theatre.
+  if (budgetWarning) log.error(budgetWarning);
 
   // 1. product discovery (cache or live)
   const browser = await chromium.launch({ headless: true });

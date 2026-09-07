@@ -163,6 +163,39 @@ describe("Issue tracker", () => {
     expect(c.status).toBe("fail");
     expect(c.detail).toContain("JIRA_BASE_URL");
   });
+
+  it("backlog が有効なのに BACKLOG_PROJECT_ID が非数値なら fail", () => {
+    const env = {
+      ...healthy,
+      ISSUE_TRACKERS: "backlog",
+      BACKLOG_SPACE: "space",
+      BACKLOG_API_KEY: "key",
+      BACKLOG_PROJECT_ID: "not-a-number",
+    };
+    const c = check(env, "Issue tracker");
+    expect(c.status).toBe("fail");
+    expect(c.detail).toContain("BACKLOG_PROJECT_ID");
+  });
+
+  it("asana が有効なのにトークンがなければ fail", () => {
+    const env = { ...healthy, ISSUE_TRACKERS: "asana" };
+    const c = check(env, "Issue tracker");
+    expect(c.status).toBe("fail");
+    expect(c.detail).toContain("ASANA_ACCESS_TOKEN");
+  });
+
+  it("backlog と asana が揃っていれば ok", () => {
+    const env = {
+      ...healthy,
+      ISSUE_TRACKERS: "backlog,asana",
+      BACKLOG_SPACE: "space",
+      BACKLOG_API_KEY: "key",
+      BACKLOG_PROJECT_ID: "123",
+      ASANA_ACCESS_TOKEN: "tok",
+      ASANA_PROJECT_ID: "proj1",
+    };
+    expect(check(env, "Issue tracker").status).toBe("ok");
+  });
 });
 
 describe("settings", () => {

@@ -183,6 +183,38 @@ describe("runTriageAgent", () => {
       expect(body).toContain("/tmp/shot.png");
     });
 
+    it("Screenshots 行の persona 名に入った @mention も無害化する", async () => {
+      const tracker = makeTracker();
+      vi.mocked(createMessageWithRetry)
+        .mockResolvedValueOnce(toolUseResponse("create_issue", {
+          title: "t", body: "b", category: "bug", merged_finding_ids: ["f1"],
+        }) as never)
+        .mockResolvedValueOnce(endTurn() as never);
+      await runTriageAgent(
+        [makeFinding({ id: "f1", agentName: "@ops", screenshotPath: "/tmp/shot.png" })],
+        {} as LLMClient,
+        "m",
+        tracker,
+      );
+      const [, body] = vi.mocked(tracker.createIssue).mock.calls[0];
+      expect(body).toContain("**Screenshots:**");
+      expect(body).toContain("`@ops`");
+      expect(body).toContain("/tmp/shot.png");
+      expect(body).not.toMatch(/[^`]@ops/);
+    });
+
+    it("未知の category は issue を作らずエラーを返す", async () => {
+      const tracker = makeTracker();
+      vi.mocked(createMessageWithRetry)
+        .mockResolvedValueOnce(toolUseResponse("create_issue", {
+          title: "t", body: "b", category: "security", merged_finding_ids: ["f1"],
+        }) as never)
+        .mockResolvedValueOnce(endTurn() as never);
+      const result = await runTriageAgent([makeFinding({ id: "f1" })], {} as LLMClient, "m", tracker);
+      expect(tracker.createIssue).not.toHaveBeenCalled();
+      expect(result.issued).toEqual([]);
+    });
+
     it("LLM が書いた body 中の @mention をバッククォートで無害化する", async () => {
       const tracker = makeTracker();
       vi.mocked(createMessageWithRetry)

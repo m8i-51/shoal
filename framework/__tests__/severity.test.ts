@@ -22,6 +22,8 @@ describe("normalizeSeverity", () => {
   it("別語彙のエイリアスを受け付ける", () => {
     expect(normalizeSeverity("blocker")).toBe("critical");
     expect(normalizeSeverity("high")).toBe("major");
+    expect(normalizeSeverity("sev1")).toBe("major");
+    expect(normalizeSeverity("P2")).toBe("minor");
     expect(normalizeSeverity("medium")).toBe("minor");
     expect(normalizeSeverity("low")).toBe("trivial");
     expect(normalizeSeverity("nit")).toBe("trivial");

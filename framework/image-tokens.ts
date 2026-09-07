@@ -86,23 +86,41 @@ function imageBase64(block: unknown): string | null {
 }
 
 /**
+ * Walk message content looking for base64 PNG blocks.
+ *
+ * Browser screenshots are almost never top-level `image` blocks: `tool-session`
+ * wraps each tool's return in a `tool_result`, and the screenshot lives in
+ * that nested `content` array. A walker that only looked at `message.content`
+ * therefore reported ~0 image tokens on a real run.
+ */
+function addImageTokensFrom(value: unknown, acc: { total: number }): void {
+  if (Array.isArray(value)) {
+    for (const item of value) addImageTokensFrom(item, acc);
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  const data = imageBase64(value);
+  if (data) {
+    const dimensions = pngDimensions(data);
+    if (dimensions) acc.total += estimateImageTokens(dimensions);
+    return;
+  }
+  const block = value as { type?: unknown; content?: unknown };
+  if (block.type === "tool_result") addImageTokensFrom(block.content, acc);
+}
+
+/**
  * Estimated image input tokens across a whole `messages` array.
  *
  * Walks both shapes a message's `content` can take (a plain string, or a block
- * array) and ignores anything that is not a base64 image.
+ * array), recurses into `tool_result` content, and ignores anything that is
+ * not a base64 image.
  */
 export function estimateImageTokensInMessages(messages: unknown): number {
   if (!Array.isArray(messages)) return 0;
-  let total = 0;
+  const acc = { total: 0 };
   for (const message of messages) {
-    const content = (message as { content?: unknown } | undefined)?.content;
-    if (!Array.isArray(content)) continue;
-    for (const block of content) {
-      const data = imageBase64(block);
-      if (!data) continue;
-      const dimensions = pngDimensions(data);
-      if (dimensions) total += estimateImageTokens(dimensions);
-    }
+    addImageTokensFrom((message as { content?: unknown } | undefined)?.content, acc);
   }
-  return total;
+  return acc.total;
 }

@@ -89,4 +89,30 @@ describe("estimateImageTokensInMessages", () => {
       { role: "user", content: [imageBlock("////not-a-png////")] },
     ])).toBe(0);
   });
+
+  it("tool_result の中の画像も数える（ブラウザのスクリーンショットはここに入る）", () => {
+    const one = estimateImageTokens({ width: 800, height: 600 });
+    const messages = [
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "t1",
+            content: [
+              { type: "text", text: "clicked Buy" },
+              imageBlock(pngBase64(800, 600)),
+            ],
+          },
+        ],
+      },
+    ];
+    expect(estimateImageTokensInMessages(messages)).toBe(one);
+  });
+
+  it("tool_result の文字列 content は 0", () => {
+    expect(estimateImageTokensInMessages([
+      { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "ok" }] },
+    ])).toBe(0);
+  });
 });
