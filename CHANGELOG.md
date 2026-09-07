@@ -14,6 +14,38 @@ to `0.1.20` or earlier, so those releases are not separately documented here.
 
 ### Added
 
+- **`shoal doctor`.** A preflight check that makes no LLM call and so costs
+  nothing: Node version, whether `.env` exists and is readable only by you,
+  the provider's credential, whether `SHOAL_MAX_USD` can actually be enforced
+  against the configured model, the Playwright browser, `BASE_URL`, any
+  enabled tracker, and the dashboard build. It exits non-zero only when
+  something would genuinely stop a run, so CI can gate on it. Two checks earn
+  it its place: a cap configured against an unpriced model can never fire, and
+  `LLM_PROVIDER=claude-cli` with `ANTHROPIC_API_KEY` still set bills the
+  metered API rather than the subscription the operator chose it for.
+- **Severity on filed issues.** `create_issue` now requires one of `critical`,
+  `major`, `minor` or `trivial`, judged from observed user impact rather than
+  fix difficulty. It is written into the issue body and applied as a
+  `severity:<level>` label, and shows as a badge in the dashboard and a
+  "critical" card in the report. Common synonyms (`blocker`, `high`, `P2`…)
+  are mapped; a level that cannot be placed leaves the issue filed with no
+  severity rather than a guessed one.
+- **`SHOAL_LANG`.** Sets the language agents write findings and issue text in,
+  as a code (`ja`, `pt-BR`, `zh-TW`) or a plain name. Previously the output
+  language was an accident of whichever app was under test. Unset behaves
+  exactly as before.
+- **`SHOAL_LOG_LEVEL`.** `silent | error | warn | info` (default) `| debug`.
+  The run summary, dashboard URL, triage results and diff summary are treated
+  as program output rather than progress, so `error` gives a quiet run that
+  still says what happened; only `silent` suppresses them.
+- **Screenshot share of LLM cost.** The run log split a single `inputTokens`
+  figure, so a surprising bill gave no hint whether the cause was chatty
+  prompts or screenshot volume. Input tokens are now also reported as an
+  estimated screenshot/text split, derived from the images actually sent and
+  modelling the API's downscale — without which a routine 1280x13666 full-page
+  capture would be priced 75x too high. The estimate is never used for billing
+  or for the spend cap.
+
 - **Retention for run artifacts.** `logs/screenshots/run_*` and
   `logs/traces/run_*` accumulated one directory per run forever, with nothing
   to clean them up. Every run now prunes directories older than
@@ -21,7 +53,34 @@ to `0.1.20` or earlier, so those releases are not separately documented here.
   out-of-range value warns and falls back to 30) at startup and logs how
   many it removed. Findings JSON, report HTML, and run logs are untouched.
 
+### Changed
+
+- **A provider is now one registry entry.** Facts about an LLM provider were
+  spread across five files, and forgetting the one in `cost.ts` meant a local
+  provider quietly priced as if it were metered. `framework/providers.ts` holds
+  them once, with the free/subscription/local sets derived from flags.
+  `LLMClient` is an interface rather than a union that grew an arm per
+  provider, and the factory switches on five construction kinds, so adding an
+  OpenAI-compatible provider is an entry and no new code. Behaviour is
+  unchanged across all twelve resolution paths.
+- **Run state has an owner.** `budget.ts`'s spend accounting and
+  `trace-scrub.ts`'s secret registry were module-level mutable state, which
+  made tests order-dependent — the latter had a `clearKnownSecrets()` escape
+  hatch labelled "test-only". Both are now instances with the process-wide one
+  kept for the CLI, and `cost.ts`'s OpenRouter cache is one object rather than
+  two loose `let`s.
+- **The README leads with the problem and the limits.** It opened on an
+  architecture diagram; it now states what shoal is for and, before the install
+  instructions, what it will not do — the per-run cost, the measured 71%
+  detection rate on its own benchmark, non-determinism, false positives, and
+  that it never reads your code.
+
 ### Fixed
+
+- **`@mentions` in LLM-generated persona names.** Persona names are written by
+  the model, and reached the issue body's "Reported by:" line and the re-report
+  comment signature unescaped, so an injected page could make every issue a
+  persona filed ping a real team.
 
 - **Every navigation could hang for 30s on a page holding an open
   SSE/WebSocket connection.** Every `page.goto()` shoal issues — the
