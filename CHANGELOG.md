@@ -12,6 +12,8 @@ to `0.1.20` or earlier, so those releases are not separately documented here.
 
 ## [Unreleased]
 
+## [0.2.3] — 2026-09-07
+
 ### Security
 
 - **Playwright errors bypassed the untrusted-content fence.** Every
@@ -625,7 +627,8 @@ to `0.1.20` or earlier, so those releases are not separately documented here.
 
 - Documentation for the dashboard's built-in weekly scheduler.
 
-[Unreleased]: https://github.com/m8i-51/shoal/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/m8i-51/shoal/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/m8i-51/shoal/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/m8i-51/shoal/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/m8i-51/shoal/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/m8i-51/shoal/compare/v0.1.33...v0.2.0
