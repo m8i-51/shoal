@@ -18,6 +18,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { isFinding, type Finding } from "../framework/types.js";
+import { normalizeSeverity, type Severity } from "../framework/severity.js";
 
 export interface TriageFindingRef {
   id: string;
@@ -30,6 +31,8 @@ export interface TriageFindingRef {
 export interface TriageIssueView {
   title: string;
   category: string;
+  /** null on runs recorded before severity existed, and when triage gave none. */
+  severity: Severity | null;
   url: string | null;
   edgeRisk: { edge: string; why: string } | null;
   createdAt: string | null;
@@ -52,6 +55,8 @@ export interface TriageView {
     findingsSkipped: number;
     findingsUnprocessed: number;
     edgeRisks: number;
+    /** Issues triage called critical — 0 on runs recorded before severity existed. */
+    critical: number;
   };
   /** True when the stored result predates per-issue records (ID lists only). */
   legacy: boolean;
@@ -168,11 +173,12 @@ export function buildTriageView(runId: string): TriageView | null {
   const rawIssues = Array.isArray(stored.issues) ? stored.issues : [];
   const issues: TriageIssueView[] = rawIssues.flatMap((raw): TriageIssueView[] => {
     if (!raw || typeof raw !== "object") return [];
-    const { title, category, url, mergedFindingIds, edgeRisk, createdAt } = raw as Record<string, unknown>;
+    const { title, category, severity, url, mergedFindingIds, edgeRisk, createdAt } = raw as Record<string, unknown>;
     if (typeof title !== "string" || typeof category !== "string") return [];
     return [{
       title,
       category,
+      severity: normalizeSeverity(severity),
       url: typeof url === "string" && url ? url : null,
       edgeRisk: edgeRiskOf(edgeRisk),
       createdAt: typeof createdAt === "string" ? createdAt : null,
@@ -208,6 +214,7 @@ export function buildTriageView(runId: string): TriageView | null {
       findingsSkipped: skipped.length,
       findingsUnprocessed: unprocessed.length,
       edgeRisks: edgeRisks.length,
+      critical: issues.filter((i) => i.severity === "critical").length,
     },
     legacy: issued.length > 0 && rawIssues.length === 0,
   };

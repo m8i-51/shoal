@@ -274,6 +274,15 @@ export function generateReport(
       })() : ""}
       <div class="stat-card"><div class="number">${findings.length}</div><div class="label">findings</div></div>
       <div class="stat-card"><div class="number">${triageResult.issued.length}</div><div class="label">→ Issues</div></div>
+      ${(() => {
+        // Critical only: a card per level would push the grid past a screen,
+        // and "how many must be looked at today" is the one that changes plans.
+        const critical = triageResult.issues.filter((i) => i.severity === "critical").length;
+        // #b91c1c is 6.47:1 on this .stat-card's white background.
+        return critical > 0
+          ? `<div class="stat-card"><div class="number" style="color:#b91c1c">${critical}</div><div class="label">critical</div></div>`
+          : "";
+      })()}
       <div class="stat-card"><div class="number">${triageResult.skipped.length}</div><div class="label">skipped</div></div>
       <div class="stat-card"><div class="number">${triageResult.unprocessed.length}</div><div class="label">pending</div></div>
       <div class="stat-card"><div class="number">${runLog.agents.length}</div><div class="label">agents</div></div>

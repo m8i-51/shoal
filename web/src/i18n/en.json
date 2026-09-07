@@ -207,6 +207,7 @@
     "statIssued": "Findings filed",
     "statSkipped": "Skipped",
     "statUnprocessed": "Unprocessed",
+    "statCritical": "Critical",
     "statEdgeRisks": "Edge risks",
     "issuesTitle": "Issues filed",
     "mergedFrom": "Merged from {{count}} finding(s)",

@@ -207,6 +207,7 @@
     "statIssued": "起票された finding",
     "statSkipped": "スキップ",
     "statUnprocessed": "未処理",
+    "statCritical": "Critical",
     "statEdgeRisks": "尖りリスク",
     "issuesTitle": "起票した issue",
     "mergedFrom": "{{count}} 件の finding をまとめた",

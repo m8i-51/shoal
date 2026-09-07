@@ -119,6 +119,46 @@ describe("runTriageAgent", () => {
       );
     });
 
+    it("severity を本文とラベルの両方に反映する", async () => {
+      const tracker = makeTracker();
+      vi.mocked(createMessageWithRetry)
+        .mockResolvedValueOnce(toolUseResponse("create_issue", {
+          title: "t", body: "b", category: "bug", severity: "critical", merged_finding_ids: ["f1"],
+        }) as never)
+        .mockResolvedValueOnce(endTurn() as never);
+      const result = await runTriageAgent([makeFinding({ id: "f1" })], {} as LLMClient, "m", tracker);
+      const [, body, labels] = vi.mocked(tracker.createIssue).mock.calls[0];
+      expect(body).toContain("**Severity:** critical");
+      expect(labels).toContain("severity:critical");
+      expect(result.issues[0].severity).toBe("critical");
+    });
+
+    it("別語彙の severity を受け入れて正規化する", async () => {
+      const tracker = makeTracker();
+      vi.mocked(createMessageWithRetry)
+        .mockResolvedValueOnce(toolUseResponse("create_issue", {
+          title: "t", body: "b", category: "ux", severity: "blocker", merged_finding_ids: ["f1"],
+        }) as never)
+        .mockResolvedValueOnce(endTurn() as never);
+      const result = await runTriageAgent([makeFinding({ id: "f1" })], {} as LLMClient, "m", tracker);
+      expect(result.issues[0].severity).toBe("critical");
+    });
+
+    it("severity が無い/置けない場合も起票は続け、捏造せず null にする", async () => {
+      const tracker = makeTracker();
+      vi.mocked(createMessageWithRetry)
+        .mockResolvedValueOnce(toolUseResponse("create_issue", {
+          title: "t", body: "b", category: "bug", severity: "catastrophic", merged_finding_ids: ["f1"],
+        }) as never)
+        .mockResolvedValueOnce(endTurn() as never);
+      const result = await runTriageAgent([makeFinding({ id: "f1" })], {} as LLMClient, "m", tracker);
+      expect(result.issuesCreated).toBe(1);
+      expect(result.issues[0].severity).toBeNull();
+      const [, body, labels] = vi.mocked(tracker.createIssue).mock.calls[0];
+      expect(body).not.toContain("**Severity:**");
+      expect(labels.some((l) => l.startsWith("severity:"))).toBe(false);
+    });
+
     it("タイトルの先頭の [xxx] プレフィックスを除去してから付け直す", async () => {
       const tracker = makeTracker();
       vi.mocked(createMessageWithRetry)

@@ -1036,6 +1036,7 @@ describe("GET /api/runs/:runId/triage", () => {
     issues: [{
       title: "[bug] Login broken",
       category: "bug",
+      severity: "critical" as const,
       url: "https://example.com/issues/7",
       edgeRisk: null,
       createdAt: "2026-01-02T00:00:00.000Z",
@@ -1043,7 +1044,7 @@ describe("GET /api/runs/:runId/triage", () => {
     }],
     skips: [],
     unprocessed: [],
-    stats: { issuesCreated: 1, findingsIssued: 1, findingsSkipped: 0, findingsUnprocessed: 0, edgeRisks: 0 },
+    stats: { issuesCreated: 1, findingsIssued: 1, findingsSkipped: 0, findingsUnprocessed: 0, edgeRisks: 0, critical: 1 },
     legacy: false,
   };
 
@@ -1064,7 +1065,9 @@ describe("GET /api/runs/:runId/triage", () => {
     const res = await request(app).get("/api/runs/run_1/triage");
     expect(res.status).toBe(200);
     expect(res.body.issues[0].mergedFindings[0].title).toBe("Login is broken");
+    expect(res.body.issues[0].severity).toBe("critical");
     expect(res.body.stats.issuesCreated).toBe(1);
+    expect(res.body.stats.critical).toBe(1);
     expect(buildTriageView).toHaveBeenCalledWith("run_1");
   });
 

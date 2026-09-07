@@ -28,6 +28,17 @@ export const CATEGORY_COLOR: Record<string, string> = {
   "goal-gap": "#7c3aed",
 };
 
+/**
+ * Severity badge backgrounds. Every one clears WCAG AA (4.5:1) against the
+ * white badge text: 6.47, 5.18, 4.92, 7.56 respectively.
+ */
+export const SEVERITY_COLOR: Record<string, string> = {
+  critical: "#b91c1c",
+  major: "#c2410c",
+  minor: "#a16207",
+  trivial: "#4b5563",
+};
+
 export function formatCostUSD(usd: number | null | undefined): string {
   if (usd == null) return "—";
   if (usd < 0.0001) return "< $0.0001";

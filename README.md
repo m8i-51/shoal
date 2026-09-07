@@ -92,6 +92,26 @@ Bugs are never marked this way: a defect is a defect whatever the positioning,
 and that rule is enforced in code, not just asked for in the prompt. Without a
 declared edge the whole mechanism stays off.
 
+### Severity
+
+Every filed issue carries a severity, judged from the impact the agent actually
+observed rather than from how hard a fix looks — the agent cannot see your code:
+
+| | |
+| --- | --- |
+| `critical` | blocks the core task entirely, loses data, or exposes something it should not |
+| `major` | completable only via a workaround a real user would likely give up before finding |
+| `minor` | noticeable friction or a wrong detail that does not stop the task |
+| `trivial` | cosmetic, or an improvement nobody is currently blocked by |
+
+It is written into the issue body and applied as a `severity:<level>` label, so
+a tracker can filter on it. Severity is independent of category: a `ux` finding
+can be `critical` and a `bug` can be `trivial`. When triage returns a level that
+is not one of the four and cannot be mapped from a common synonym (`blocker`,
+`high`, `P2`…), the issue is still filed — with no severity at all rather than a
+guessed one, so a team sorting by severity never mistakes a fabricated level for
+a real one.
+
 ---
 
 ## Quick Start
