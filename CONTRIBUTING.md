@@ -23,8 +23,9 @@ write it in English, wherever it sits.
 
 ## Prerequisites
 
-- **Node.js 22+** (CI and the release build both run on Node 22; the openai
-  SDK and `concurrently` declare `engines: node >= 22`)
+- **Node.js 22.12+** to run the test suite (`vitest@5` engines). CI and the
+  published CLI still treat Node 22 as the floor; `.nvmrc` is `22`. The openai
+  SDK and `concurrently` declare `engines: node >= 22`.
 - **npm** (the repo ships a `package-lock.json`)
 - A supported LLM provider key if you want to run agents end-to-end — Anthropic
   by default. See the [LLM providers](README.md#llm-providers) table for

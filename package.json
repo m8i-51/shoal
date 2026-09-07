@@ -1,6 +1,6 @@
 {
   "name": "@m8i-51/shoal",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "type": "module",
   "description": "Multi-agent web exploration framework — finds bugs, UX issues, and missing features by running AI agents against your app",
   "license": "MIT",
@@ -98,19 +98,19 @@
     "@types/react-dom": "^19.2.3",
     "@types/supertest": "^7.2.0",
     "@vitejs/plugin-react": "^6.1.1",
-    "@vitest/coverage-v8": "^4.1.6",
+    "@vitest/coverage-v8": "^5.0.0",
     "concurrently": "^10.0.3",
     "eslint": "^10.9.1",
     "eslint-plugin-react-hooks": "^7.1.1",
-    "i18next": "^26.0.6",
+    "i18next": "^26.4.2",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
-    "react-i18next": "^17.0.4",
+    "react-i18next": "^17.0.13",
     "react-router-dom": "^7.14.1",
     "supertest": "^7.2.2",
     "typescript": "^5",
     "typescript-eslint": "^8.69.0",
     "vite": "^8.2.2",
-    "vitest": "^4.1.5"
+    "vitest": "^5.0.0"
   }
 }
