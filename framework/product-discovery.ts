@@ -8,7 +8,7 @@ import * as path from "path";
 import Anthropic from "@anthropic-ai/sdk";
 import * as log from "./log";
 import { wrapUntrusted, untrustedContentPrompt } from "./untrusted";
-import { checkUrlSafety } from "./safe-fetch";
+import { safeFetch } from "./safe-fetch";
 
 export type { ThresholdCandidate } from "./threshold";
 export type { ProductEdge } from "./product-edge";
@@ -460,15 +460,18 @@ ${untrustedContentPrompt()}`;
         if (!url) return "fetch_url: missing url";
         // The model's choice of URL is steered by untrusted page content (see
         // untrusted.ts), so it cannot be trusted to avoid internal/private
-        // addresses on its own — check before touching the network.
-        const safety = await checkUrlSafety(url, { allowedOrigin: new URL(baseUrl).origin });
-        if (!safety.ok) {
-          log.info(`  [product-discovery] ${safety.reason}`);
-          return safety.reason;
-        }
+        // addresses on its own — check, and never follow redirects, before
+        // touching the network. See safe-fetch.ts.
         try {
-          const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-          const text = await res.text();
+          const fetched = await safeFetch(url, {
+            allowedOrigin: new URL(baseUrl).origin,
+            signal: AbortSignal.timeout(8000),
+          });
+          if (!fetched.ok) {
+            log.info(`  [product-discovery] ${fetched.reason}`);
+            return fetched.reason;
+          }
+          const text = await fetched.response.text();
           log.info(`  [product-discovery] fetched: ${url}`);
           const cleaned = text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 2000);
           return wrapUntrusted(`url:${url}`, cleaned);

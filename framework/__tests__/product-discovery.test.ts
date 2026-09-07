@@ -314,13 +314,28 @@ describe("discoverProduct", () => {
       expect(toolResultAt(1)).toMatch(/refused/i);
     });
 
+    it("許可された URL でも fetch は redirect: error で行い、同一オリジンの 302 が内部へ飛ぶ抜け道を閉じる", async () => {
+      vi.mocked(fetch).mockResolvedValue({ text: async () => "ok" } as Response);
+      vi.mocked(createMessageWithRetry)
+        .mockResolvedValueOnce(toolUseResponse("fetch_url", { url: "https://docs.example.net/readme" }) as never)
+        .mockResolvedValueOnce(toolUseResponse("output_spec", makeOutputSpecInput()) as never);
+      await discoverProduct("https://example.com", makeFakePage(), {} as LLMClient, "m");
+      expect(fetch).toHaveBeenCalledWith(
+        "https://docs.example.net/readme",
+        expect.objectContaining({ redirect: "error" }),
+      );
+    });
+
     it("BASE_URL と同一オリジンへの fetch_url は private アドレスでも許可し、結果はフェンスで返す", async () => {
       vi.mocked(fetch).mockResolvedValue({ text: async () => "local about page" } as Response);
       vi.mocked(createMessageWithRetry)
         .mockResolvedValueOnce(toolUseResponse("fetch_url", { url: "http://localhost:3000/about" }) as never)
         .mockResolvedValueOnce(toolUseResponse("output_spec", makeOutputSpecInput()) as never);
       await discoverProduct("http://localhost:3000", makeFakePage(), {} as LLMClient, "m");
-      expect(fetch).toHaveBeenCalledWith("http://localhost:3000/about", expect.any(Object));
+      expect(fetch).toHaveBeenCalledWith(
+        "http://localhost:3000/about",
+        expect.objectContaining({ redirect: "error" }),
+      );
       const result = toolResultAt(1);
       expect(result).toContain("local about page");
       // Not blocked by the SSRF guard *and* still fenced like any other page-derived result.

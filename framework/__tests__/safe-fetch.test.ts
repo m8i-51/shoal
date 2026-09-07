@@ -1,5 +1,7 @@
-import { describe, it, expect } from "vitest";
-import { checkUrlSafety, type LookupFn } from "../safe-fetch";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import * as http from "http";
+import type { AddressInfo } from "net";
+import { checkUrlSafety, safeFetch, type LookupFn } from "../safe-fetch";
 
 function fakeLookup(address: string, family = 4): LookupFn {
   return async () => ({ address, family });
@@ -167,5 +169,86 @@ describe("checkUrlSafety — allowedOrigin exception", () => {
   it("他の内部ホストは allowedOrigin と一致しない限り拒否される", async () => {
     const result = await checkUrlSafety("http://127.0.0.1:9999/", { allowedOrigin: "http://localhost:3000" });
     expect(result.ok).toBe(false);
+  });
+});
+
+describe("safeFetch", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("拒否された URL は fetch しない", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await safeFetch("http://169.254.169.254/latest/meta-data/");
+    expect(result.ok).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("check を通った URL は redirect: \"error\" で fetch する（呼び出し側から上書きできない）", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, text: async () => "ok" });
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await safeFetch("http://93.184.216.34/readme");
+    expect(result).toEqual({ ok: true, response: expect.anything() });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://93.184.216.34/readme",
+      expect.objectContaining({ redirect: "error" }),
+    );
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(init.redirect).toBe("error");
+  });
+});
+
+function listen(server: http.Server): Promise<void> {
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () => resolve());
+  });
+}
+
+function close(server: http.Server): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.close((err) => (err ? reject(err) : resolve()));
+  });
+}
+
+describe("safeFetch — HTTP redirect", () => {
+  it("同一オリジンの 302 を追わず、リダイレクト先には接続しない", async () => {
+    let internalHits = 0;
+    const internal = http.createServer((_req, res) => {
+      internalHits += 1;
+      res.writeHead(200, { "Content-Type": "text/plain" });
+      res.end("INTERNAL-ONLY");
+    });
+    let originHits = 0;
+    const origin = http.createServer((req, res) => {
+      if (req.url === "/open-redirect") {
+        originHits += 1;
+        const dest = internal.address() as AddressInfo;
+        res.writeHead(302, { Location: `http://127.0.0.1:${dest.port}/secret` });
+        res.end();
+        return;
+      }
+      res.writeHead(200);
+      res.end("ok");
+    });
+
+    await listen(internal);
+    await listen(origin);
+    try {
+      const originPort = (origin.address() as AddressInfo).port;
+      const originUrl = `http://127.0.0.1:${originPort}`;
+      await expect(
+        safeFetch(`${originUrl}/open-redirect`, {
+          allowedOrigin: originUrl,
+          signal: AbortSignal.timeout(2000),
+        }),
+      ).rejects.toThrow();
+      expect(originHits).toBe(1);
+      expect(internalHits).toBe(0);
+    } finally {
+      await close(origin);
+      await close(internal);
+    }
   });
 });

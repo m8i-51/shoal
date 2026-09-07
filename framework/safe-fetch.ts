@@ -27,14 +27,21 @@
  * process.env here, so this stays unit-testable) and a request to that exact
  * origin is let through without the address check.
  *
- * Honest limit: resolving a hostname here and then letting the caller
- * `fetch()` it separately is a classic DNS-rebinding TOCTOU gap — nothing
- * stops the name resolving to a public address at check time and a private
- * one milliseconds later at connect time. Closing that fully would need a
- * fetch implementation that connects to the address we already resolved
- * instead of re-resolving the hostname. This guard stops the common case (a
- * page telling the agent to fetch a literal internal IP, or a hostname that
- * plainly resolves to one) without pretending to close every timing window.
+ * Callers must go through `safeFetch`, not `checkUrlSafety` plus a bare
+ * `fetch()`. Node/undici defaults to `redirect: "follow"`, so a URL that
+ * passed the check — including the allowed `BASE_URL` origin — could 302
+ * onto 169.254.169.254 or RFC1918 and the first check would never see it.
+ * `safeFetch` always sets `redirect: "error"`; that option is not
+ * overridable from the call site.
+ *
+ * Honest limit: resolving a hostname here and then fetching it is still a
+ * classic DNS-rebinding TOCTOU gap — nothing stops the name resolving to a
+ * public address at check time and a private one milliseconds later at
+ * connect time. Closing that fully would need a fetch that connects to the
+ * address we already resolved instead of re-resolving the hostname. This
+ * guard stops the common case (a page telling the agent to fetch a literal
+ * internal IP, a hostname that plainly resolves to one, or a same-origin
+ * open redirect onto one) without pretending to close every timing window.
  */
 import { isIP } from "net";
 import * as dns from "dns";
@@ -140,9 +147,28 @@ function isBlockedAddress(address: string): boolean {
 }
 
 /**
+ * Fetch `rawUrl` only after `checkUrlSafety` allows it, and never follow
+ * HTTP redirects. Network / redirect failures throw, the same way a bare
+ * `fetch()` would, so the caller can fence the error as untrusted content.
+ */
+export async function safeFetch(
+  rawUrl: string,
+  options: SafeFetchOptions & { signal?: AbortSignal } = {},
+): Promise<{ ok: true; response: Response } | { ok: false; reason: string }> {
+  const check = await checkUrlSafety(rawUrl, options);
+  if (!check.ok) return check;
+  const response = await fetch(rawUrl, {
+    signal: options.signal ?? AbortSignal.timeout(8000),
+    redirect: "error",
+  });
+  return { ok: true, response };
+}
+
+/**
  * Decide whether `rawUrl` is safe to fetch. Never throws — an invalid or
  * unresolvable URL comes back as `{ ok: false, reason }`, ready to hand to
- * the model in place of the fetch it asked for.
+ * the model in place of the fetch it asked for. Prefer `safeFetch` at the
+ * call site so the redirect policy cannot be forgotten.
  */
 export async function checkUrlSafety(rawUrl: string, options: SafeFetchOptions = {}): Promise<SafeFetchCheck> {
   let url: URL;

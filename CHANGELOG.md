@@ -33,8 +33,10 @@ to `0.1.20` or earlier, so those releases are not separately documented here.
   schemes, loopback, link-local, private v4, unique-local v6 and the
   unspecified address, resolving hostnames first. It deliberately allows the
   configured `BASE_URL` origin, since the app under test is routinely
-  localhost. DNS rebinding between check and fetch remains open and is
-  documented rather than papered over.
+  localhost. HTTP redirects are refused (`redirect: "error"`) so a
+  same-origin 302 cannot skip the check onto 169.254.169.254 or RFC1918.
+  DNS rebinding between check and fetch remains open and is documented
+  rather than papered over.
 - **The shared artifact was the least protected one.** Trace zips were
   scrubbed of registered secrets; the standalone HTML report — the file meant
   to be attached to a ticket — was not scrubbed at all. Its rendered text now
