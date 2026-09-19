@@ -1,6 +1,12 @@
 import { createLLMClient, type LLMClient } from "./llm-client.js";
 import { completeText } from "./tool-session.js";
 import type { ProductSpec } from "./product-discovery.js";
+import {
+  parsePersonaContract,
+  PERSONA_CONTRACT_GENERATION_SPEC,
+  PersonaContractError,
+  type PersonaContract,
+} from "./persona-contract.js";
 
 export interface GeneratedPersonaFields {
   name: string;
@@ -8,6 +14,7 @@ export interface GeneratedPersonaFields {
   persona: string;
   lenses: string[];
   accountRole?: string;
+  contract: PersonaContract;
 }
 
 export class PersonaGenerationError extends Error {
@@ -49,7 +56,15 @@ export function parseGeneratedPersona(raw: unknown): GeneratedPersonaFields {
     ? obj.accountRole.trim()
     : undefined;
 
-  return { name, role, persona, lenses, ...(accountRole ? { accountRole } : {}) };
+  let contract: PersonaContract;
+  try {
+    contract = parsePersonaContract(obj.contract);
+  } catch (e) {
+    const message = e instanceof PersonaContractError ? e.message : "generated persona missing contract";
+    throw new PersonaGenerationError(message);
+  }
+
+  return { name, role, persona, lenses, contract, ...(accountRole ? { accountRole } : {}) };
 }
 
 function extractJsonObject(text: string): unknown {
@@ -90,7 +105,7 @@ export async function generatePersonaFromSeed(
     provider,
     client,
     model,
-    maxTokens: 1024,
+    maxTokens: 2048,
     system: `You expand a short persona seed into a concrete test-user persona for an AI exploration swarm.
 Return ONLY a JSON object (no markdown prose) with keys:
 - name: a human first name (string)
@@ -98,11 +113,14 @@ Return ONLY a JSON object (no markdown prose) with keys:
 - accountRole: short test-account role token such as user, instructor, or admin — NOT a narrative description
 - persona: 2–4 sentences describing background, motivations, and how they use the app (string)
 - lenses: 1–4 evaluation perspectives as short strings (array)
+- ${PERSONA_CONTRACT_GENERATION_SPEC}
 
 Rules:
 - Ground the persona in THIS product's users and goals — not a generic QA engineer.
 - Reflect the seed's character (tone, quirks, intent) vividly.
-- Prefer end-user roles over professional auditor titles unless the seed clearly asks for that.`,
+- Prefer end-user roles over professional auditor titles unless the seed clearly asks for that.
+- The contract must make this person's BEHAVIOR observable. A seed like "first-time user" is not automatically a careful reader — pick skip OR read and write it into comprehension / abandonment.
+- Do not give the persona product knowledge merely because you have the spec. Put product facts in knowledgeBoundary.doesNotKnow unless the seed clearly already knows them.`,
     userPrompt: `App: ${spec.appName}
 Description: ${spec.appDescription}
 Target users: ${spec.targetUsers}

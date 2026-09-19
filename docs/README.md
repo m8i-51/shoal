@@ -13,5 +13,6 @@ This directory holds **architecture decision records (ADRs)** for shoal — why 
 | [2026-08-27-fixed-persona-roster.md](design/2026-08-27-fixed-persona-roster.md) | Dashboard fixed personas (seed → generate) |
 | [2026-08-27-threshold-agent.md](design/2026-08-27-threshold-agent.md) | Threshold agent lane |
 | [2026-09-02-product-edge.md](design/2026-09-02-product-edge.md) | Product edge and edge-risk triage |
+| [2026-09-19-persona-contract.md](design/2026-09-19-persona-contract.md) | Behavioral persona contracts (skip vs read) |
 
 When adding a new ADR, use `docs/design/YYYY-MM-DD-short-name.md` and link it from this table.

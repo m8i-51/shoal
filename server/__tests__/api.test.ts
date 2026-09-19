@@ -932,6 +932,18 @@ describe("personas API", () => {
       role: "first-time user",
       persona: "Needs clear onboarding.",
       lenses: ["trust"],
+      contract: {
+        traits: "speeds through copy",
+        behavioralRules: {
+          discovery: "Thumb-scroll 1–2 screens.",
+          comprehension: "Mash Next on tutorials.",
+          helpSeeking: "Does not search in-app.",
+          exploration: "At most two new screens.",
+        },
+        knowledgeBoundary: { doesNotKnow: ["score meaning"], mayInferFrom: ["labels"] },
+        stateRules: { confusionIncreasesWhen: ["numbers"], confusionDecreasesWhen: ["one sentence"] },
+        abandonment: ["90 seconds"],
+      },
     });
     vi.mocked(addAgent).mockReturnValue({
       id: "agent_1",
@@ -948,7 +960,11 @@ describe("personas API", () => {
     const res = await request(app).post("/api/personas").send({ seed: "初めて使う人" });
     expect(res.status).toBe(201);
     expect(res.body.origin).toBe("fixed");
-    expect(addAgent).toHaveBeenCalledWith(expect.objectContaining({ origin: "fixed", seed: "初めて使う人" }));
+    expect(addAgent).toHaveBeenCalledWith(expect.objectContaining({
+      origin: "fixed",
+      seed: "初めて使う人",
+      contract: expect.objectContaining({ traits: "speeds through copy" }),
+    }));
   });
 
   it("POST /api/personas returns 502 on generation failure", async () => {
@@ -984,6 +1000,17 @@ describe("personas API", () => {
     const rest = await request(app).post("/api/personas/f1/restore");
     expect(rest.status).toBe(200);
     expect(rest.body.status).toBe("active");
+  });
+
+  it("PATCH /api/personas/:id rejects an invalid contract", async () => {
+    vi.mocked(loadAgents).mockReturnValue([
+      { id: "f1", name: "A", role: "r", persona: "p", createdAt: "t", origin: "fixed", status: "active" },
+    ] as never);
+    vi.mocked(updateAgent).mockClear();
+    const res = await request(app).patch("/api/personas/f1").send({ contract: { traits: "x" } });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/contract/i);
+    expect(updateAgent).not.toHaveBeenCalled();
   });
 });
 

@@ -8,6 +8,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { Tool } from "./llm-client";
 import { SUGGESTED_DEVICES } from "./environment";
+import { PERSONA_CONTRACT_TOOL_SCHEMA } from "./persona-contract";
 
 // ================================================================
 // API agent tools
@@ -146,7 +147,7 @@ export const PERSONA_DESIGNER_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: "add_agent",
-    description: "Register a new agent (user persona). / 新しいエージェントを登録する",
+    description: "Register a new agent (user persona) with a behavioral contract. Two recruits must fork on the same screen (skip vs read a tutorial) — do not hire two careful readers. / 行動契約つきのユーザーペルソナを登録する。同じ画面で行動が分岐すること（チュートリアルを飛ばす人 vs 全部読む人）。慎重な読者を二人採用しない",
     input_schema: {
       type: "object",
       properties: {
@@ -157,6 +158,7 @@ export const PERSONA_DESIGNER_TOOLS: Anthropic.Tool[] = [
           description: "Short test-account role token such as user, instructor, or admin — not a narrative description",
         },
         persona: { type: "string" },
+        contract: PERSONA_CONTRACT_TOOL_SCHEMA,
         environment: {
           type: "object",
           description: `Optional browsing environment — make it match the persona's life (e.g. a commuting sales rep browses on a phone over a slow connection). Give 1-2 recruits a non-desktop environment. Omit entirely for a standard desktop user.
@@ -174,7 +176,7 @@ export const PERSONA_DESIGNER_TOOLS: Anthropic.Tool[] = [
           },
         },
       },
-      required: ["name", "role", "persona"],
+      required: ["name", "role", "persona", "contract"],
     },
   },
   {

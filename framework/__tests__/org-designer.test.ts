@@ -76,4 +76,13 @@ describe("designOrg", () => {
     expect(personaGuidance).toContain("Design Standards Reference");
     expect(personaGuidance).toContain("Apple HIG");
   });
+
+  it("採用方針に行動契約（同じ画面での分岐）を含める", async () => {
+    vi.mocked(completeText).mockResolvedValue("x");
+    await designOrg(makeSpec(), {} as LLMClient, "m");
+    const prompt = vi.mocked(completeText).mock.calls[0][0].userPrompt;
+    expect(prompt).toContain("Behavioral contracts");
+    expect(prompt).toContain("4-step");
+    expect(prompt).toContain("Knowledge Boundary");
+  });
 });

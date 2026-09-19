@@ -3,6 +3,25 @@ import { useTranslation } from "react-i18next";
 import { useImeEnterHandler } from "../utils/ime-enter";
 import { apiFetch } from "../api";
 
+interface PersonaContract {
+  traits: string;
+  behavioralRules: {
+    discovery: string;
+    comprehension: string;
+    helpSeeking: string;
+    exploration: string;
+  };
+  knowledgeBoundary: {
+    doesNotKnow: string[];
+    mayInferFrom: string[];
+  };
+  stateRules: {
+    confusionIncreasesWhen: string[];
+    confusionDecreasesWhen: string[];
+  };
+  abandonment: string[];
+}
+
 interface Persona {
   id: string;
   name: string;
@@ -13,6 +32,106 @@ interface Persona {
   status?: "active" | "archived";
   origin?: string;
   accountRole?: string;
+  contract?: PersonaContract;
+}
+
+interface PersonaDraft {
+  name: string;
+  role: string;
+  persona: string;
+  lenses: string;
+  accountRole: string;
+  traits: string;
+  discovery: string;
+  comprehension: string;
+  helpSeeking: string;
+  exploration: string;
+  doesNotKnow: string;
+  mayInferFrom: string;
+  confusionIncreasesWhen: string;
+  confusionDecreasesWhen: string;
+  abandonment: string;
+}
+
+const EMPTY_DRAFT: PersonaDraft = {
+  name: "",
+  role: "",
+  persona: "",
+  lenses: "",
+  accountRole: "",
+  traits: "",
+  discovery: "",
+  comprehension: "",
+  helpSeeking: "",
+  exploration: "",
+  doesNotKnow: "",
+  mayInferFrom: "",
+  confusionIncreasesWhen: "",
+  confusionDecreasesWhen: "",
+  abandonment: "",
+};
+
+function joinLines(items: string[] | undefined): string {
+  return (items ?? []).join("\n");
+}
+
+function splitLines(value: string): string[] {
+  return value.split("\n").map((s) => s.trim()).filter(Boolean);
+}
+
+function draftFromPersona(p: Persona): PersonaDraft {
+  const c = p.contract;
+  return {
+    name: p.name,
+    role: p.role,
+    persona: p.persona,
+    lenses: (p.lenses ?? []).join(", "),
+    accountRole: p.accountRole ?? "",
+    traits: c?.traits ?? "",
+    discovery: c?.behavioralRules.discovery ?? "",
+    comprehension: c?.behavioralRules.comprehension ?? "",
+    helpSeeking: c?.behavioralRules.helpSeeking ?? "",
+    exploration: c?.behavioralRules.exploration ?? "",
+    doesNotKnow: joinLines(c?.knowledgeBoundary.doesNotKnow),
+    mayInferFrom: joinLines(c?.knowledgeBoundary.mayInferFrom),
+    confusionIncreasesWhen: joinLines(c?.stateRules.confusionIncreasesWhen),
+    confusionDecreasesWhen: joinLines(c?.stateRules.confusionDecreasesWhen),
+    abandonment: joinLines(c?.abandonment),
+  };
+}
+
+function contractFromDraft(d: PersonaDraft): PersonaContract | null {
+  const filled = [
+    d.traits,
+    d.discovery,
+    d.comprehension,
+    d.helpSeeking,
+    d.exploration,
+    d.doesNotKnow,
+    d.mayInferFrom,
+    d.confusionIncreasesWhen,
+    d.confusionDecreasesWhen,
+    d.abandonment,
+  ].some((v) => v.trim() !== "");
+  if (!filled) return null;
+  return {
+    traits: d.traits.trim(),
+    behavioralRules: {
+      discovery: d.discovery.trim(),
+      comprehension: d.comprehension.trim(),
+      helpSeeking: d.helpSeeking.trim(),
+      exploration: d.exploration.trim(),
+    },
+    knowledgeBoundary: {
+      doesNotKnow: splitLines(d.doesNotKnow),
+      mayInferFrom: splitLines(d.mayInferFrom),
+    },
+    stateRules: {
+      confusionIncreasesWhen: splitLines(d.confusionIncreasesWhen),
+      confusionDecreasesWhen: splitLines(d.confusionDecreasesWhen),
+    },
+    abandonment: splitLines(d.abandonment),
+  };
 }
 
 async function fetchPersonas(): Promise<Persona[] | null> {
@@ -34,13 +153,7 @@ export function PersonasPanel() {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [draft, setDraft] = useState<{ name: string; role: string; persona: string; lenses: string; accountRole: string }>({
-    name: "",
-    role: "",
-    persona: "",
-    lenses: "",
-    accountRole: "",
-  });
+  const [draft, setDraft] = useState<PersonaDraft>(EMPTY_DRAFT);
   const [saving, setSaving] = useState(false);
 
   const applyPersonas = useCallback((all: Persona[]) => {
@@ -98,13 +211,7 @@ export function PersonasPanel() {
 
   const startEdit = (p: Persona) => {
     setEditingId(p.id);
-    setDraft({
-      name: p.name,
-      role: p.role,
-      persona: p.persona,
-      lenses: (p.lenses ?? []).join(", "),
-      accountRole: p.accountRole ?? "",
-    });
+    setDraft(draftFromPersona(p));
   };
 
   const saveEdit = async () => {
@@ -125,6 +232,7 @@ export function PersonasPanel() {
           persona: draft.persona,
           lenses,
           accountRole: draft.accountRole.trim() === "" ? null : draft.accountRole.trim(),
+          contract: contractFromDraft(draft),
         }),
       });
       if (!res.ok) {
@@ -150,6 +258,10 @@ export function PersonasPanel() {
   const restore = async (id: string) => {
     await apiFetch(`/api/personas/${id}/restore`, { method: "POST" });
     await load();
+  };
+
+  const setField = (key: keyof PersonaDraft) => (e: { target: { value: string } }) => {
+    setDraft((d) => ({ ...d, [key]: e.target.value }));
   };
 
   return (
@@ -191,33 +303,114 @@ export function PersonasPanel() {
                   <input
                     style={styles.input}
                     value={draft.name}
-                    onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
+                    onChange={setField("name")}
                     placeholder={t("personas.name")}
                   />
                   <input
                     style={styles.input}
                     value={draft.role}
-                    onChange={(e) => setDraft((d) => ({ ...d, role: e.target.value }))}
+                    onChange={setField("role")}
                     placeholder={t("personas.role")}
                   />
                   <input
                     style={styles.input}
                     value={draft.accountRole}
-                    onChange={(e) => setDraft((d) => ({ ...d, accountRole: e.target.value }))}
+                    onChange={setField("accountRole")}
                     placeholder={t("personas.accountRolePlaceholder")}
                     aria-label={t("personas.accountRole")}
                   />
                   <textarea
                     style={styles.textarea}
                     value={draft.persona}
-                    onChange={(e) => setDraft((d) => ({ ...d, persona: e.target.value }))}
+                    onChange={setField("persona")}
                     rows={3}
                   />
                   <input
                     style={styles.input}
                     value={draft.lenses}
-                    onChange={(e) => setDraft((d) => ({ ...d, lenses: e.target.value }))}
+                    onChange={setField("lenses")}
                     placeholder={t("personas.lensesPlaceholder")}
+                  />
+                  <p style={styles.contractLabel}>{t("personas.contractTitle")}</p>
+                  <p style={styles.contractHint}>{t("personas.contractHint")}</p>
+                  <input
+                    style={styles.input}
+                    value={draft.traits}
+                    onChange={setField("traits")}
+                    placeholder={t("personas.traitsPlaceholder")}
+                    aria-label={t("personas.traits")}
+                  />
+                  <textarea
+                    style={styles.textarea}
+                    value={draft.discovery}
+                    onChange={setField("discovery")}
+                    rows={2}
+                    placeholder={t("personas.discovery")}
+                    aria-label={t("personas.discovery")}
+                  />
+                  <textarea
+                    style={styles.textarea}
+                    value={draft.comprehension}
+                    onChange={setField("comprehension")}
+                    rows={2}
+                    placeholder={t("personas.comprehension")}
+                    aria-label={t("personas.comprehension")}
+                  />
+                  <textarea
+                    style={styles.textarea}
+                    value={draft.helpSeeking}
+                    onChange={setField("helpSeeking")}
+                    rows={2}
+                    placeholder={t("personas.helpSeeking")}
+                    aria-label={t("personas.helpSeeking")}
+                  />
+                  <textarea
+                    style={styles.textarea}
+                    value={draft.exploration}
+                    onChange={setField("exploration")}
+                    rows={2}
+                    placeholder={t("personas.exploration")}
+                    aria-label={t("personas.exploration")}
+                  />
+                  <textarea
+                    style={styles.textarea}
+                    value={draft.doesNotKnow}
+                    onChange={setField("doesNotKnow")}
+                    rows={3}
+                    placeholder={`${t("personas.doesNotKnow")} — ${t("personas.listPlaceholder")}`}
+                    aria-label={t("personas.doesNotKnow")}
+                  />
+                  <textarea
+                    style={styles.textarea}
+                    value={draft.mayInferFrom}
+                    onChange={setField("mayInferFrom")}
+                    rows={2}
+                    placeholder={`${t("personas.mayInferFrom")} — ${t("personas.listPlaceholder")}`}
+                    aria-label={t("personas.mayInferFrom")}
+                  />
+                  <textarea
+                    style={styles.textarea}
+                    value={draft.confusionIncreasesWhen}
+                    onChange={setField("confusionIncreasesWhen")}
+                    rows={2}
+                    placeholder={`${t("personas.confusionIncreases")} — ${t("personas.listPlaceholder")}`}
+                    aria-label={t("personas.confusionIncreases")}
+                  />
+                  <textarea
+                    style={styles.textarea}
+                    value={draft.confusionDecreasesWhen}
+                    onChange={setField("confusionDecreasesWhen")}
+                    rows={2}
+                    placeholder={`${t("personas.confusionDecreases")} — ${t("personas.listPlaceholder")}`}
+                    aria-label={t("personas.confusionDecreases")}
+                  />
+                  <textarea
+                    style={styles.textarea}
+                    value={draft.abandonment}
+                    onChange={setField("abandonment")}
+                    rows={3}
+                    placeholder={`${t("personas.abandonment")} — ${t("personas.listPlaceholder")}`}
+                    aria-label={t("personas.abandonment")}
                   />
                   <div style={styles.editActions}>
                     <button onClick={() => setEditingId(null)} style={styles.cancelBtn}>
@@ -237,10 +430,27 @@ export function PersonasPanel() {
                       <span style={styles.role}>{t("personas.accountRole")}: {p.accountRole}</span>
                     )}
                   </div>
+                  {p.contract?.traits && <p style={styles.traits}>{p.contract.traits}</p>}
                   {p.seed && <p style={styles.seed}>{t("personas.seedLabel")}: {p.seed}</p>}
                   <p style={styles.persona}>{p.persona}</p>
                   {(p.lenses?.length ?? 0) > 0 && (
                     <p style={styles.lenses}>{(p.lenses ?? []).join(" · ")}</p>
+                  )}
+                  {p.contract && (
+                    <div style={styles.contractBlock}>
+                      <p style={styles.rule}>
+                        <span style={styles.ruleLabel}>{t("personas.comprehension")}</span>
+                        {p.contract.behavioralRules.comprehension}
+                      </p>
+                      <p style={styles.rule}>
+                        <span style={styles.ruleLabel}>{t("personas.doesNotKnow")}</span>
+                        {p.contract.knowledgeBoundary.doesNotKnow.join(" · ")}
+                      </p>
+                      <p style={styles.rule}>
+                        <span style={styles.ruleLabel}>{t("personas.abandonment")}</span>
+                        {p.contract.abandonment.join(" · ")}
+                      </p>
+                    </div>
                   )}
                   <div style={styles.itemActions}>
                     <button onClick={() => startEdit(p)} style={styles.editBtn}>
@@ -377,6 +587,12 @@ const styles = {
     color: "#475569",
     margin: "0.25rem 0 0",
   },
+  traits: {
+    fontSize: "0.75rem",
+    fontWeight: 600,
+    color: "#334155",
+    margin: "0.35rem 0 0",
+  },
   persona: {
     fontSize: "0.8rem",
     color: "#334155",
@@ -387,6 +603,40 @@ const styles = {
     fontSize: "0.7rem",
     color: "#64748b",
     margin: "0.35rem 0 0",
+  },
+  contractBlock: {
+    marginTop: "0.5rem",
+    padding: "0.5rem 0.65rem",
+    background: "#f8fafc",
+    borderRadius: "5px",
+  },
+  contractLabel: {
+    fontSize: "0.7rem",
+    fontWeight: 700,
+    textTransform: "uppercase" as const,
+    letterSpacing: "0.06em",
+    color: "#64748b",
+    margin: "0.35rem 0 0",
+  },
+  contractHint: {
+    fontSize: "0.7rem",
+    color: "#64748b",
+    margin: "0.15rem 0 0.35rem",
+  },
+  rule: {
+    fontSize: "0.75rem",
+    color: "#334155",
+    margin: "0.2rem 0 0",
+    lineHeight: 1.4,
+  },
+  ruleLabel: {
+    display: "block",
+    fontSize: "0.65rem",
+    fontWeight: 700,
+    textTransform: "uppercase" as const,
+    letterSpacing: "0.05em",
+    color: "#64748b",
+    marginBottom: "0.1rem",
   },
   itemActions: {
     display: "flex",

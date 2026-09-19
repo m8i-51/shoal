@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { parse as parseYaml } from "yaml";
 import * as log from "./log";
+import { formatContractSummary, tryParsePersonaContract, type PersonaContract } from "./persona-contract";
 
 export interface PersonaTemplate {
   name: string;
@@ -9,6 +10,7 @@ export interface PersonaTemplate {
   persona: string;
   lenses?: string[];
   accountRole?: string;
+  contract?: PersonaContract;
 }
 
 export interface PersonaPack {
@@ -23,11 +25,19 @@ function isPersonaTemplate(v: unknown): v is PersonaTemplate {
   return typeof o.name === "string" && typeof o.role === "string" && typeof o.persona === "string";
 }
 
-function normalizeTemplate(raw: PersonaTemplate): PersonaTemplate {
+function normalizeTemplate(raw: PersonaTemplate, source: string): PersonaTemplate {
   const accountRole = typeof raw.accountRole === "string" && raw.accountRole.trim() !== ""
     ? raw.accountRole.trim()
     : undefined;
-  return accountRole ? { ...raw, accountRole } : raw;
+  const contract = tryParsePersonaContract(raw.contract, `${source}:${raw.name}`);
+  return {
+    name: raw.name,
+    role: raw.role,
+    persona: raw.persona,
+    ...(raw.lenses ? { lenses: raw.lenses } : {}),
+    ...(accountRole ? { accountRole } : {}),
+    ...(contract ? { contract } : {}),
+  };
 }
 
 function parseRaw(raw: unknown, source: string): PersonaPack | null {
@@ -50,7 +60,7 @@ function parseRaw(raw: unknown, source: string): PersonaPack | null {
       return false;
     }
     return true;
-  }).map((v) => normalizeTemplate(v as PersonaTemplate));
+  }).map((v) => normalizeTemplate(v as PersonaTemplate, source));
 
   if (personas.length === 0) {
     log.warn(`[persona-pack] ${source}: 0 valid personas found`);
@@ -138,6 +148,7 @@ export function formatPackForPrompt(pack: PersonaPack): string {
         `   ${p.persona}`,
         ...(p.accountRole ? [`   accountRole: ${p.accountRole}`] : []),
         ...(p.lenses?.length ? [`   Suggested lenses: ${p.lenses.join(", ")}`] : []),
+        ...(p.contract ? [`   Contract: ${formatContractSummary(p.contract)}`] : []),
       ].join("\n")
     ),
   ];

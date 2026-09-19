@@ -3,6 +3,7 @@ import * as path from "path";
 import type { EnvironmentProfile } from "./environment";
 import * as log from "./log";
 import { writeFileAtomic, quarantineCorruptFile } from "./atomic-write";
+import { parsePersonaContract, type PersonaContract } from "./persona-contract";
 
 /** 1 run 分のエージェント個人の体験記録 */
 export interface AgentMemory {
@@ -33,6 +34,8 @@ export interface Agent {
   lenses?: string[];
   /** Short test-account role (user / instructor / admin). Distinct from narrative `role`. */
   accountRole?: string;
+  /** Observable behavior on a screen. Missing on legacy agents. */
+  contract?: PersonaContract;
 }
 
 const STORE_PATH = path.join(process.cwd(), "agents.json");
@@ -84,6 +87,7 @@ export interface AddAgentInput {
   seed?: string;
   lenses?: string[];
   accountRole?: string;
+  contract?: PersonaContract;
 }
 
 export function addAgent(input: AddAgentInput): Agent {
@@ -109,6 +113,7 @@ export function addAgent(input: AddAgentInput): Agent {
     ...(input.accountRole !== undefined && input.accountRole.trim() !== ""
       ? { accountRole: requireNonEmptyString(input.accountRole, "accountRole") }
       : {}),
+    ...(input.contract ? { contract: parsePersonaContract(input.contract) } : {}),
   };
   agents.push(agent);
   saveAgents(agents);
@@ -163,6 +168,7 @@ export interface UpdateAgentInput {
   persona?: string;
   lenses?: string[];
   accountRole?: string | null;
+  contract?: PersonaContract | null;
 }
 
 /** Update fields on an active fixed persona. Returns null if not found / not editable. */
@@ -182,6 +188,13 @@ export function updateAgent(id: string, patch: UpdateAgentInput): Agent | null {
       delete agent.accountRole;
     } else {
       agent.accountRole = requireNonEmptyString(patch.accountRole, "accountRole");
+    }
+  }
+  if (patch.contract !== undefined) {
+    if (patch.contract === null) {
+      delete agent.contract;
+    } else {
+      agent.contract = parsePersonaContract(patch.contract);
     }
   }
 

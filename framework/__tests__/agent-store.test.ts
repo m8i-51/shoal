@@ -115,6 +115,17 @@ describe("addAgent", () => {
     expect(() => addAgent({ name: "A", role: "r", persona: undefined as unknown as string })).toThrow(/persona/i);
     expect(fs.writeFileSync).not.toHaveBeenCalled();
   });
+
+  it("不正な contract は保存せず throw する", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    expect(() => addAgent({
+      name: "B",
+      role: "r",
+      persona: "p",
+      contract: { traits: "x" } as never,
+    })).toThrow(/contract/i);
+    expect(fs.writeFileSync).not.toHaveBeenCalled();
+  });
 });
 
 describe("retireAgent", () => {
@@ -183,6 +194,35 @@ describe("addAgent origin/status", () => {
     expect(agent.role).toBe("趣味で学ぶシニア学習者");
     expect(agent.accountRole).toBe("user");
   });
+
+  it("stores a behavioral contract", () => {
+    const contract = {
+      traits: "speeds through copy, skims numbers, wants a score to show someone",
+      behavioralRules: {
+        discovery: "Thumb-scroll 1–2 screens.",
+        comprehension: "Mash Next on tutorials.",
+        helpSeeking: "Does not search in-app.",
+        exploration: "At most two new screens.",
+      },
+      knowledgeBoundary: {
+        doesNotKnow: ["what the score means"],
+        mayInferFrom: ["visible labels"],
+      },
+      stateRules: {
+        confusionIncreasesWhen: ["unexplained numbers"],
+        confusionDecreasesWhen: ["one sentence of purpose"],
+      },
+      abandonment: ["90 seconds without knowing what the product is"],
+    };
+    const agent = addAgent({
+      name: "Takuma",
+      role: "busy planner",
+      persona: "wants a score",
+      contract,
+    });
+    expect(agent.contract?.traits).toContain("speeds through");
+    expect(agent.contract?.behavioralRules.comprehension).toContain("Mash Next");
+  });
 });
 
 describe("archive/restore/update/list", () => {
@@ -238,6 +278,33 @@ describe("archive/restore/update/list", () => {
     setup([{ ...makeAgent({ id: "f1", origin: "fixed", status: "active" }), accountRole: "user" }]);
     const cleared = updateAgent("f1", { accountRole: null });
     expect(cleared?.accountRole).toBeUndefined();
+  });
+
+  it("updates and clears contract", () => {
+    const contract = {
+      traits: "cautious reader",
+      behavioralRules: {
+        discovery: "Scroll the whole page.",
+        comprehension: "Read every tutorial step.",
+        helpSeeking: "Looks for in-app help.",
+        exploration: "Opens related screens when unsure.",
+      },
+      knowledgeBoundary: {
+        doesNotKnow: ["hidden shortcuts"],
+        mayInferFrom: ["on-screen copy"],
+      },
+      stateRules: {
+        confusionIncreasesWhen: ["jargon without a gloss"],
+        confusionDecreasesWhen: ["a highlighted target matches the explanation"],
+      },
+      abandonment: ["login required before trying"],
+    };
+    setup([makeAgent({ id: "f1", origin: "fixed", status: "active" })]);
+    const updated = updateAgent("f1", { contract });
+    expect(updated?.contract?.traits).toBe("cautious reader");
+    setup([{ ...makeAgent({ id: "f1", origin: "fixed", status: "active" }), contract }]);
+    const cleared = updateAgent("f1", { contract: null });
+    expect(cleared?.contract).toBeUndefined();
   });
 });
 
