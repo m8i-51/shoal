@@ -148,8 +148,8 @@
   },
   "personas": {
     "title": "Fixed Personas",
-    "hint": "Type a short seed (e.g. \"first-time user\"). AI expands it using the app's product spec. Fixed members always join runs.",
-    "seedPlaceholder": "e.g. first-time user / someone hunting for bugs",
+    "hint": "Type a short seed (e.g. \"first-time user\"). AI expands it into a person who behaves differently on the same screen — skip a tutorial, or read every step. Fixed members always join runs.",
+    "seedPlaceholder": "e.g. first-time user who mashes Next / someone who reads every dialog",
     "create": "Create",
     "empty": "No fixed personas yet.",
     "edit": "Edit",
@@ -166,7 +166,21 @@
     "lensesPlaceholder": "Lenses (comma-separated)",
     "seedLabel": "Seed",
     "createFailed": "Could not create persona",
-    "saveFailed": "Could not save persona"
+    "saveFailed": "Could not save persona",
+    "contractTitle": "Behavioral contract",
+    "contractHint": "Same screen, different behavior. The tutorial fork: mash Next unread, or read every step.",
+    "traits": "Traits",
+    "traitsPlaceholder": "e.g. speeds through copy, skims numbers",
+    "discovery": "Discovery",
+    "comprehension": "Comprehension",
+    "helpSeeking": "Help-seeking",
+    "exploration": "Exploration",
+    "doesNotKnow": "Does not know",
+    "mayInferFrom": "May infer from",
+    "confusionIncreases": "Confusion increases when",
+    "confusionDecreases": "Confusion decreases when",
+    "abandonment": "Leaves when",
+    "listPlaceholder": "One item per line"
   },
   "experience": {
     "title": "Experience Score",

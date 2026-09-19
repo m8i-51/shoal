@@ -148,8 +148,8 @@
   },
   "personas": {
     "title": "固定ペルソナ",
-    "hint": "短い種を入力（例:「初めて使う人」）。アプリのプロダクト仕様を読んで AI が広げます。固定メンバーは毎回の run に参加します。",
-    "seedPlaceholder": "例: 初めて使う人 / バグを探している人",
+    "hint": "短い種を入力（例:「初めて使う人」）。同じ画面でも行動が分岐する人に広がります — チュートリアルを飛ばすか、全部読むか。固定メンバーは毎回の run に参加します。",
+    "seedPlaceholder": "例: 次へを連打する人 / 説明を全部読む人",
     "create": "作成",
     "empty": "固定ペルソナはまだありません。",
     "edit": "編集",
@@ -166,7 +166,21 @@
     "lensesPlaceholder": "観点（カンマ区切り）",
     "seedLabel": "種",
     "createFailed": "ペルソナを作成できませんでした",
-    "saveFailed": "ペルソナを保存できませんでした"
+    "saveFailed": "ペルソナを保存できませんでした",
+    "contractTitle": "行動の契約",
+    "contractHint": "同じ画面、違う行動。チュートリアルは「次へ」連打か、全部読むか。",
+    "traits": "行動の特徴",
+    "traitsPlaceholder": "例: スピード重視・情報を取捨選択",
+    "discovery": "発見の仕方",
+    "comprehension": "読み方",
+    "helpSeeking": "助けの求め方",
+    "exploration": "探索の幅",
+    "doesNotKnow": "知らないこと",
+    "mayInferFrom": "推論してよいもの",
+    "confusionIncreases": "混乱が増えるとき",
+    "confusionDecreases": "混乱が減るとき",
+    "abandonment": "離脱するとき",
+    "listPlaceholder": "1行に1項目"
   },
   "experience": {
     "title": "体験スコア",

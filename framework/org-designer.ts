@@ -69,6 +69,10 @@ Avoid professional/specialist titles (QA engineer, PM, auditor) as primary perso
 **If mixed:**
 Balance job-role personas and lifestyle-based end-user personas.
 
+**Behavioral contracts (required):**
+A persona is not a bio. Recruits must differ in observable behavior on the SAME screen — a 4-step first-run tutorial should fork. One person mashes Next and closes it unread (speed, selective attention). Another reads every step (cautious, confirms before proceeding). Write that as Behavioral Rules (Discovery / Comprehension / Help-seeking / Exploration), a Knowledge Boundary (what they do not know — do not give them the feature list just because the model has it), confusion state-update rules, and abandonment thresholds.
+Do not recruit two people who would both read the tutorial carefully. Check existing agents' traits and fill the missing fork.
+
 **Always include as supplement (1–2 personas regardless of app type):**
 - 1 UX evaluator: focuses on visual consistency, interaction patterns, HIG/Material compliance
 - 1 edge-case/accessibility evaluator: focuses on error handling, accessibility, stress scenarios

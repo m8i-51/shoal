@@ -38,6 +38,7 @@ import {
   generatePersonaFromSeed,
   PersonaGenerationError,
 } from "../framework/persona-from-seed.js";
+import { parsePersonaContract, PersonaContractError } from "../framework/persona-contract.js";
 import type { ProductSpec } from "../framework/product-discovery.js";
 import { normalizeProductEdge } from "../framework/product-edge.js";
 import * as log from "../framework/log.js";
@@ -197,6 +198,7 @@ app.post("/api/personas", personaCreateLimiter, async (req, res) => {
       origin: "fixed",
       status: "active",
       seed,
+      contract: generated.contract,
       ...(generated.accountRole ? { accountRole: generated.accountRole } : {}),
     });
     res.status(201).json(agent);
@@ -217,16 +219,29 @@ app.patch("/api/personas/:id", (req, res) => {
     res.status(404).json({ error: "persona not found" });
     return;
   }
-  const { name, role, persona, lenses, accountRole } = req.body as {
+  const { name, role, persona, lenses, accountRole, contract } = req.body as {
     name?: unknown;
     role?: unknown;
     persona?: unknown;
     lenses?: unknown;
     accountRole?: unknown;
+    contract?: unknown;
   };
   if (lenses !== undefined && (!Array.isArray(lenses) || !lenses.every((l) => typeof l === "string"))) {
     res.status(400).json({ error: "lenses must be an array of strings" });
     return;
+  }
+  let parsedContract: ReturnType<typeof parsePersonaContract> | null | undefined;
+  if (contract === null) {
+    parsedContract = null;
+  } else if (contract !== undefined) {
+    try {
+      parsedContract = parsePersonaContract(contract);
+    } catch (e) {
+      const message = e instanceof PersonaContractError ? e.message : "invalid contract";
+      res.status(400).json({ error: message });
+      return;
+    }
   }
   try {
     const updated = updateAgent(id, {
@@ -237,6 +252,7 @@ app.patch("/api/personas/:id", (req, res) => {
       ...(typeof accountRole === "string" || accountRole === null
         ? { accountRole: accountRole as string | null }
         : {}),
+      ...(parsedContract !== undefined ? { contract: parsedContract } : {}),
     });
     if (!updated) {
       res.status(400).json({ error: "persona must be active fixed to edit — restore first" });

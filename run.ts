@@ -19,6 +19,7 @@ import { runToolSession } from "./framework/tool-session";
 import { ToolSessionNoOpError, type ToolResultContent } from "./framework/tool-types";
 import { collectedFindings, initRunLog, saveRunLog, saveFinding, getSwarmSignals, runLog } from "./framework/findings";
 import { loadAgents, addAgent, retireAgent, recordAgentMemories, formatAgentMemories, buildMemoryInputs, isFixedAgent, agentOrigin, resolveAgentAccountRole, type Agent } from "./framework/agent-store";
+import { formatPersonaContract, parsePersonaContract, PERSONA_CONTRACT_GENERATION_SPEC } from "./framework/persona-contract";
 import { computeRosterSlots, buildRunRoster, splitRosterForDispatch, partitionActiveAgents } from "./framework/roster";
 import { updateCoverage, computeWeightedSummary, getLastRunPaths, getFindingHotspots } from "./framework/coverage";
 import {
@@ -408,7 +409,7 @@ async function runExplorer(
   const systemPrompt = `You are "${agent.name}".
 Role: ${agent.role}
 Persona: ${agent.persona}
-
+${formatPersonaContract(agent.contract)}
 You are an employee using "${productSpec.appName}".
 You have API tools only — not a real browser. You cannot click UI controls, toggle themes, open notification panels, use a hamburger menu, or complete OAuth in a page.
 If the assigned task requires a real UI, call post_outcome with achieved=false and say it needs the browser lane.
@@ -553,6 +554,8 @@ ${pathCoverageStep}
 6. Call get_scenarios to see the user test scenarios generated for this run — about 70% of agents will be assigned a scenario, so recruit personas whose background fits those scenarios
 7. Call get_agents to check the current agent roster (archived agents are omitted; origin is included)
 8. Adjust AUTO agents only so that active autos == ${autoSlots}${testAccounts.length > 0 ? "\n   — set accountRole on each new agent to a short token matching an available test account (user, instructor, admin). Keep role as a narrative description of the person" : ""}
+   — every add_agent MUST include a behavioral contract. ${PERSONA_CONTRACT_GENERATION_SPEC}
+   — look at existing agents' contract traits. If the roster already has a tutorial-skipper, recruit a reader (or vice versa). Do not hire two people who would both read a 4-step tutorial carefully.
    — give 1–2 new recruits an "environment" (mobile device, dark mode, non-default locale, slow connection) that naturally fits their persona's life; leave the rest on desktop
 9. Do not retire fixed agents. Only retire autos when above the autoSlots target.`;
 
@@ -620,15 +623,18 @@ ${pathCoverageStep}
             createdAt: a.createdAt,
             origin: agentOrigin(a),
             status: a.status ?? "active",
+            traits: a.contract?.traits,
+            comprehension: a.contract?.behavioralRules.comprehension,
           }));
           log.info(`  [persona-designer] current agents: ${agents.length}`);
         } else if (t.name === "add_agent") {
-          const { name, role, persona, environment, accountRole } = input as {
+          const { name, role, persona, environment, accountRole, contract } = input as {
             name?: string;
             role?: string;
             persona?: string;
             environment?: EnvironmentProfile;
             accountRole?: string;
+            contract?: unknown;
           };
           try {
             const cleanEnv = sanitizeEnvironment(environment);
@@ -640,6 +646,7 @@ ${pathCoverageStep}
               origin: "auto",
               status: "active",
               ...(accountRole?.trim() ? { accountRole: accountRole.trim() } : {}),
+              contract: parsePersonaContract(contract),
             });
             result = agent;
             log.info(`  [persona-designer] created: ${agent.name} (${agent.role})${agent.accountRole ? ` [accountRole: ${agent.accountRole}]` : ""}${cleanEnv ? ` [env: ${Object.entries(cleanEnv).map(([k, v]) => `${k}=${v}`).join(", ")}]` : ""}`);
@@ -676,7 +683,7 @@ ${pathCoverageStep}
       userPrompt: "Design and manage user personas for this run.",
       tools: sessionTools,
       maxIterations: DEFAULT_PERSONA_DESIGNER_ITERATIONS,
-      maxTokens: 1024,
+      maxTokens: 2048,
     });
     log.info("[persona-designer] done");
   } catch (e) {
@@ -801,7 +808,7 @@ async function runBrowserAgent(
   const systemPrompt = `You are "${agent.name}".
 Role: ${agent.role}
 Persona: ${agent.persona}
-
+${formatPersonaContract(agent.contract)}
 You are a real user of "${productSpec.appName}".
 Use the browser tools to navigate the app and carry out everyday tasks.
 
