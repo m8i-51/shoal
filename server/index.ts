@@ -38,7 +38,7 @@ import {
   generatePersonaFromSeed,
   PersonaGenerationError,
 } from "../framework/persona-from-seed.js";
-import { parsePersonaContract, PersonaContractError } from "../framework/persona-contract.js";
+import { parsePersonaContract, PersonaContractError, isBrowserInformationMode, type BrowserInformationMode } from "../framework/persona-contract.js";
 import type { ProductSpec } from "../framework/product-discovery.js";
 import { normalizeProductEdge } from "../framework/product-edge.js";
 import * as log from "../framework/log.js";
@@ -493,18 +493,23 @@ app.get("/api/runs/:runId/report", (req, res) => {
 // API: start a run
 // ----------------------------------------------------------------
 app.post("/api/runs/start", (req, res) => {
-  const { baseUrl, maxBrowsers, maxExplorers, maxThresholds, mode, llmBaseUrl, llmApiKey, llmModel } = req.body as {
+  const { baseUrl, maxBrowsers, maxExplorers, maxThresholds, mode, browserInformation, llmBaseUrl, llmApiKey, llmModel } = req.body as {
     baseUrl?: string;
     maxBrowsers?: number;
     maxExplorers?: number;
     maxThresholds?: number;
     mode?: string;
+    browserInformation?: string;
     llmBaseUrl?: string;
     llmApiKey?: string;
     llmModel?: string;
   };
   if (mode !== undefined && !["read-only", "safe", "full"].includes(mode)) {
     res.status(400).json({ error: "mode must be one of: read-only, safe, full" });
+    return;
+  }
+  if (browserInformation !== undefined && !isBrowserInformationMode(browserInformation)) {
+    res.status(400).json({ error: "browserInformation must be one of: mixed, first-run, informed" });
     return;
   }
   if (!isValidAgentCount(maxBrowsers) || !isValidAgentCount(maxExplorers) || !isValidAgentCount(maxThresholds)) {
@@ -524,7 +529,17 @@ app.post("/api/runs/start", (req, res) => {
     res.status(400).json({ error: "llmApiKey is required when llmBaseUrl is set" });
     return;
   }
-  const sessionId = spawnRun({ baseUrl, maxBrowsers, maxExplorers, maxThresholds, mode, llmBaseUrl, llmApiKey, llmModel });
+  const sessionId = spawnRun({
+    baseUrl,
+    maxBrowsers,
+    maxExplorers,
+    maxThresholds,
+    mode,
+    browserInformation: browserInformation as BrowserInformationMode | undefined,
+    llmBaseUrl,
+    llmApiKey,
+    llmModel,
+  });
   res.json({ sessionId });
 });
 

@@ -68,6 +68,15 @@
       "safe": "Creating/editing data is allowed; irreversible actions (delete / pay / send) are avoided.",
       "full": "No restrictions. Use only against disposable environments."
     },
+    "browserInformation": "Browser information",
+    "browserInformationMixed": "Mixed (follow personas)",
+    "browserInformationFirstRun": "All first-run (screen only)",
+    "browserInformationInformed": "All explorers",
+    "browserInformationHint": {
+      "mixed": "Each browser persona keeps their own setting. First-run people get no spec and no logs.",
+      "first-run": "Every browser agent this run is first-run: no spec, no console, screen only. API and threshold agents stay informed.",
+      "informed": "Every browser agent this run gets the product brief and diagnostic tools, even if their persona is first-run."
+    },
     "fixedRosterHint": "If you have fixed personas, the run may raise agent counts so all of them join."
   },
   "duration": {
@@ -180,7 +189,11 @@
     "confusionIncreases": "Confusion increases when",
     "confusionDecreases": "Confusion decreases when",
     "abandonment": "Leaves when",
-    "listPlaceholder": "One item per line"
+    "listPlaceholder": "One item per line",
+    "information": "What they know",
+    "informationHint": "First-run: no spec, no logs — the screen only. Explorer: today's briefing and diagnostic tools.",
+    "informationInformed": "Explorer",
+    "informationFirstRun": "First-run (screen only)"
   },
   "experience": {
     "title": "Experience Score",

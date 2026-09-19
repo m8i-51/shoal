@@ -1,7 +1,7 @@
 # First-run personas (knowledge + observation subtraction)
 
 **Date:** 2026-09-19  
-**Status:** Plan — not implemented  
+**Status:** Implemented  
 **Depends on:** behavioral persona contracts (`information` lives on the contract; omitted → `informed`)
 
 ## Problem

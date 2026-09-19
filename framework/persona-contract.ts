@@ -30,6 +30,14 @@ export interface PersonaStateRules {
   confusionDecreasesWhen: string[];
 }
 
+export const PERSONA_INFORMATION = ["informed", "first-run"] as const;
+export type PersonaInformation = (typeof PERSONA_INFORMATION)[number];
+
+export const BROWSER_INFORMATION_MODES = ["mixed", "first-run", "informed"] as const;
+export type BrowserInformationMode = (typeof BROWSER_INFORMATION_MODES)[number];
+
+export type AgentLane = "browser" | "explorer" | "threshold" | "regression";
+
 export interface PersonaContract {
   /** Short behavioral signature shown in the roster (not age/job). */
   traits: string;
@@ -37,6 +45,8 @@ export interface PersonaContract {
   knowledgeBoundary: PersonaKnowledgeBoundary;
   stateRules: PersonaStateRules;
   abandonment: string[];
+  /** Omitted on legacy contracts → informed. */
+  information?: PersonaInformation;
 }
 
 const TRAITS_MAX = 160;
@@ -56,7 +66,8 @@ Fields:
 - knowledgeBoundary.doesNotKnow: product facts they do not have. Do NOT pour the feature list into their head just because the model knows it.
 - knowledgeBoundary.mayInferFrom: what they may use (visible labels, buttons, as much body copy as Comprehension allows)
 - stateRules.confusionIncreasesWhen / confusionDecreasesWhen: observable conditions
-- abandonment: stop conditions; any one is enough to leave`;
+- abandonment: stop conditions; any one is enough to leave
+- information: "informed" (default — gets the product brief and diagnostic tools) or "first-run" (screen only: no spec, no console, no a11y tree). If the active roster has no first-run person and this recruit is a new-user lens, set first-run. Never set first-run on accessibility or security specialists.`;
 
 function clip(value: string, max: number): string {
   return value.length <= max ? value : value.slice(0, max);
@@ -85,6 +96,54 @@ function requireStringList(value: unknown, field: string): string[] {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isPersonaInformation(value: unknown): value is PersonaInformation {
+  return value === "informed" || value === "first-run";
+}
+
+export function isBrowserInformationMode(value: unknown): value is BrowserInformationMode {
+  return value === "mixed" || value === "first-run" || value === "informed";
+}
+
+/** Missing or unknown contract.information → informed. Only "first-run" is poor. */
+export function personaInformation(contract: PersonaContract | undefined): PersonaInformation {
+  return contract?.information === "first-run" ? "first-run" : "informed";
+}
+
+/** Missing or unknown start-run mode → mixed. */
+export function parseBrowserInformationMode(raw: unknown): BrowserInformationMode {
+  return isBrowserInformationMode(raw) ? raw : "mixed";
+}
+
+export function effectiveInformation(
+  contract: PersonaContract | undefined,
+  opts: { mode: BrowserInformationMode; lane: AgentLane },
+): PersonaInformation {
+  switch (opts.lane) {
+    case "explorer":
+    case "threshold":
+    case "regression":
+      return "informed";
+    case "browser": {
+      switch (opts.mode) {
+        case "first-run":
+          return "first-run";
+        case "informed":
+          return "informed";
+        case "mixed":
+          return personaInformation(contract);
+        default: {
+          const _exhaustive: never = opts.mode;
+          return _exhaustive;
+        }
+      }
+    }
+    default: {
+      const _exhaustive: never = opts.lane;
+      return _exhaustive;
+    }
+  }
 }
 
 /** Parse a full contract. Throws PersonaContractError on any missing/invalid field. */
@@ -122,6 +181,7 @@ export function parsePersonaContract(raw: unknown): PersonaContract {
       confusionDecreasesWhen: requireStringList(stateRaw.confusionDecreasesWhen, "stateRules.confusionDecreasesWhen"),
     },
     abandonment: requireStringList(raw.abandonment, "abandonment"),
+    ...(isPersonaInformation(raw.information) ? { information: raw.information } : {}),
   };
 }
 
@@ -145,8 +205,41 @@ export function formatContractSummary(contract: PersonaContract): string {
   return `${contract.traits} — ${contract.behavioralRules.comprehension}`;
 }
 
+function knowledgeClause(information: PersonaInformation): string {
+  switch (information) {
+    case "first-run":
+      return "You have no product brief. The screen is the product. Facts in \"does not know\" stay unknown until you see them on the screen — and only if Comprehension lets you read them.";
+    case "informed":
+      return "Treat [Implemented Features] / [App Overview] as swarm background, not as your personal knowledge. Facts in \"does not know\" stay unknown until you see them on the screen — and only if Comprehension lets you read them.";
+    default: {
+      const _exhaustive: never = information;
+      return _exhaustive;
+    }
+  }
+}
+
+function contractPreamble(information: PersonaInformation): string {
+  switch (information) {
+    case "first-run":
+      return `This contract is how you actually use the app. It outranks being a thorough tester.
+If a tutorial, dialog, or long explanation appears: follow Comprehension, not diligence. A skipper skips. A reader reads.
+When this contract conflicts with "explore thoroughly", the contract wins.`;
+    case "informed":
+      return `This contract is how you actually use the app. It outranks being a thorough tester, and it outranks the feature list below.
+If a tutorial, dialog, or long explanation appears: follow Comprehension, not diligence. A skipper skips. A reader reads.
+When this contract conflicts with "explore thoroughly" or with [Implemented Features], the contract wins.`;
+    default: {
+      const _exhaustive: never = information;
+      return _exhaustive;
+    }
+  }
+}
+
 /** System-prompt block. Empty string when the agent has no contract (legacy roster). */
-export function formatPersonaContract(contract: PersonaContract | undefined): string {
+export function formatPersonaContract(
+  contract: PersonaContract | undefined,
+  information: PersonaInformation = personaInformation(contract),
+): string {
   if (!contract) return "";
 
   const doesNotKnow = contract.knowledgeBoundary.doesNotKnow.map((s) => `- ${s}`).join("\n");
@@ -157,9 +250,7 @@ export function formatPersonaContract(contract: PersonaContract | undefined): st
 
   return `
 [Your Behavioral Contract]
-This contract is how you actually use the app. It outranks being a thorough tester, and it outranks the feature list below.
-If a tutorial, dialog, or long explanation appears: follow Comprehension, not diligence. A skipper skips. A reader reads.
-When this contract conflicts with "explore thoroughly" or with [Implemented Features], the contract wins.
+${contractPreamble(information)}
 
 Traits: ${contract.traits}
 
@@ -173,7 +264,7 @@ What you do not know:
 ${doesNotKnow}
 You may infer only from:
 ${mayInfer}
-Treat [Implemented Features] / [App Overview] as swarm background, not as your personal knowledge. Facts in "does not know" stay unknown until you see them on the screen — and only if Comprehension lets you read them.
+${knowledgeClause(information)}
 
 Confusion increases when:
 ${up}
@@ -225,6 +316,12 @@ export const PERSONA_CONTRACT_TOOL_SCHEMA = {
       type: "array",
       items: { type: "string" },
       description: "Stop conditions; any one is enough to leave",
+    },
+    information: {
+      type: "string",
+      enum: ["informed", "first-run"],
+      description:
+        "informed (default): product brief + diagnostic tools. first-run: screen only. Use first-run for a new-user if the roster has none; never for a11y/security specialists.",
     },
   },
   required: ["traits", "behavioralRules", "knowledgeBoundary", "stateRules", "abandonment"],

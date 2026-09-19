@@ -25,8 +25,9 @@ At runtime, browser and API agents get `[Your Behavioral Contract]`. It outranks
 ## Out of scope
 
 - A/B preference scoring / pairwise rating of isolated screenshots
-- A separate screenshot-only "naive" lane (observation-channel subtraction)
 - Treating abandonment reports as ground truth rather than hypotheses
 - Scaling to hundreds of personas
+
+Knowledge and observation subtraction for selected browser agents is in [2026-09-19-first-run-persona.md](2026-09-19-first-run-persona.md).
 
 Triage and Product Edge stay as they are: a skipper who "needs an onboarding wizard" is still a finding, and `edge-risk` still marks the ones that would sand the product down.

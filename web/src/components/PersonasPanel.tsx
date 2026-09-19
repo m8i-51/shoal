@@ -20,6 +20,7 @@ interface PersonaContract {
     confusionDecreasesWhen: string[];
   };
   abandonment: string[];
+  information?: "informed" | "first-run";
 }
 
 interface Persona {
@@ -51,6 +52,7 @@ interface PersonaDraft {
   confusionIncreasesWhen: string;
   confusionDecreasesWhen: string;
   abandonment: string;
+  information: "informed" | "first-run";
 }
 
 const EMPTY_DRAFT: PersonaDraft = {
@@ -69,6 +71,7 @@ const EMPTY_DRAFT: PersonaDraft = {
   confusionIncreasesWhen: "",
   confusionDecreasesWhen: "",
   abandonment: "",
+  information: "informed",
 };
 
 function joinLines(items: string[] | undefined): string {
@@ -97,6 +100,7 @@ function draftFromPersona(p: Persona): PersonaDraft {
     confusionIncreasesWhen: joinLines(c?.stateRules.confusionIncreasesWhen),
     confusionDecreasesWhen: joinLines(c?.stateRules.confusionDecreasesWhen),
     abandonment: joinLines(c?.abandonment),
+    information: c?.information === "first-run" ? "first-run" : "informed",
   };
 }
 
@@ -131,6 +135,7 @@ function contractFromDraft(d: PersonaDraft): PersonaContract | null {
       confusionDecreasesWhen: splitLines(d.confusionDecreasesWhen),
     },
     abandonment: splitLines(d.abandonment),
+    information: d.information,
   };
 }
 
@@ -333,6 +338,26 @@ export function PersonasPanel() {
                   />
                   <p style={styles.contractLabel}>{t("personas.contractTitle")}</p>
                   <p style={styles.contractHint}>{t("personas.contractHint")}</p>
+                  <p style={styles.contractLabel}>{t("personas.information")}</p>
+                  <p style={styles.contractHint}>{t("personas.informationHint")}</p>
+                  <div style={styles.segment} role="group" aria-label={t("personas.information")}>
+                    <button
+                      type="button"
+                      style={draft.information === "informed" ? styles.segmentOn : styles.segmentOff}
+                      aria-pressed={draft.information === "informed"}
+                      onClick={() => setDraft((prev) => ({ ...prev, information: "informed" }))}
+                    >
+                      {t("personas.informationInformed")}
+                    </button>
+                    <button
+                      type="button"
+                      style={draft.information === "first-run" ? styles.segmentOn : styles.segmentOff}
+                      aria-pressed={draft.information === "first-run"}
+                      onClick={() => setDraft((prev) => ({ ...prev, information: "first-run" }))}
+                    >
+                      {t("personas.informationFirstRun")}
+                    </button>
+                  </div>
                   <input
                     style={styles.input}
                     value={draft.traits}
@@ -438,6 +463,12 @@ export function PersonasPanel() {
                   )}
                   {p.contract && (
                     <div style={styles.contractBlock}>
+                      <p style={styles.rule}>
+                        <span style={styles.ruleLabel}>{t("personas.information")}</span>
+                        {p.contract.information === "first-run"
+                          ? t("personas.informationFirstRun")
+                          : t("personas.informationInformed")}
+                      </p>
                       <p style={styles.rule}>
                         <span style={styles.ruleLabel}>{t("personas.comprehension")}</span>
                         {p.contract.behavioralRules.comprehension}
@@ -622,6 +653,29 @@ const styles = {
     fontSize: "0.7rem",
     color: "#64748b",
     margin: "0.15rem 0 0.35rem",
+  },
+  segment: {
+    display: "flex",
+    gap: "0.35rem",
+    margin: "0 0 0.5rem",
+  },
+  segmentOn: {
+    fontSize: "0.75rem",
+    padding: "0.3rem 0.6rem",
+    borderRadius: "6px",
+    border: "1px solid #334155",
+    background: "#1e293b",
+    color: "#f8fafc",
+    cursor: "pointer",
+  },
+  segmentOff: {
+    fontSize: "0.75rem",
+    padding: "0.3rem 0.6rem",
+    borderRadius: "6px",
+    border: "1px solid #cbd5e1",
+    background: "#fff",
+    color: "#334155",
+    cursor: "pointer",
   },
   rule: {
     fontSize: "0.75rem",

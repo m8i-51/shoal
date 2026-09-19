@@ -39,6 +39,7 @@ personas:
       abandonment:
         - "login or email required before trying the product"
         - "a paywall with no remaining balance shown"
+      information: first-run
 
   - name: "Kenji"
     role: "busy planner"
@@ -70,6 +71,7 @@ personas:
         - "90 seconds without knowing what the product is"
         - "asked to log in before trying it"
         - "unexpected balance shortage or payment prompt"
+      information: first-run
 
   - name: "Mika"
     role: "accessibility-focused user"

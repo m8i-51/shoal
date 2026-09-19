@@ -8,7 +8,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { Tool } from "./llm-client";
 import { SUGGESTED_DEVICES } from "./environment";
-import { PERSONA_CONTRACT_TOOL_SCHEMA } from "./persona-contract";
+import { PERSONA_CONTRACT_TOOL_SCHEMA, type PersonaInformation } from "./persona-contract";
 
 // ================================================================
 // API agent tools
@@ -311,4 +311,55 @@ export function browserTools(appTools: Tool[], includeApiTools: boolean): Anthro
       },
     },
   ];
+}
+
+export const FIRST_RUN_BROWSER_TOOL_NAMES = [
+  "view_screen",
+  "navigate",
+  "click",
+  "fill",
+  "select",
+  "post_feedback",
+  "post_outcome",
+] as const;
+
+const FIRST_RUN_CLICK: Anthropic.Tool = {
+  name: "click",
+  description:
+    "Click a button, link, or tab you can see. Use the visible name. / 見えている名前でクリックする",
+  input_schema: {
+    type: "object",
+    properties: {
+      description: {
+        type: "string",
+        description: "Visible name or a description of the control (partial name match is OK).",
+      },
+    },
+    required: [],
+  },
+};
+
+function isApiCheckTool(tool: Anthropic.Tool): boolean {
+  return (tool.description ?? "").startsWith("[API check]");
+}
+
+/** Strip diagnostic / API-check tools for first-run browser agents. Informed is a no-op. */
+export function browserToolsForInformation(
+  tools: Anthropic.Tool[],
+  information: PersonaInformation,
+): Anthropic.Tool[] {
+  switch (information) {
+    case "informed":
+      return tools;
+    case "first-run": {
+      const allowed = new Set<string>(FIRST_RUN_BROWSER_TOOL_NAMES);
+      return tools
+        .filter((t) => allowed.has(t.name) && !isApiCheckTool(t))
+        .map((t) => (t.name === "click" ? FIRST_RUN_CLICK : t));
+    }
+    default: {
+      const _exhaustive: never = information;
+      return _exhaustive;
+    }
+  }
 }

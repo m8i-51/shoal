@@ -68,6 +68,15 @@
       "safe": "データ作成・編集は許可し、削除・支払い・送信などの不可逆操作を抑止します。",
       "full": "制限なし。使い捨て環境でのみ使用してください。"
     },
+    "browserInformation": "ブラウザの情報",
+    "browserInformationMixed": "混在（ペルソナに従う）",
+    "browserInformationFirstRun": "全員初見（画面だけ）",
+    "browserInformationInformed": "全員探索者",
+    "browserInformationHint": {
+      "mixed": "各ブラウザペルソナの設定に従う。初見の人には仕様もログも渡さない。",
+      "first-run": "この run のブラウザは全員初見。仕様もコンソールも渡さない。API・しきい値は探索者のまま。",
+      "informed": "この run のブラウザは全員探索者。ペルソナが初見でも仕様と診断ツールを渡す。"
+    },
     "fixedRosterHint": "固定ペルソナがいる場合、全員が参加できるようエージェント数が自動で増えることがあります。"
   },
   "duration": {
@@ -180,7 +189,11 @@
     "confusionIncreases": "混乱が増えるとき",
     "confusionDecreases": "混乱が減るとき",
     "abandonment": "離脱するとき",
-    "listPlaceholder": "1行に1項目"
+    "listPlaceholder": "1行に1項目",
+    "information": "情報",
+    "informationHint": "初見はこの人に仕様もログも渡さない。探索者は今までどおり。",
+    "informationInformed": "探索者",
+    "informationFirstRun": "初見（画面だけ）"
   },
   "experience": {
     "title": "体験スコア",

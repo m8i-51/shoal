@@ -13,6 +13,9 @@ import {
   tryParsePersonaContract,
   formatPersonaContract,
   formatContractSummary,
+  personaInformation,
+  parseBrowserInformationMode,
+  effectiveInformation,
   PersonaContractError,
 } from "../persona-contract";
 import { sampleContract } from "./persona-contract-fixtures";
@@ -60,6 +63,13 @@ describe("parsePersonaContract", () => {
     expect(() => parsePersonaContract({ ...sampleContract(), abandonment: [] })).toThrow(/abandonment/i);
     expect(() => parsePersonaContract(null)).toThrow(/object/i);
   });
+
+  it("keeps information when it is informed or first-run, and drops unknown values", () => {
+    expect(parsePersonaContract({ ...sampleContract(), information: "first-run" }).information).toBe("first-run");
+    expect(parsePersonaContract({ ...sampleContract(), information: "informed" }).information).toBe("informed");
+    expect(parsePersonaContract({ ...sampleContract(), information: "naive" }).information).toBeUndefined();
+    expect(parsePersonaContract(sampleContract()).information).toBeUndefined();
+  });
 });
 
 describe("tryParsePersonaContract", () => {
@@ -92,6 +102,45 @@ describe("formatPersonaContract", () => {
     expect(text).toContain("what the score means");
     expect(text).toContain("the contract wins");
     expect(text).toContain("post_feedback");
+  });
+
+  it("does not mention the feature list when the effective information is first-run", () => {
+    const text = formatPersonaContract(sampleContract({ information: "first-run" }), "first-run");
+    expect(text).toContain("The screen is the product");
+    expect(text).not.toContain("[Implemented Features]");
+    expect(text).not.toContain("feature list below");
+  });
+});
+
+describe("personaInformation / effectiveInformation", () => {
+  it("treats missing and unknown information as informed", () => {
+    expect(personaInformation(undefined)).toBe("informed");
+    expect(personaInformation(sampleContract())).toBe("informed");
+    expect(personaInformation(sampleContract({ information: "first-run" }))).toBe("first-run");
+  });
+
+  it("parses start-run browserInformation, defaulting unknown values to mixed", () => {
+    expect(parseBrowserInformationMode("mixed")).toBe("mixed");
+    expect(parseBrowserInformationMode("first-run")).toBe("first-run");
+    expect(parseBrowserInformationMode("informed")).toBe("informed");
+    expect(parseBrowserInformationMode(undefined)).toBe("mixed");
+    expect(parseBrowserInformationMode("naive")).toBe("mixed");
+  });
+
+  it("keeps explorer/threshold/regression informed even when the run is first-run", () => {
+    const firstRun = sampleContract({ information: "first-run" });
+    expect(effectiveInformation(firstRun, { mode: "first-run", lane: "explorer" })).toBe("informed");
+    expect(effectiveInformation(firstRun, { mode: "first-run", lane: "threshold" })).toBe("informed");
+    expect(effectiveInformation(firstRun, { mode: "first-run", lane: "regression" })).toBe("informed");
+  });
+
+  it("applies run mode on the browser lane", () => {
+    const firstRun = sampleContract({ information: "first-run" });
+    const informed = sampleContract();
+    expect(effectiveInformation(informed, { mode: "first-run", lane: "browser" })).toBe("first-run");
+    expect(effectiveInformation(firstRun, { mode: "informed", lane: "browser" })).toBe("informed");
+    expect(effectiveInformation(firstRun, { mode: "mixed", lane: "browser" })).toBe("first-run");
+    expect(effectiveInformation(informed, { mode: "mixed", lane: "browser" })).toBe("informed");
   });
 });
 

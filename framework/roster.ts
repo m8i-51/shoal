@@ -1,5 +1,6 @@
 import type { Agent } from "./agent-store";
 import { agentOrigin, isActiveAgent, isFixedAgent } from "./agent-store";
+import { personaInformation } from "./persona-contract";
 
 export interface RosterSlotInput {
   maxBrowsers: number;
@@ -81,6 +82,9 @@ export interface RosterDispatch<T extends Agent> {
  * Split a single run roster into explorer / browser lanes.
  * No agent is assigned to more than one lane.
  * Prefer putting fixed agents into browser slots first (primary UX surface).
+ * When there are at least two browser slots and the roster has both first-run
+ * and informed people, put one of each in the browser lane so mixed runs mix.
+ * First-run agents prefer browser slots (they are useless as API explorers).
  * Regression is an extra browser job, not taken from the explorer pool.
  */
 export function splitRosterForDispatch<T extends Agent>(
@@ -91,30 +95,50 @@ export function splitRosterForDispatch<T extends Agent>(
   const maxExplorers = Math.max(0, Math.floor(caps.maxExplorers));
   const remaining = [...roster];
 
-  const take = (count: number, preferFixed: boolean): T[] => {
+  const isFirstRun = (a: T): boolean => personaInformation(a.contract) === "first-run";
+
+  const takeMatching = (count: number, pred: (a: T) => boolean): T[] => {
     const selected: T[] = [];
     if (count <= 0) return selected;
-
-    if (preferFixed) {
-      for (let i = 0; i < remaining.length && selected.length < count; ) {
-        if (agentOrigin(remaining[i]) === "fixed") {
-          selected.push(remaining.splice(i, 1)[0]);
-        } else {
-          i++;
-        }
+    for (let i = 0; i < remaining.length && selected.length < count; ) {
+      if (pred(remaining[i])) {
+        selected.push(remaining.splice(i, 1)[0]);
+      } else {
+        i++;
       }
     }
+    return selected;
+  };
 
+  const takeAny = (count: number): T[] => {
+    const selected: T[] = [];
     while (selected.length < count && remaining.length > 0) {
       selected.push(remaining.shift()!);
     }
     return selected;
   };
 
-  const browsers = take(maxBrowsers, true);
+  const browsers: T[] = [];
+  if (maxBrowsers >= 2) {
+    const hasFirstRun = remaining.some(isFirstRun);
+    const hasInformed = remaining.some((a) => !isFirstRun(a));
+    if (hasFirstRun && hasInformed) {
+      browsers.push(...takeMatching(1, (a) => isFirstRun(a) && agentOrigin(a) === "fixed"));
+      if (!browsers.some(isFirstRun)) browsers.push(...takeMatching(1, isFirstRun));
+      browsers.push(...takeMatching(1, (a) => !isFirstRun(a) && agentOrigin(a) === "fixed"));
+      if (!browsers.some((a) => !isFirstRun(a))) browsers.push(...takeMatching(1, (a) => !isFirstRun(a)));
+    }
+  }
 
-  // Regression runs as a browser job (see run.ts), not as an API explorer.
-  const explorers = maxExplorers > 0 ? take(maxExplorers, true) : [];
+  browsers.push(...takeMatching(maxBrowsers - browsers.length, (a) => agentOrigin(a) === "fixed"));
+  browsers.push(...takeMatching(maxBrowsers - browsers.length, isFirstRun));
+  browsers.push(...takeAny(maxBrowsers - browsers.length));
+
+  const explorers: T[] = [];
+  if (maxExplorers > 0) {
+    explorers.push(...takeMatching(maxExplorers, (a) => agentOrigin(a) === "fixed"));
+    explorers.push(...takeAny(maxExplorers - explorers.length));
+  }
   const regression: T | null = null;
 
   return { explorers, browsers, regression };
