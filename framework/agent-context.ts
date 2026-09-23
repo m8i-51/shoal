@@ -51,22 +51,26 @@ export async function withAgentContext<T>(
 ): Promise<T> {
   const { browser, agentId, agentName, mode, runId, trace, saveSession, onPage } = options;
   const context = await browser.newContext(options.contextOptions);
-  await applyBrowserGuardrails(context, mode);
-  if (trace) {
-    try {
-      await context.tracing.start({ screenshots: true, snapshots: true });
-    } catch (e) {
-      log.warn(`[trace] failed to start for ${agentName}:`, e);
-    }
-  }
-  const page = await context.newPage();
-  if (onPage) await onPage(page);
+  let tracingStarted = false;
+  let bodyStarted = false;
   try {
+    await applyBrowserGuardrails(context, mode);
+    if (trace) {
+      try {
+        await context.tracing.start({ screenshots: true, snapshots: true });
+        tracingStarted = true;
+      } catch (e) {
+        log.warn(`[trace] failed to start for ${agentName}:`, e);
+      }
+    }
+    const page = await context.newPage();
+    if (onPage) await onPage(page);
+    bodyStarted = true;
     return await run(page, context);
   } finally {
     // close 前に呼ぶ必要がある
-    if (saveSession) await saveAgentSession(context, agentId);
-    if (trace) {
+    if (saveSession && bodyStarted) await saveAgentSession(context, agentId);
+    if (tracingStarted) {
       const tracePath = traceAgentZipPath(runId, agentId);
       try {
         fs.mkdirSync(path.dirname(tracePath), { recursive: true });

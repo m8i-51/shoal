@@ -109,6 +109,38 @@ describe("withAgentContext", () => {
     expect(context.close).toHaveBeenCalled();
   });
 
+  it("初期化（onPage）が失敗しても context は閉じ、セッションは保存しない", async () => {
+    const { browser, context, tracing } = makeBrowser();
+    await expect(
+      withAgentContext(
+        options({
+          browser,
+          trace: true,
+          saveSession: true,
+          onPage: async () => {
+            throw new Error("cdp init failed");
+          },
+        }),
+        async () => undefined,
+      ),
+    ).rejects.toThrow("cdp init failed");
+    expect(context.close).toHaveBeenCalled();
+    expect(saveAgentSession).not.toHaveBeenCalled();
+    expect(tracing.stop).toHaveBeenCalled();
+  });
+
+  it("guardrails 適用が失敗しても context は閉じる", async () => {
+    const { browser, context, tracing } = makeBrowser();
+    vi.mocked(applyBrowserGuardrails).mockRejectedValueOnce(new Error("guardrail failed"));
+    await expect(
+      withAgentContext(options({ browser, trace: true, saveSession: true }), async () => undefined),
+    ).rejects.toThrow("guardrail failed");
+    expect(context.close).toHaveBeenCalled();
+    expect(tracing.start).not.toHaveBeenCalled();
+    expect(tracing.stop).not.toHaveBeenCalled();
+    expect(saveAgentSession).not.toHaveBeenCalled();
+  });
+
   it("tracing.start が失敗しても本体は走る", async () => {
     const { browser, tracing } = makeBrowser();
     tracing.start.mockRejectedValueOnce(new Error("no trace"));
