@@ -167,7 +167,11 @@ const VERIFY_FINDING = parseVerifyFinding();
 
 function focusPrompt(): string {
   if (FOCUS_PATHS.length === 0) return "";
-  return `\n[Focus Paths for This Run]\nRecent code changes affect these areas — spend most of your session here:\n${FOCUS_PATHS.map((p) => `- ${p}`).join("\n")}\nExplore these paths first and in depth. Only wander elsewhere once they are exhausted.`;
+  return `
+[Focus Paths for This Run]
+Recent code changes affect these areas — spend most of your session here:
+${FOCUS_PATHS.map((p) => `- ${p}`).join("\n")}
+Explore these paths first and in depth. Only wander elsewhere once they are exhausted.`;
 }
 
 // エージェントへの割り当て。actor はマルチアクターシナリオで同時に動く役割
@@ -401,7 +405,37 @@ async function runExplorer(
   };
   runLog.agents.push(agentLog);
 
-  const systemPrompt = `You are "${agent.name}".\nRole: ${agent.role}\nPersona: ${agent.persona}\n\nYou are an employee using "${productSpec.appName}".\nYou have API tools only — not a real browser. You cannot click UI controls, toggle themes, open notification panels, use a hamburger menu, or complete OAuth in a page.\nIf the assigned task requires a real UI, call post_outcome with achieved=false and say it needs the browser lane.\n\nUse the tools to interact with the app.\n\n${productSpec.appDescription}\n\nIf you notice anything inconvenient, a missing feature, or bug-like behavior,\nreport it with the post_feedback tool.\n\nWhen writing the body, match the tone to the category:\n- bug: technical ("The endpoint returned 500 when...", "Expected X but got Y")\n- ux: experiential ("I tried to find the button but...", "It was unclear what would happen if...")\n- feature-request: aspirational ("It would have been useful if...", "I wished I could...")\n- goal-gap: goal-oriented ("I was trying to X, but couldn't because...")\n\n[Implemented Features]\n${productSpec.features}\n${productSpec.uiFeatures ? `\n[UI-Only Features]\nThese features exist in the UI but may not be reflected in API responses. Keep them in mind when interpreting API results.\n${productSpec.uiFeatures}\n` : ""}${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${goalsSection(productSpec)}${assignment.scenario\n    ? `\n[Your Task for This Run]\nTitle: ${assignment.scenario.title}\nYou are: ${assignment.scenario.context}\nGoal: ${assignment.scenario.goal}\nConstraints: ${assignment.scenario.constraints}\n\nFocus on completing this task naturally. Report any issues you encounter along the way.\nWhen done (or if you cannot complete the goal), call post_outcome with achieved=true/false and a brief reason.\n`\n    : assignment.lens\n    ? `\n[Focus Area for This Run]\n${assignment.lens}\nKeep this perspective in mind and prioritize reporting related issues.\n`\n    : ""}${focusPrompt()}${formatAgentMemories(agent)}${guardrailPrompt(SHOAL_MODE)}\nTake 3–5 actions, then finish.\n\n${untrustedContentPrompt()}`;
+  const systemPrompt = `You are "${agent.name}".
+Role: ${agent.role}
+Persona: ${agent.persona}
+
+You are an employee using "${productSpec.appName}".
+You have API tools only — not a real browser. You cannot click UI controls, toggle themes, open notification panels, use a hamburger menu, or complete OAuth in a page.
+If the assigned task requires a real UI, call post_outcome with achieved=false and say it needs the browser lane.
+
+Use the tools to interact with the app.
+
+${productSpec.appDescription}
+
+If you notice anything inconvenient, a missing feature, or bug-like behavior,
+report it with the post_feedback tool.
+
+When writing the body, match the tone to the category:
+- bug: technical ("The endpoint returned 500 when...", "Expected X but got Y")
+- ux: experiential ("I tried to find the button but...", "It was unclear what would happen if...")
+- feature-request: aspirational ("It would have been useful if...", "I wished I could...")
+- goal-gap: goal-oriented ("I was trying to X, but couldn't because...")
+
+[Implemented Features]
+${productSpec.features}
+${productSpec.uiFeatures ? `\n[UI-Only Features]\nThese features exist in the UI but may not be reflected in API responses. Keep them in mind when interpreting API results.\n${productSpec.uiFeatures}\n` : ""}${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${goalsSection(productSpec)}${assignment.scenario
+    ? `\n[Your Task for This Run]\nTitle: ${assignment.scenario.title}\nYou are: ${assignment.scenario.context}\nGoal: ${assignment.scenario.goal}\nConstraints: ${assignment.scenario.constraints}\n\nFocus on completing this task naturally. Report any issues you encounter along the way.\nWhen done (or if you cannot complete the goal), call post_outcome with achieved=true/false and a brief reason.\n`
+    : assignment.lens
+    ? `\n[Focus Area for This Run]\n${assignment.lens}\nKeep this perspective in mind and prioritize reporting related issues.\n`
+    : ""}${focusPrompt()}${formatAgentMemories(agent)}${guardrailPrompt(SHOAL_MODE)}
+Take 3–5 actions, then finish.
+
+${untrustedContentPrompt()}`;
 
   await runAgentLoop(agentLog, systemPrompt, EXPLORER_TOOLS, client, defaultModel, makeExecutor(agentLog, scenarioOutcomes, assignment.scenario), llmProvider);
   log.info(`[explorer] ${agent.name} done`);
@@ -434,7 +468,26 @@ async function runRegressionAgent(
     .map((i) => `- Issue ${i.number}: ${i.title}\n  ${i.body.slice(0, 200).replace(/\n/g, " ")}`)
     .join("\n");
 
-  const systemPrompt = `You are "${agent.name}". Act as a QA engineer.\n\nYou have API tools only — not a real browser. Do not mark a UI-only bug (theme, OAuth page, hamburger, notification panel, layout) as verified or regressed from API evidence. Skip those.\n\nThe following Issues have been closed as fixed. Verify they are actually fixed via API when that is enough.\n\n[Issues to Verify]\n${issueList}\n\n[Steps]\n1. Read each Issue and perform actions that could reproduce it\n2. If the problem reoccurs, report it with report_regression\n3. If the problem is gone, record it with mark_verified\n4. Finish after checking all items\n\n[Reference: Implemented Features]\n${productSpec.features}\n${productSpec.uiFeatures ? `\n[UI-Only Features]\nThese features exist in the UI but may not be reflected in API responses.\n${productSpec.uiFeatures}\n` : ""}${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${goalsSection(productSpec)}${guardrailPrompt(SHOAL_MODE)}\n\n${untrustedContentPrompt()}`;
+  const systemPrompt = `You are "${agent.name}". Act as a QA engineer.
+
+You have API tools only — not a real browser. Do not mark a UI-only bug (theme, OAuth page, hamburger, notification panel, layout) as verified or regressed from API evidence. Skip those.
+
+The following Issues have been closed as fixed. Verify they are actually fixed via API when that is enough.
+
+[Issues to Verify]
+${issueList}
+
+[Steps]
+1. Read each Issue and perform actions that could reproduce it
+2. If the problem reoccurs, report it with report_regression
+3. If the problem is gone, record it with mark_verified
+4. Finish after checking all items
+
+[Reference: Implemented Features]
+${productSpec.features}
+${productSpec.uiFeatures ? `\n[UI-Only Features]\nThese features exist in the UI but may not be reflected in API responses.\n${productSpec.uiFeatures}\n` : ""}${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${goalsSection(productSpec)}${guardrailPrompt(SHOAL_MODE)}
+
+${untrustedContentPrompt()}`;
 
   await runAgentLoop(
     agentLog,
@@ -479,7 +532,29 @@ async function runPersonaDesigner(
     ? "2. Call get_persona_templates to get project-specific persona archetypes — prefer these over inventing new personas from scratch"
     : "2. (No persona templates configured — invent personas that fit the app context)";
 
-  const systemPrompt = `You are the persona designer for "${productSpec.appName}".\nYou create and manage test agents that simulate real users of the app.\n\n[Organization Design Guidelines]\n${orgGuidance}${accountContext}\n\n[Fixed roster rules]\n- Agents with origin "fixed" are team-curated permanent members. NEVER call retire_agent on them.\n- Align the number of ACTIVE auto agents (origin "auto" or missing) to exactly ${autoSlots}.\n  — If fewer than ${autoSlots} active autos exist, add_agent until you reach ${autoSlots}.\n  — If more than ${autoSlots} active autos exist, retire_agent the excess autos only (oldest first).\n  — If autoSlots is 0, do not add autos; retire excess autos if any.\n\n[Steps]\n1. Call get_coverage to review which lenses and categories are underrepresented in past runs\n${personaTemplateStep}\n${pathCoverageStep}\n5. Call get_open_issues to understand what problems are already known — recruit agents likely to find DIFFERENT issues in unexplored areas\n6. Call get_scenarios to see the user test scenarios generated for this run — about 70% of agents will be assigned a scenario, so recruit personas whose background fits those scenarios\n7. Call get_agents to check the current agent roster (archived agents are omitted; origin is included)\n8. Adjust AUTO agents only so that active autos == ${autoSlots}${testAccounts.length > 0 ? "\n   — set accountRole on each new agent to a short token matching an available test account (user, instructor, admin). Keep role as a narrative description of the person" : ""}\n   — give 1–2 new recruits an "environment" (mobile device, dark mode, non-default locale, slow connection) that naturally fits their persona's life; leave the rest on desktop\n9. Do not retire fixed agents. Only retire autos when above the autoSlots target.`;
+  const systemPrompt = `You are the persona designer for "${productSpec.appName}".
+You create and manage test agents that simulate real users of the app.
+
+[Organization Design Guidelines]
+${orgGuidance}${accountContext}
+
+[Fixed roster rules]
+- Agents with origin "fixed" are team-curated permanent members. NEVER call retire_agent on them.
+- Align the number of ACTIVE auto agents (origin "auto" or missing) to exactly ${autoSlots}.
+  — If fewer than ${autoSlots} active autos exist, add_agent until you reach ${autoSlots}.
+  — If more than ${autoSlots} active autos exist, retire_agent the excess autos only (oldest first).
+  — If autoSlots is 0, do not add autos; retire excess autos if any.
+
+[Steps]
+1. Call get_coverage to review which lenses and categories are underrepresented in past runs
+${personaTemplateStep}
+${pathCoverageStep}
+5. Call get_open_issues to understand what problems are already known — recruit agents likely to find DIFFERENT issues in unexplored areas
+6. Call get_scenarios to see the user test scenarios generated for this run — about 70% of agents will be assigned a scenario, so recruit personas whose background fits those scenarios
+7. Call get_agents to check the current agent roster (archived agents are omitted; origin is included)
+8. Adjust AUTO agents only so that active autos == ${autoSlots}${testAccounts.length > 0 ? "\n   — set accountRole on each new agent to a short token matching an available test account (user, instructor, admin). Keep role as a narrative description of the person" : ""}
+   — give 1–2 new recruits an "environment" (mobile device, dark mode, non-default locale, slow connection) that naturally fits their persona's life; leave the rest on desktop
+9. Do not retire fixed agents. Only retire autos when above the autoSlots target.`;
 
   try {
     const sessionTools = PERSONA_DESIGNER_TOOLS.map((t) => ({
@@ -723,7 +798,59 @@ async function runBrowserAgent(
   const pageHashUpdates: Record<string, string> = {};
   const MAX_ITERATIONS = extras.maxIterations ?? browserIterations();
 
-  const systemPrompt = `You are "${agent.name}".\nRole: ${agent.role}\nPersona: ${agent.persona}\n\nYou are a real user of "${productSpec.appName}".\nUse the browser tools to navigate the app and carry out everyday tasks.\n\n[App Overview]\n${productSpec.appDescription}\n\n[How to Proceed]\n1. Navigate to a page with navigate\n2. Perform actual tasks on that page\n3. If you find any issues, record them with post_feedback (they become Issues after triage)\n4. Move to another page and repeat\n5. Finish within ${MAX_ITERATIONS} actions\n\nWhen writing the body, match the tone to the category:\n- bug: technical ("The endpoint returned 500 when...", "Expected X but got Y")\n- ux: experiential ("I tried to find the button but...", "It was unclear what would happen if...")\n- feature-request: aspirational ("It would have been useful if...", "I wished I could...")\n- goal-gap: goal-oriented ("I was trying to X, but couldn't because...")\n\n[Using Observation Tools]\n- To verify an action was actually applied, call diff_since_last_action\n- If data isn't reflected or errors appear, call read_network_errors\n- For unexpected behavior, call read_console_logs to check JS errors\n- If problems are found, record them with post_feedback\n\n[Using API Check Tools (tools prefixed with [API check])]\n- After a browser action, verify the actual saved state via API\n- Data visible in the browser but missing in the API (or vice versa) is an inconsistency bug — report with post_feedback\n\n[Using view_screen]\n- Call it once right after navigate\n- Do not call it repeatedly on the same page\n\n[Using check_swarm_signals]\n- Call it once mid-session to see what other agents exploring this app have reported\n- If a signal matches the area you are in, try to reproduce it as YOUR persona — a finding confirmed by different personas becomes a stronger issue\n- Report reproductions with post_feedback in your own words; do not copy the other agent's report\n\n[Reference: Implemented Features]\n${productSpec.features}\n${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${goalsSection(productSpec)}${assignment.actor && assignment.scenario\n    ? `\n[Your Task for This Run — Two-User Scenario]\nTitle: ${assignment.scenario.title}\nSituation: ${assignment.scenario.context}\nYou are the "${assignment.actor.role}" actor. Your goal: ${assignment.actor.goal}\n\nRIGHT NOW another agent is using this app as "${assignment.actor.partnerRole}" — your actions and theirs may affect the same data at the same time.\nWhile completing your goal, pay special attention to concurrency and permission issues:\n- data that goes stale and never refreshes after the other user changes it\n- conflicting edits that silently overwrite each other\n- permission or status changes that do not take effect (or take effect inconsistently) mid-session\n- realtime updates, locks, or notifications that never arrive\nReport such issues with post_feedback (usually category "bug").\nWhen done (or if you cannot complete the goal), call post_outcome with achieved=true/false and a brief reason.`\n    : assignment.scenario\n    ? `\n[Your Task for This Run]\nTitle: ${assignment.scenario.title}\nYou are: ${assignment.scenario.context}\nGoal: ${assignment.scenario.goal}\nConstraints: ${assignment.scenario.constraints}\n\nFocus on completing this task naturally as this user. Report any issues you encounter along the way.\nWhen done (or if you cannot complete the goal), call post_outcome with achieved=true/false and a brief reason.`\n    : assignment.lens\n    ? `\n[Focus Area for This Run]\n${assignment.lens}\nKeep this perspective in mind and prioritize reporting related issues.`\n    : ""}${focusPrompt()}${describeEnvironment(agent.environment)}${sessionContinuityPrompt(hasAgentSession(agent.id))}${formatAgentMemories(agent)}${guardrailPrompt(SHOAL_MODE)}${authPrompt(authPlan.handoff)}${extras.extraPrompt ?? ""}\n\n${untrustedContentPrompt()}`;
+  const systemPrompt = `You are "${agent.name}".
+Role: ${agent.role}
+Persona: ${agent.persona}
+
+You are a real user of "${productSpec.appName}".
+Use the browser tools to navigate the app and carry out everyday tasks.
+
+[App Overview]
+${productSpec.appDescription}
+
+[How to Proceed]
+1. Navigate to a page with navigate
+2. Perform actual tasks on that page
+3. If you find any issues, record them with post_feedback (they become Issues after triage)
+4. Move to another page and repeat
+5. Finish within ${MAX_ITERATIONS} actions
+
+When writing the body, match the tone to the category:
+- bug: technical ("The endpoint returned 500 when...", "Expected X but got Y")
+- ux: experiential ("I tried to find the button but...", "It was unclear what would happen if...")
+- feature-request: aspirational ("It would have been useful if...", "I wished I could...")
+- goal-gap: goal-oriented ("I was trying to X, but couldn't because...")
+
+[Using Observation Tools]
+- To verify an action was actually applied, call diff_since_last_action
+- If data isn't reflected or errors appear, call read_network_errors
+- For unexpected behavior, call read_console_logs to check JS errors
+- If problems are found, record them with post_feedback
+
+[Using API Check Tools (tools prefixed with [API check])]
+- After a browser action, verify the actual saved state via API
+- Data visible in the browser but missing in the API (or vice versa) is an inconsistency bug — report with post_feedback
+
+[Using view_screen]
+- Call it once right after navigate
+- Do not call it repeatedly on the same page
+
+[Using check_swarm_signals]
+- Call it once mid-session to see what other agents exploring this app have reported
+- If a signal matches the area you are in, try to reproduce it as YOUR persona — a finding confirmed by different personas becomes a stronger issue
+- Report reproductions with post_feedback in your own words; do not copy the other agent's report
+
+[Reference: Implemented Features]
+${productSpec.features}
+${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${goalsSection(productSpec)}${assignment.actor && assignment.scenario
+    ? `\n[Your Task for This Run — Two-User Scenario]\nTitle: ${assignment.scenario.title}\nSituation: ${assignment.scenario.context}\nYou are the "${assignment.actor.role}" actor. Your goal: ${assignment.actor.goal}\n\nRIGHT NOW another agent is using this app as "${assignment.actor.partnerRole}" — your actions and theirs may affect the same data at the same time.\nWhile completing your goal, pay special attention to concurrency and permission issues:\n- data that goes stale and never refreshes after the other user changes it\n- conflicting edits that silently overwrite each other\n- permission or status changes that do not take effect (or take effect inconsistently) mid-session\n- realtime updates, locks, or notifications that never arrive\nReport such issues with post_feedback (usually category "bug").\nWhen done (or if you cannot complete the goal), call post_outcome with achieved=true/false and a brief reason.`
+    : assignment.scenario
+    ? `\n[Your Task for This Run]\nTitle: ${assignment.scenario.title}\nYou are: ${assignment.scenario.context}\nGoal: ${assignment.scenario.goal}\nConstraints: ${assignment.scenario.constraints}\n\nFocus on completing this task naturally as this user. Report any issues you encounter along the way.\nWhen done (or if you cannot complete the goal), call post_outcome with achieved=true/false and a brief reason.`
+    : assignment.lens
+    ? `\n[Focus Area for This Run]\n${assignment.lens}\nKeep this perspective in mind and prioritize reporting related issues.`
+    : ""}${focusPrompt()}${describeEnvironment(agent.environment)}${sessionContinuityPrompt(hasAgentSession(agent.id))}${formatAgentMemories(agent)}${guardrailPrompt(SHOAL_MODE)}${authPrompt(authPlan.handoff)}${extras.extraPrompt ?? ""}
+
+${untrustedContentPrompt()}`;
 
   const startUrl = resolveLoginUrl(BASE_URL, authPlan.startPath);
   await page.goto(startUrl, { waitUntil: "load", timeout: 15000 });
@@ -943,7 +1070,42 @@ async function runThresholdAgent(
   const pageHashUpdates: Record<string, string> = {};
   const MAX_ITERATIONS = thresholdIterations();
 
-  const systemPrompt = `You are "${agent.name}".\nRole: ${agent.role}\nPersona: ${agent.persona}\n\nYou probe boundaries of "${productSpec.appName}" — not free exploration.\nWork through your assigned threshold candidates. Prefer evidence over speculation.\n\n[App Overview]\n${productSpec.appDescription}\n\n[Assigned Threshold Candidates]\n${formatThresholdCandidatesForPrompt(candidates)}\n\n[How to Proceed]\n1. Pick the highest-priority remaining candidate\n2. Navigate to its area; if needed, use [API check] tools to seed a near-limit state\n3. Follow howToProbe in the browser (fill/click/select as a real user would)\n4. If the boundary crashes, silently fails, loses data, or shows an unclear/wrong message — report with post_feedback\n5. If the boundary behaves clearly and safely, do NOT invent a finding — move to the next candidate\n6. If an area does not exist, skip that candidate\n7. Finish after probing your list (within ${MAX_ITERATIONS} actions)\n\nWhen writing the body, match the tone to the category:\n- bug: technical ("Submitting 501 chars returned 500 with no validation...", "Expected a 403 at the plan limit but the create succeeded")\n- ux: experiential ("I hit the seat limit and had no idea what to do next...", "The error appeared after I left the field and I could not tell which limit I crossed")\n- feature-request / goal-gap: only if a missing affordance at the boundary clearly blocks a user outcome\n\n[Using Observation Tools]\n- After probing, call diff_since_last_action / read_network_errors / read_console_logs when the UI reaction is unclear\n- Use check_swarm_signals once mid-session; if another agent reported something in your area, try to reproduce it as a threshold probe and report in your own words\n\n[Reference: Implemented Features]\n${productSpec.features}\n${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${goalsSection(productSpec)}${guardrailPrompt(SHOAL_MODE)}${authPrompt(authPlan.handoff)}\n\n${untrustedContentPrompt()}`;
+  const systemPrompt = `You are "${agent.name}".
+Role: ${agent.role}
+Persona: ${agent.persona}
+
+You probe boundaries of "${productSpec.appName}" — not free exploration.
+Work through your assigned threshold candidates. Prefer evidence over speculation.
+
+[App Overview]
+${productSpec.appDescription}
+
+[Assigned Threshold Candidates]
+${formatThresholdCandidatesForPrompt(candidates)}
+
+[How to Proceed]
+1. Pick the highest-priority remaining candidate
+2. Navigate to its area; if needed, use [API check] tools to seed a near-limit state
+3. Follow howToProbe in the browser (fill/click/select as a real user would)
+4. If the boundary crashes, silently fails, loses data, or shows an unclear/wrong message — report with post_feedback
+5. If the boundary behaves clearly and safely, do NOT invent a finding — move to the next candidate
+6. If an area does not exist, skip that candidate
+7. Finish after probing your list (within ${MAX_ITERATIONS} actions)
+
+When writing the body, match the tone to the category:
+- bug: technical ("Submitting 501 chars returned 500 with no validation...", "Expected a 403 at the plan limit but the create succeeded")
+- ux: experiential ("I hit the seat limit and had no idea what to do next...", "The error appeared after I left the field and I could not tell which limit I crossed")
+- feature-request / goal-gap: only if a missing affordance at the boundary clearly blocks a user outcome
+
+[Using Observation Tools]
+- After probing, call diff_since_last_action / read_network_errors / read_console_logs when the UI reaction is unclear
+- Use check_swarm_signals once mid-session; if another agent reported something in your area, try to reproduce it as a threshold probe and report in your own words
+
+[Reference: Implemented Features]
+${productSpec.features}
+${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${goalsSection(productSpec)}${guardrailPrompt(SHOAL_MODE)}${authPrompt(authPlan.handoff)}
+
+${untrustedContentPrompt()}`;
 
   const startUrl = resolveLoginUrl(BASE_URL, authPlan.startPath);
   await page.goto(startUrl, { waitUntil: "load", timeout: 15000 });
@@ -1558,7 +1720,19 @@ export async function main() {
             discoverBudget,
             {
               extraTools: [REPORT_REGRESSION_TOOL, MARK_VERIFIED_TOOL],
-              extraPrompt: `\n\n[Regression Task]\nYou are a regression tester in the BROWSER lane. Re-open each closed issue in a real browser and confirm the UI still behaves as expected.\n\nClosed issues to check:\n${closedIssues.map((i) => `- ${i.number}: ${i.title}\n  ${(i.body ?? "").slice(0, 200).replace(/\n/g, " ")}`).join("\n")}\n\nRules:\n- Use browser tools (snapshot, click, fill, select, navigate). Never mark a UI bug verified or regressed from API calls alone.\n- If an issue is clearly API-only (no UI surface), skip it rather than inventing a UI check.\n- Call report_regression when a previously-fixed bug is back. Call mark_verified when the UI still looks fixed.\n- Cover as many issues as you can. Prefer checking every issue over stopping early.`,
+              extraPrompt: `
+
+[Regression Task]
+You are a regression tester in the BROWSER lane. Re-open each closed issue in a real browser and confirm the UI still behaves as expected.
+
+Closed issues to check:
+${closedIssues.map((i) => `- ${i.number}: ${i.title}\n  ${(i.body ?? "").slice(0, 200).replace(/\n/g, " ")}`).join("\n")}
+
+Rules:
+- Use browser tools (snapshot, click, fill, select, navigate). Never mark a UI bug verified or regressed from API calls alone.
+- If an issue is clearly API-only (no UI surface), skip it rather than inventing a UI check.
+- Call report_regression when a previously-fixed bug is back. Call mark_verified when the UI still looks fixed.
+- Cover as many issues as you can. Prefer checking every issue over stopping early.`,
               maxIterations: regressionMaxIterations(closedIssues.length),
               closedIssues,
               logPrefix: "regression",
