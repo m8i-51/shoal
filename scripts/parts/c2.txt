@@ -1,0 +1,316 @@
+Issues.length === 0) {
+            result = "(no open issues from configured tracker(s) yet)";
+          } else {
+            result = openIssues.map((i) => `- ${formatIssueRef(i.number)}: ${i.title} [${i.labels.join(", ")}]`).join("\n");
+          }
+          log.info(`  [persona-designer] open issues fetched (${openIssues.length})`);
+        } else if (t.name === "get_scenarios") {
+          if (scenarios.length === 0) {
+            result = "(no scenarios generated — all agents will use free-exploration mode)";
+          } else {
+            result = scenarios.map((s) =>
+              `[${s.id}] ${s.title}\n  Context: ${s.context}\n  Goal: ${s.goal}\n  Constraints: ${s.constraints}`
+            ).join("\n\n");
+          }
+          log.info(`  [persona-designer] scenarios fetched (${scenarios.length})`);
+        } else if (t.name === "get_agents") {
+          const agents = loadAgents().filter((a) => (a.status ?? "active") !== "archived");
+          result = agents.map((a) => ({
+            id: a.id,
+            name: a.name,
+            role: a.role,
+            accountRole: a.accountRole,
+            createdAt: a.createdAt,
+            origin: agentOrigin(a),
+            status: a.status ?? "active",
+          }));
+          log.info(`  [persona-designer] current agents: ${agents.length}`);
+        } else if (t.name === "add_agent") {
+          const { name, role, persona, environment, accountRole } = input as {
+            name?: string;
+            role?: string;
+            persona?: string;
+            environment?: EnvironmentProfile;
+            accountRole?: string;
+          };
+          try {
+            const cleanEnv = sanitizeEnvironment(environment);
+            const agent = addAgent({
+              name: name ?? "",
+              role: role ?? "",
+              persona: persona ?? "",
+              environment: cleanEnv,
+              origin: "auto",
+              status: "active",
+              ...(accountRole?.trim() ? { accountRole: accountRole.trim() } : {}),
+            });
+            result = agent;
+            log.info(`  [persona-designer] created: ${agent.name} (${agent.role})${agent.accountRole ? ` [accountRole: ${agent.accountRole}]` : ""}${cleanEnv ? ` [env: ${Object.entries(cleanEnv).map(([k, v]) => `${k}=${v}`).join(", ")}]` : ""}`);
+          } catch (e) {
+            const message = e instanceof Error ? e.message : String(e);
+            result = { error: message };
+            log.info(`  [persona-designer] add_agent rejected: ${message}`);
+          }
+        } else if (t.name === "retire_agent") {
+          const { agentId, reason } = input as { agentId: string; reason: string };
+          const existing = loadAgents().find((a) => a.id === agentId);
+          if (existing && isFixedAgent(existing)) {
+            result = { success: false, error: "cannot retire fixed persona" };
+            log.info(`  [persona-designer] retire blocked (fixed): ${agentId} — ${reason}`);
+          } else {
+            const success = retireAgent(agentId);
+            result = success
+              ? { success: true }
+              : { success: false, error: "agent not found or not retiring" };
+            log.info(`  [persona-designer] retired: ${agentId} — ${reason} (success=${success})`);
+          }
+        } else {
+          result = { error: "unknown tool" };
+        }
+        return JSON.stringify(result);
+      },
+    }));
+
+    await runToolSession({
+      provider: llmProvider,
+      client,
+      model: defaultModel,
+      system: systemPrompt,
+      userPrompt: "Design and manage user personas for this run.",
+      tools: sessionTools,
+      maxIterations: DEFAULT_PERSONA_DESIGNER_ITERATIONS,
+      maxTokens: 1024,
+    });
+    log.info("[persona-designer] done");
+  } catch (e) {
+    log.error("[persona-designer] error:", e);
+  }
+}
+
+// ================================================================
+// Browser agent tools
+// ================================================================
+
+function browserLogToAgentLog(
+  agent: Agent,
+  log: BrowserAgentLog,
+  agentType: AgentLog["agentType"] = "browser",
+): AgentLog {
+  return {
+    agentType,
+    agentId: agent.id,
+    agentName: log.agentName,
+    role: agent.role,
+    startedAt: log.startedAt,
+    completedAt: log.completedAt,
+    status: log.status,
+    iterations: log.iterations,
+    actions: log.actions.map((a) => ({
+      timestamp: a.timestamp,
+      tool: a.tool,
+      input: a.input,
+      result: null,
+      durationMs: a.durationMs,
+    })),
+    visitedPaths: log.visitedPaths,
+    issuesPosted: log.feedbacksSaved.map((f) => ({
+      title: f.title,
+      category: f.category,
+      url: null,
+    })),
+    regressionChecks: log.regressionChecks ?? [],
+    error: log.error,
+  };
+}
+
+function applyAgentSummary(agentLog: AgentLog): void {
+  runLog.summary.totalActions += agentLog.actions.length;
+  if (agentLog.status === "completed") runLog.summary.completed++;
+  else if (agentLog.status === "error") runLog.summary.errors++;
+  if (agentLog.status === "iteration_limit") runLog.summary.iterationLimitReached++;
+}
+
+function recordBrowserAgentRun(agent: Agent, browserLog: BrowserAgentLog): void {
+  const agentLog = browserLogToAgentLog(agent, browserLog, "browser");
+  runLog.agents.push(agentLog);
+  applyAgentSummary(agentLog);
+}
+
+function recordThresholdAgentRun(agent: Agent, browserLog: BrowserAgentLog): void {
+  const agentLog = browserLogToAgentLog(agent, browserLog, "threshold");
+  runLog.agents.push(agentLog);
+  applyAgentSummary(agentLog);
+}
+
+function recordRegressionAgentRun(agent: Agent, browserLog: BrowserAgentLog): void {
+  const agentLog = browserLogToAgentLog(agent, browserLog, "regression");
+  runLog.agents.push(agentLog);
+  applyAgentSummary(agentLog);
+}
+
+
+
+type BrowserAgentExtras = {
+  extraTools?: Anthropic.Tool[];
+  extraPrompt?: string;
+  maxIterations?: number;
+  closedIssues?: ClosedIssue[];
+  logPrefix?: string;
+};
+
+async function runBrowserAgent(
+  agent: Agent,
+  page: Page,
+  productSpec: ProductSpec,
+  assignment: Assignment = {},
+  scenarioOutcomes: ScenarioOutcome[] = [],
+  authPlan: BrowserAuthPlan = { handoff: { kind: "guest" }, startPath: "/" },
+  siteMap: SiteMap | null = null,
+  runId: string = "",
+  discoverBudget: { used: number } | null = null,
+  extras: BrowserAgentExtras = {},
+): Promise<BrowserAgentLog> {
+  const logPrefix = extras.logPrefix ?? "browser";
+  const assignmentLabel = assignment.scenario
+    ? `[scenario: ${assignment.scenario.title.slice(0, 35)}]`
+    : assignment.lens
+    ? `[lens: ${assignment.lens.slice(0, 30)}...]`
+    : "[free exploration]";
+  log.info(`\n[${logPrefix}] ${agent.name} start ${assignmentLabel}`);
+
+  const agentLog: BrowserAgentLog = {
+    agentName: agent.name,
+    persona: agent.persona,
+    startedAt: new Date().toISOString(),
+    completedAt: null,
+    status: "completed",
+    iterations: 0,
+    actions: [],
+    visitedPaths: [],
+    feedbacksSaved: [],
+    regressionChecks: [],
+    error: null,
+  };
+
+  const observation = setupObservation(page);
+  const siteMapOrigin = new URL(BASE_URL).origin;
+  let lastTrackedPath: string | null = null;
+  let consecutiveOnPath = 0;
+  const host = new URL(BASE_URL).host;
+  const cachedHashes = loadPageHashes(host);
+  const pageHashUpdates: Record<string, string> = {};
+  const MAX_ITERATIONS = extras.maxIterations ?? browserIterations();
+
+  const systemPrompt = `You are "${agent.name}".
+Role: ${agent.role}
+Persona: ${agent.persona}
+
+You are a real user of "${productSpec.appName}".
+Use the browser tools to navigate the app and carry out everyday tasks.
+
+[App Overview]
+${productSpec.appDescription}
+
+[How to Proceed]
+1. Navigate to a page with navigate
+2. Perform actual tasks on that page
+3. If you find any issues, record them with post_feedback (they become Issues after triage)
+4. Move to another page and repeat
+5. Finish within ${MAX_ITERATIONS} actions
+
+When writing the body, match the tone to the category:
+- bug: technical ("The endpoint returned 500 when...", "Expected X but got Y")
+- ux: experiential ("I tried to find the button but...", "It was unclear what would happen if...")
+- feature-request: aspirational ("It would have been useful if...", "I wished I could...")
+- goal-gap: goal-oriented ("I was trying to X, but couldn't because...")
+
+[Using Observation Tools]
+- To verify an action was actually applied, call diff_since_last_action
+- If data isn't reflected or errors appear, call read_network_errors
+- For unexpected behavior, call read_console_logs to check JS errors
+- If problems are found, record them with post_feedback
+
+[Using API Check Tools (tools prefixed with [API check])]
+- After a browser action, verify the actual saved state via API
+- Data visible in the browser but missing in the API (or vice versa) is an inconsistency bug — report with post_feedback
+
+[Using view_screen]
+- Call it once right after navigate
+- Do not call it repeatedly on the same page
+
+[Using check_swarm_signals]
+- Call it once mid-session to see what other agents exploring this app have reported
+- If a signal matches the area you are in, try to reproduce it as YOUR persona — a finding confirmed by different personas becomes a stronger issue
+- Report reproductions with post_feedback in your own words; do not copy the other agent's report
+
+[Reference: Implemented Features]
+${productSpec.features}
+${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${goalsSection(productSpec)}${assignment.actor && assignment.scenario
+    ? `\n[Your Task for This Run — Two-User Scenario]\nTitle: ${assignment.scenario.title}\nSituation: ${assignment.scenario.context}\nYou are the "${assignment.actor.role}" actor. Your goal: ${assignment.actor.goal}\n\nRIGHT NOW another agent is using this app as "${assignment.actor.partnerRole}" — your actions and theirs may affect the same data at the same time.\nWhile completing your goal, pay special attention to concurrency and permission issues:\n- data that goes stale and never refreshes after the other user changes it\n- conflicting edits that silently overwrite each other\n- permission or status changes that do not take effect (or take effect inconsistently) mid-session\n- realtime updates, locks, or notifications that never arrive\nReport such issues with post_feedback (usually category "bug").\nWhen done (or if you cannot complete the goal), call post_outcome with achieved=true/false and a brief reason.`
+    : assignment.scenario
+    ? `\n[Your Task for This Run]\nTitle: ${assignment.scenario.title}\nYou are: ${assignment.scenario.context}\nGoal: ${assignment.scenario.goal}\nConstraints: ${assignment.scenario.constraints}\n\nFocus on completing this task naturally as this user. Report any issues you encounter along the way.\nWhen done (or if you cannot complete the goal), call post_outcome with achieved=true/false and a brief reason.`
+    : assignment.lens
+    ? `\n[Focus Area for This Run]\n${assignment.lens}\nKeep this perspective in mind and prioritize reporting related issues.`
+    : ""}${focusPrompt()}${describeEnvironment(agent.environment)}${sessionContinuityPrompt(hasAgentSession(agent.id))}${formatAgentMemories(agent)}${guardrailPrompt(SHOAL_MODE)}${authPrompt(authPlan.handoff)}${extras.extraPrompt ?? ""}
+
+${untrustedContentPrompt()}`;
+
+  const startUrl = resolveLoginUrl(BASE_URL, authPlan.startPath);
+  await page.goto(startUrl, { waitUntil: "load", timeout: 15000 });
+  await page.waitForTimeout(RUN_TIMINGS.agentStartupMs);
+  const initialScreenshot = await takeScreenshot(page, "initial");
+
+  const opening = (() => {
+    switch (authPlan.handoff.kind) {
+      case "credentials":
+        return "The login page is open. Sign in with the exact credentials in [Authentication], then use the app. Do not invent other usernames or passwords.";
+      case "guest":
+        return "The app is open. Start using it. If you see a login form, do not guess usernames or passwords — explore only what is available without an account.";
+      case "session":
+        return authPlan.handoff.email
+          ? "The app is open and you are already logged in. Start using it. Do not log out or enter different credentials."
+          : "The app is open. Start using it.";
+      default: {
+        const _exhaustive: never = authPlan.handoff;
+        return `The app is open. Start using it. (${String(_exhaustive)})`;
+      }
+    }
+  })();
+
+  const sessionTools = [...BROWSER_TOOLS, ...(extras.extraTools ?? [])].map((t) => ({
+    name: t.name,
+    description: t.description ?? t.name,
+    input_schema: t.input_schema as Record<string, unknown>,
+    execute: async (input: Record<string, unknown>): Promise<ToolResultContent> => {
+      const { text, screenshot, sendToClaude } = await executeBrowserTool(t.name, input, {
+        ...browserToolBaseContext(),
+        page,
+        agentId: agent.id,
+        agentLog,
+        observation,
+        scenarioOutcomes,
+        cachedHashes,
+        pageHashUpdates,
+        scenario: assignment.scenario,
+        closedIssues: extras.closedIssues ?? [],
+      });
+      log.info(`  → ${formatToolCallLog(t.name, input, 60)}`);
+
+      if (siteMap) {
+        try {
+          const currentPath = normalizePath(page.url(), siteMapOrigin);
+          if (currentPath) {
+            const isNewEntry = currentPath !== lastTrackedPath;
+            if (isNewEntry) {
+              lastTrackedPath = currentPath;
+              consecutiveOnPath = 1;
+            } else {
+              consecutiveOnPath += 1;
+            }
+            recordVisit(siteMap, currentPath, runId || runLog.runId, {
+              isNewEntry,
+              consecutiveIterations: consecutiveOnPath,
+            });
+          }
+          if (t.name === "navigate" && discoverBudget) {
+            const hrefs = await collectSameOriginHrefs(page, siteMapOrigin)
