@@ -38,12 +38,12 @@ import {
 } from "./framework/site-map";
 import { computeExperienceScore, formatExperienceLine } from "./framework/experience-score";
 import { updateAdoption } from "./framework/adoption";
-import { getShoalMode, filterAppTools, applyBrowserGuardrails, guardrailPrompt } from "./framework/guardrails";
+import { getShoalMode, filterAppTools, guardrailPrompt } from "./framework/guardrails";
 import { buildContextOptions, sanitizeEnvironment, describeEnvironment, applyNetworkThrottle, type EnvironmentProfile } from "./framework/environment";
-import { agentSessionPath, hasAgentSession, saveAgentSession, sessionContinuityPrompt } from "./framework/session-store";
+import { agentSessionPath, hasAgentSession, sessionContinuityPrompt } from "./framework/session-store";
+import { baseContextOptions, withAgentContext, type AgentContextOptions } from "./framework/agent-context";
 import { loadPageHashes, updatePageHashes } from "./framework/page-cache";
-import { traceAgentZipPath } from "./framework/trace-chunk";
-import { registerSecrets, scrubTraceZipSafely } from "./framework/trace-scrub";
+import { registerSecrets } from "./framework/trace-scrub";
 import { getRetentionDays, pruneRunArtifacts } from "./framework/retention";
 import { loadPersonaPack, formatPackForPrompt, type PersonaPack } from "./framework/persona-pack";
 import { buildTrackers, formatIssuesCreatedLine } from "./framework/trackers/index";
@@ -1249,15 +1249,22 @@ async function runVerifyMode(
     constraints: "Focus only on verifying this one issue. Do not explore unrelated areas.",
   };
 
-  const context = await browser.newContext({ viewport: VIEWPORT });
-  await applyBrowserGuardrails(context, SHOAL_MODE);
-  const page = await context.newPage();
-  try {
-    const browserLog = await runBrowserAgent(verifier, page, productSpec, { scenario }, scenarioOutcomes);
-    recordBrowserAgentRun(verifier, browserLog);
-  } finally {
-    await context.close();
-  }
+  await withAgentContext(
+    {
+      browser,
+      agentId: verifier.id,
+      agentName: verifier.name,
+      contextOptions: baseContextOptions(VIEWPORT),
+      mode: SHOAL_MODE,
+      runId: runLog.runId,
+      trace: false,
+      saveSession: false,
+    },
+    async (page) => {
+      const browserLog = await runBrowserAgent(verifier, page, productSpec, { scenario }, scenarioOutcomes);
+      recordBrowserAgentRun(verifier, browserLog);
+    },
+  );
 
   const outcome = scenarioOutcomes[0];
   const result = {
@@ -1576,61 +1583,52 @@ export async function main() {
       | { kind: "threshold"; agent: Agent; log: BrowserAgentLog }
       | { kind: "regression"; agent: Agent; log: BrowserAgentLog };
 
+    const laneContext = (agent: Agent, overrides: Partial<AgentContextOptions> & Pick<AgentContextOptions, "contextOptions">): AgentContextOptions => ({
+      browser,
+      agentId: agent.id,
+      agentName: agent.name,
+      mode: SHOAL_MODE,
+      runId: runLog.runId,
+      trace: TRACE_ENABLED,
+      saveSession: false,
+      ...overrides,
+    });
+
     const browserJobs = (budgetStopped ? [] : browserAgents).map(async (agent): Promise<LaneResult> => {
-        const assignment = pairAssignments.get(agent.id) ?? pickAssignment(dispatchIdx++, dispatchScenarios, "browser");
-        agentAssignments.set(agent.id, assignment);
+      const assignment = pairAssignments.get(agent.id) ?? pickAssignment(dispatchIdx++, dispatchScenarios, "browser");
+      agentAssignments.set(agent.id, assignment);
 
-        const accountRole = assignment.actor?.role ?? resolveAgentAccountRole(agent);
-        const authPlan = planBrowserAuth({
-          testAccounts,
-          accountRole,
-          loginPath: resolveLoginPath(productSpec),
-          returningSessionPath: hasAgentSession(agent.id) ? agentSessionPath(agent.id) : undefined,
-          preferAccountSession: Boolean(assignment.actor),
-        });
-        log.info(describeAuthPlan(agent.name, authPlan));
-        const baseOptions: Parameters<typeof browser.newContext>[0] = {
-          viewport: VIEWPORT,
-        };
-        if (authPlan.storageStatePath) {
-          baseOptions.storageState = authPlan.storageStatePath;
-          if (!assignment.actor && hasAgentSession(agent.id)) {
-            log.info(`[session] ${agent.name} returns with their previous session`);
-          }
-        }
-        // ペルソナの環境プロファイル（デバイス・ロケール・配色）を重ねる
-        const contextOptions = buildContextOptions(agent.environment, baseOptions);
+      const accountRole = assignment.actor?.role ?? resolveAgentAccountRole(agent);
+      const authPlan = planBrowserAuth({
+        testAccounts,
+        accountRole,
+        loginPath: resolveLoginPath(productSpec),
+        returningSessionPath: hasAgentSession(agent.id) ? agentSessionPath(agent.id) : undefined,
+        preferAccountSession: Boolean(assignment.actor),
+      });
+      log.info(describeAuthPlan(agent.name, authPlan));
+      if (authPlan.storageStatePath && !assignment.actor && hasAgentSession(agent.id)) {
+        log.info(`[session] ${agent.name} returns with their previous session`);
+      }
+      // ペルソナの環境プロファイル（デバイス・ロケール・配色）を重ねる
+      const contextOptions = buildContextOptions(
+        agent.environment,
+        baseContextOptions(VIEWPORT, authPlan.storageStatePath),
+      );
 
-        const context = await browser.newContext(contextOptions);
-        await applyBrowserGuardrails(context, SHOAL_MODE);
-        if (TRACE_ENABLED) {
-          try {
-            await context.tracing.start({ screenshots: true, snapshots: true });
-          } catch (e) {
-            log.warn(`[trace] failed to start for ${agent.name}:`, e);
-          }
-        }
-        const page = await context.newPage();
-        await applyNetworkThrottle(page, agent.environment?.networkThrottle);
-        try {
+      return withAgentContext(
+        laneContext(agent, {
+          contextOptions,
+          // 次の run で「再訪ユーザー」になれるようセッションを保存する
+          saveSession: true,
+          onPage: (page) => applyNetworkThrottle(page, agent.environment?.networkThrottle),
+        }),
+        async (page) => {
           const log = await runBrowserAgent(agent, page, productSpec, assignment, scenarioOutcomes, authPlan, sharedSiteMap, runLog.runId, discoverBudget);
           return { kind: "browser", agent, log };
-        } finally {
-          // 次の run で「再訪ユーザー」になれるようセッションを保存（close 前に呼ぶ）
-          await saveAgentSession(context, agent.id);
-          if (TRACE_ENABLED) {
-            const tracePath = traceAgentZipPath(runLog.runId, agent.id);
-            try {
-              fs.mkdirSync(path.dirname(tracePath), { recursive: true });
-              await context.tracing.stop({ path: tracePath });
-              await scrubTraceZipSafely(tracePath, `agent trace ${agent.name}`);
-            } catch (e) {
-              log.warn(`[trace] failed to save for ${agent.name}:`, e);
-            }
-          }
-          await context.close();
-        }
-      });
+        },
+      );
+    });
 
     const thresholdJobs = thresholdAgents.map(async (agent, i): Promise<LaneResult> => {
       const slice = thresholdSlices[i] ?? [];
@@ -1643,39 +1641,15 @@ export async function main() {
         preferAccountSession: false,
       });
       log.info(describeAuthPlan(agent.name, authPlan));
-      const baseOptions: Parameters<typeof browser.newContext>[0] = {
-        viewport: VIEWPORT,
-      };
-      if (authPlan.storageStatePath) {
-        baseOptions.storageState = authPlan.storageStatePath;
-      }
-      const context = await browser.newContext(baseOptions);
-      await applyBrowserGuardrails(context, SHOAL_MODE);
-      if (TRACE_ENABLED) {
-        try {
-          await context.tracing.start({ screenshots: true, snapshots: true });
-        } catch (e) {
-          log.warn(`[trace] failed to start for ${agent.name}:`, e);
-        }
-      }
-      const page = await context.newPage();
-      try {
-        const log = await runThresholdAgent(agent, page, productSpec, slice, authPlan);
-        return { kind: "threshold", agent, log };
-      } finally {
-        // ephemeral — do not saveAgentSession
-        if (TRACE_ENABLED) {
-          const tracePath = traceAgentZipPath(runLog.runId, agent.id);
-          try {
-            fs.mkdirSync(path.dirname(tracePath), { recursive: true });
-            await context.tracing.stop({ path: tracePath });
-            await scrubTraceZipSafely(tracePath, `agent trace ${agent.name}`);
-          } catch (e) {
-            log.warn(`[trace] failed to save for ${agent.name}:`, e);
-          }
-        }
-        await context.close();
-      }
+
+      // ephemeral — セッションは保存しない
+      return withAgentContext(
+        laneContext(agent, { contextOptions: baseContextOptions(VIEWPORT, authPlan.storageStatePath) }),
+        async (page) => {
+          const log = await runThresholdAgent(agent, page, productSpec, slice, authPlan);
+          return { kind: "threshold", agent, log };
+        },
+      );
     });
 
     const regressionJobs: Promise<LaneResult>[] = [];
@@ -1692,36 +1666,23 @@ export async function main() {
           preferAccountSession: false,
         });
         log.info(describeAuthPlan(regressionAgent.name, authPlan));
-        const baseOptions: Parameters<typeof browser.newContext>[0] = {
-          viewport: VIEWPORT,
-        };
-        if (authPlan.storageStatePath) {
-          baseOptions.storageState = authPlan.storageStatePath;
-        }
-        const context = await browser.newContext(baseOptions);
-        await applyBrowserGuardrails(context, SHOAL_MODE);
-        if (TRACE_ENABLED) {
-          try {
-            await context.tracing.start({ screenshots: true, snapshots: true });
-          } catch (e) {
-            log.warn(`[trace] failed to start for ${regressionAgent.name}:`, e);
-          }
-        }
-        const page = await context.newPage();
-        try {
-          const log = await runBrowserAgent(
-            regressionAgent,
-            page,
-            productSpec,
-            {},
-            scenarioOutcomes,
-            authPlan,
-            sharedSiteMap,
-            runLog.runId,
-            discoverBudget,
-            {
-              extraTools: [REPORT_REGRESSION_TOOL, MARK_VERIFIED_TOOL],
-              extraPrompt: `
+
+        return withAgentContext(
+          laneContext(regressionAgent, { contextOptions: baseContextOptions(VIEWPORT, authPlan.storageStatePath) }),
+          async (page) => {
+            const log = await runBrowserAgent(
+              regressionAgent,
+              page,
+              productSpec,
+              {},
+              scenarioOutcomes,
+              authPlan,
+              sharedSiteMap,
+              runLog.runId,
+              discoverBudget,
+              {
+                extraTools: [REPORT_REGRESSION_TOOL, MARK_VERIFIED_TOOL],
+                extraPrompt: `
 
 [Regression Task]
 You are a regression tester in the BROWSER lane. Re-open each closed issue in a real browser and confirm the UI still behaves as expected.
@@ -1734,26 +1695,15 @@ Rules:
 - If an issue is clearly API-only (no UI surface), skip it rather than inventing a UI check.
 - Call report_regression when a previously-fixed bug is back. Call mark_verified when the UI still looks fixed.
 - Cover as many issues as you can. Prefer checking every issue over stopping early.`,
-              maxIterations: regressionMaxIterations(closedIssues.length),
-              closedIssues,
-              logPrefix: "regression",
-              lane: "regression",
-            },
-          );
-          return { kind: "regression", agent: regressionAgent, log };
-        } finally {
-          if (TRACE_ENABLED) {
-            const tracePath = traceAgentZipPath(runLog.runId, regressionAgent.id);
-            try {
-              fs.mkdirSync(path.dirname(tracePath), { recursive: true });
-              await context.tracing.stop({ path: tracePath });
-              await scrubTraceZipSafely(tracePath, `agent trace ${regressionAgent.name}`);
-            } catch (e) {
-              log.warn(`[trace] failed to save for ${regressionAgent.name}:`, e);
-            }
-          }
-          await context.close();
-        }
+                maxIterations: regressionMaxIterations(closedIssues.length),
+                closedIssues,
+                logPrefix: "regression",
+                lane: "regression",
+              },
+            );
+            return { kind: "regression", agent: regressionAgent, log };
+          },
+        );
       })());
     }
 
