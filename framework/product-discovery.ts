@@ -373,6 +373,12 @@ const DISCOVERY_TOOLS: Anthropic.Tool[] = [
   },
 ];
 
+export const UNCONFIRMED_DISCOVERY = "(auto-discovery failed)";
+
+export function isUnconfirmedDiscovery(spec: Pick<ProductSpec, "appDescription">): boolean {
+  return spec.appDescription === UNCONFIRMED_DISCOVERY;
+}
+
 export async function discoverProduct(
   baseUrl: string,
   page: Page,
@@ -526,7 +532,7 @@ ${untrustedContentPrompt()}`;
     const loginPath = observedFormPath ?? observedLinkPath;
     spec = {
       appName: new URL(baseUrl).hostname,
-      appDescription: "(auto-discovery failed)",
+      appDescription: UNCONFIRMED_DISCOVERY,
       targetUsers: "(unknown)",
       features: "(auto-discovery failed)",
       designContext: "(unknown)",
