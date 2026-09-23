@@ -1,0 +1,171 @@
+diff --git a/framework/__tests__/account-manager.test.ts b/framework/__tests__/account-manager.test.ts
+index 1d8a1b4..e3fa976 100644
+--- a/framework/__tests__/account-manager.test.ts
++++ b/framework/__tests__/account-manager.test.ts
+@@ -7,7 +7,7 @@ vi.mock("../findings", () => ({ saveFinding: vi.fn() }));
+ import * as fs from "fs";
+ import { createMessageWithRetry } from "../llm-retry";
+ import { saveFinding } from "../findings";
+-import { loadTestAccounts, inspectAccountsFile, resolveAccountSetup, runAccountManager, loginCandidateUrls, resolveLoginUrl, planBrowserAuth, authPrompt, describeAuthPlan, loginLooksEstablished, storageStateHasSession, describeLoginFailure, pickAdminAccount, type TestAccount } from "../account-manager";
++import { loadTestAccounts, inspectAccountsFile, resolveAccountSetup, runAccountManager, loginCandidateUrls, resolveLoginUrl, planBrowserAuth, authPrompt, describeAuthPlan, loginLooksEstablished, storageStateHasSession, describeLoginFailure, pickAdminAccount, discoveryStorageState, type TestAccount } from "../account-manager";
+ import type { ProductSpec } from "../product-discovery";
+ import type { LLMClient } from "../llm-client";
+ import type { Page, BrowserContext } from "playwright";
+@@ -846,6 +846,41 @@ describe("planBrowserAuth / authPrompt", () => {
+     expect(authPrompt(plan.handoff)).not.toContain("secret");
+   });
+ 
++  it("discovery は保存済み user セッションを開き、ファイルが無ければ渡さない", () => {
++    const accounts: TestAccount[] = [
++      { email: "admin@x.com", password: "p", role: "admin", storageStatePath: "/states/admin.json" },
++      { email: "user@x.com", password: "p", role: "user", storageStatePath: "/states/user.json" },
++    ];
++    vi.mocked(fs.existsSync).mockImplementation((p) => p === "/states/user.json");
++    expect(discoveryStorageState(accounts)).toEqual({
++      status: "ready",
++      path: "/states/user.json",
++      email: "user@x.com",
++    });
++
++    vi.mocked(fs.existsSync).mockReturnValue(false);
++    expect(discoveryStorageState(accounts)).toEqual({
++      status: "missing-file",
++      path: "/states/user.json",
++      email: "user@x.com",
++    });
++  });
++
++  it("discovery は資格情報だけではセッションを注入しない", () => {
++    expect(discoveryStorageState([credsOnly])).toBeUndefined();
++  });
++
++  it("user セッションが無ければ他の保存済みセッションを discovery に使う", () => {
++    vi.mocked(fs.existsSync).mockReturnValue(true);
++    expect(discoveryStorageState([
++      { email: "admin@x.com", password: "p", role: "admin", storageStatePath: "/states/admin.json" },
++    ])).toEqual({
++      status: "ready",
++      path: "/states/admin.json",
++      email: "admin@x.com",
++    });
++  });
++
+   it("セッションが一つも無いときだけ資格情報を渡す", () => {
+     const plan = planBrowserAuth({
+       testAccounts: [credsOnly],
+diff --git a/framework/account-manager.ts b/framework/account-manager.ts
+index 1305757..72ff462 100644
+--- a/framework/account-manager.ts
++++ b/framework/account-manager.ts
+@@ -244,6 +244,30 @@ export function planBrowserAuth(opts: {
+   return { handoff: { kind: "guest" }, startPath: "/" };
+ }
+ 
++export type DiscoveryStorageState =
++  | { status: "ready"; path: string; email?: string }
++  | { status: "missing-file"; path: string; email?: string };
++
++/**
++ * Session product discovery should open with.
++ * Same default as a browser agent with no persona role: a saved user session,
++ * then any other saved session. Credential-only accounts stay logged out here;
++ * Account Manager signs those in after the spec exists.
++ */
++export function discoveryStorageState(accounts: TestAccount[]): DiscoveryStorageState | undefined {
++  const plan = planBrowserAuth({
++    testAccounts: accounts,
++    accountRole: "user",
++    preferAccountSession: false,
++  });
++  if (plan.handoff.kind !== "session" || !plan.storageStatePath) return undefined;
++  const email = plan.handoff.email;
++  if (!fs.existsSync(plan.storageStatePath)) {
++    return { status: "missing-file", path: plan.storageStatePath, email };
++  }
++  return { status: "ready", path: plan.storageStatePath, email };
++}
++
+ export function authPrompt(handoff: AuthHandoff): string {
+   switch (handoff.kind) {
+     case "session":
+diff --git a/framework/product-discovery.ts b/framework/product-discovery.ts
+index 58834e0..2e879fb 100644
+--- a/framework/product-discovery.ts
++++ b/framework/product-discovery.ts
+@@ -373,6 +373,12 @@ const DISCOVERY_TOOLS: Anthropic.Tool[] = [
+   },
+ ];
+ 
++export const UNCONFIRMED_DISCOVERY = "(auto-discovery failed)";
++
++export function isUnconfirmedDiscovery(spec: Pick<ProductSpec, "appDescription">): boolean {
++  return spec.appDescription === UNCONFIRMED_DISCOVERY;
++}
++
+ export async function discoverProduct(
+   baseUrl: string,
+   page: Page,
+@@ -526,7 +532,7 @@ ${untrustedContentPrompt()}`;
+     const loginPath = observedFormPath ?? observedLinkPath;
+     spec = {
+       appName: new URL(baseUrl).hostname,
+-      appDescription: "(auto-discovery failed)",
++      appDescription: UNCONFIRMED_DISCOVERY,
+       targetUsers: "(unknown)",
+       features: "(auto-discovery failed)",
+       designContext: "(unknown)",
+diff --git a/run.ts b/run.ts
+index 65cacbe..7e959e5 100644
+--- a/run.ts
++++ b/run.ts
+@@ -46,7 +46,7 @@ import { getRetentionDays, pruneRunArtifacts } from "./framework/retention";
+ import { loadPersonaPack, formatPackForPrompt, type PersonaPack } from "./framework/persona-pack";
+ import { buildTrackers, formatIssuesCreatedLine } from "./framework/trackers/index";
+ import { setupObservation, buildObservationWarning } from "./framework/observation";
+-import { discoverProduct, loadCachedSpec, resolveLoginPath, type ProductSpec } from "./framework/product-discovery";
++import { discoverProduct, isUnconfirmedDiscovery, loadCachedSpec, resolveLoginPath, type ProductSpec } from "./framework/product-discovery";
+ import { designOrg } from "./framework/org-designer";
+ import { designScenarios, findMultiActorScenario, pairAgentsToActors, type Scenario, type ScenarioOutcome } from "./framework/scenario-designer";
+ import { runTriageAgent, type TriageResult } from "./framework/triage";
+@@ -56,7 +56,7 @@ import type { AgentLog, Finding, RegressionCheck } from "./framework/types";
+ import { resolveIssueId, formatIssueRef } from "./framework/issue-id";
+ import type { ClosedIssue } from "./framework/trackers/types";
+ import { loadTarget, applyLoadedTarget } from "./targets";
+-import { runAccountManager, resolveAccountSetup, persistAccountSessions, planBrowserAuth, authPrompt, describeAuthPlan, resolveLoginUrl, type TestAccount, type BrowserAuthPlan } from "./framework/account-manager";
++import { runAccountManager, resolveAccountSetup, persistAccountSessions, planBrowserAuth, authPrompt, describeAuthPlan, resolveLoginUrl, discoveryStorageState, loadTestAccounts, type TestAccount, type BrowserAuthPlan } from "./framework/account-manager";
+ import { estimateCost, formatCostUSD } from "./framework/cost";
+ import {
+   normalizeThresholdCandidates,
+@@ -1302,7 +1302,11 @@ export async function main() {
+   const scenarioOutcomes: ScenarioOutcome[] = [];
+   try {
+     const cached = loadCachedSpec(BASE_URL);
+-    if (cached && !REFRESH_SPEC) {
++    const savedSession = discoveryStorageState(loadTestAccounts());
++    const replaceFailedGuestCache = Boolean(
++      cached && isUnconfirmedDiscovery(cached) && savedSession?.status === "ready" && !REFRESH_SPEC,
++    );
++    if (cached && !REFRESH_SPEC && !replaceFailedGuestCache) {
+       const ageDays = cached.discoveredAt
+         ? Math.floor((Date.now() - new Date(cached.discoveredAt).getTime()) / 86_400_000)
+         : null;
+@@ -1311,7 +1315,18 @@ export async function main() {
+       log.info(`\n[product-discovery] using cache (${ageStr}, confidence: ${cached.confidence})${staleHint}`);
+       productSpec = cached;
+     } else {
+-      const discoveryContext = await browser.newContext({ viewport: VIEWPORT });
++      if (replaceFailedGuestCache) {
++        log.info("\n[product-discovery] ignoring unconfirmed guest cache; a saved session is available");
++      }
++      const discoveryOptions: Parameters<typeof browser.newContext>[0] = { viewport: VIEWPORT };
++      if (savedSession?.status === "ready") {
++        discoveryOptions.storageState = savedSession.path;
++        const who = savedSession.email ? ` (${savedSession.email})` : "";
++        log.info(`[product-discovery] using saved session${who}: ${savedSession.path}`);
++      } else if (savedSession?.status === "missing-file") {
++        log.warn(`[product-discovery] saved session file missing, discovering as guest: ${savedSession.path}`);
++      }
++      const discoveryContext = await browser.newContext(discoveryOptions);
+       const discoveryPage = await discoveryContext.newPage();
+       productSpec = await discoverProduct(BASE_URL, discoveryPage, client, defaultModel, targetConfig.projectPath);
+       await discoveryContext.close();
