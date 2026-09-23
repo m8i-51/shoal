@@ -1,0 +1,339 @@
+;
+            const normalized = hrefs
+              .map((h) => normalizePath(h, siteMapOrigin))
+              .filter((p): p is string => Boolean(p));
+            const ingested = ingestDiscoveredPaths(siteMap, normalized, {
+              runBudget: MAX_DISCOVERED_PER_RUN,
+              usedBudget: discoverBudget.used,
+            });
+            discoverBudget.used = ingested.usedBudget;
+          }
+        } catch (e) {
+          log.warn(`  [site-map] visit/discover update failed:`, e);
+        }
+      }
+
+      return sendToClaude && screenshot
+        ? [
+            { type: "text", text },
+            { type: "image", source: { type: "base64", media_type: "image/png", data: screenshot.base64 } },
+          ]
+        : text;
+    },
+  }));
+
+  try {
+    const result = await runToolSession({
+      provider: llmProvider,
+      client,
+      model: defaultModel,
+      system: systemPrompt,
+      userPrompt: [
+        { type: "image", source: { type: "base64", media_type: "image/png", data: initialScreenshot.base64 } },
+        { type: "text", text: opening },
+      ],
+      tools: sessionTools,
+      maxIterations: MAX_ITERATIONS,
+      maxTokens: 1024,
+      onAfterTools: ({ results, iteration, maxIterations }) => {
+        agentLog.iterations = iteration;
+        if (iteration >= maxIterations) agentLog.status = "iteration_limit";
+
+        const remaining = maxIterations - iteration;
+        let budgetHint = `[${remaining} turns remaining]`;
+        if (remaining <= 2) {
+          budgetHint += " Last turns. Post any remaining findings with post_feedback, then finish.";
+        } else if (remaining <= 4) {
+          budgetHint += " Start wrapping up.";
+        }
+
+        const PROGRESS_TOOLS = new Set(["navigate", "fill", "post_feedback"]);
+        const recent = agentLog.actions.slice(-5).map((a) => a.tool);
+        if (recent.length >= 5 && !recent.some((t) => PROGRESS_TOOLS.has(t))) {
+          budgetHint += " You seem stuck on the same page. Navigate to a different page.";
+        }
+
+        const observationWarning = buildObservationWarning(observation);
+        if (observationWarning) {
+          budgetHint += `\n\n${observationWarning}\nUse read_console_logs or read_network_errors for details.`;
+        }
+
+        const last = results[results.length - 1];
+        if (!last) return;
+        const lastContent = last.content;
+        results[results.length - 1] = {
+          ...last,
+          content:
+            typeof lastContent === "string"
+              ? `${lastContent}\n\n${budgetHint}`
+              : ([...(lastContent as unknown[]), { type: "text" as const, text: budgetHint }] as Anthropic.ToolResultBlockParam["content"]),
+        };
+      },
+    });
+    agentLog.iterations = result.iterations;
+    if (agentLog.status !== "iteration_limit") agentLog.status = "completed";
+    if (result.iterations >= MAX_ITERATIONS) agentLog.status = "iteration_limit";
+  } catch (e) {
+    agentLog.status = "error";
+    agentLog.error = String(e);
+    log.error(`[${agent.name}] error:`, e);
+  } finally {
+    agentLog.completedAt = new Date().toISOString();
+    updatePageHashes(host, pageHashUpdates);
+  }
+
+  log.info(`[${logPrefix}] ${agent.name} done (feedback: ${agentLog.feedbacksSaved.length})`);
+  return agentLog;
+}
+
+function formatThresholdCandidatesForPrompt(candidates: ThresholdCandidate[]): string {
+  if (candidates.length === 0) return "(none assigned)";
+  return candidates
+    .map(
+      (c, i) =>
+        `${i + 1}. [${c.kind}/p${c.priority}] id=${c.id}\n` +
+        `   area: ${c.area}\n` +
+        `   signal: ${c.signal}\n` +
+        `   howToProbe: ${c.howToProbe}`,
+    )
+    .join("\n");
+}
+
+function makeRegressionProber(): Agent {
+  return {
+    id: `agent_regression_${Date.now()}`,
+    name: "Regression QA",
+    role: "qa",
+    persona:
+      "A careful QA engineer who re-tests closed issues in the real UI. Verifies fixes by reproducing the original steps in the browser. Does not mark a UI bug as verified from API responses alone.",
+    createdAt: new Date().toISOString(),
+    origin: "auto",
+    status: "active",
+    accountRole: "user",
+  };
+}
+
+function makeThresholdProbers(count: number): Agent[] {
+  const now = new Date().toISOString();
+  return Array.from({ length: count }, (_, i) => ({
+    id: `agent_threshold_${i + 1}`,
+    name: count === 1 ? "Threshold Prober" : `Threshold Prober ${i + 1}`,
+    role: "threshold-prober",
+    persona:
+      "A careful boundary probe who pushes limits the way a power user would — form maxima, plan quotas, permission edges, and moments where the experience falls apart — then reports what actually broke or felt ambiguous. Does not invent findings when the boundary behaves clearly.",
+    createdAt: now,
+  }));
+}
+
+function pickThresholdAuthRole(testAccounts: TestAccount[], fallbackRole: string): string {
+  return testAccounts[0]?.role ?? fallbackRole;
+}
+
+async function runThresholdAgent(
+  agent: Agent,
+  page: Page,
+  productSpec: ProductSpec,
+  candidates: ThresholdCandidate[],
+  authPlan: BrowserAuthPlan = { handoff: { kind: "guest" }, startPath: "/" },
+): Promise<BrowserAgentLog> {
+  log.info(`\n[threshold] ${agent.name} start (${candidates.length} candidate(s))`);
+
+  const agentLog: BrowserAgentLog = {
+    agentName: agent.name,
+    persona: agent.persona,
+    startedAt: new Date().toISOString(),
+    completedAt: null,
+    status: "completed",
+    iterations: 0,
+    actions: [],
+    visitedPaths: [],
+    feedbacksSaved: [],
+    regressionChecks: [],
+    error: null,
+  };
+
+  const observation = setupObservation(page);
+  const host = new URL(BASE_URL).host;
+  const cachedHashes = loadPageHashes(host);
+  const pageHashUpdates: Record<string, string> = {};
+  const MAX_ITERATIONS = thresholdIterations();
+
+  const systemPrompt = `You are "${agent.name}".
+Role: ${agent.role}
+Persona: ${agent.persona}
+
+You probe boundaries of "${productSpec.appName}" — not free exploration.
+Work through your assigned threshold candidates. Prefer evidence over speculation.
+
+[App Overview]
+${productSpec.appDescription}
+
+[Assigned Threshold Candidates]
+${formatThresholdCandidatesForPrompt(candidates)}
+
+[How to Proceed]
+1. Pick the highest-priority remaining candidate
+2. Navigate to its area; if needed, use [API check] tools to seed a near-limit state
+3. Follow howToProbe in the browser (fill/click/select as a real user would)
+4. If the boundary crashes, silently fails, loses data, or shows an unclear/wrong message — report with post_feedback
+5. If the boundary behaves clearly and safely, do NOT invent a finding — move to the next candidate
+6. If an area does not exist, skip that candidate
+7. Finish after probing your list (within ${MAX_ITERATIONS} actions)
+
+When writing the body, match the tone to the category:
+- bug: technical ("Submitting 501 chars returned 500 with no validation...", "Expected a 403 at the plan limit but the create succeeded")
+- ux: experiential ("I hit the seat limit and had no idea what to do next...", "The error appeared after I left the field and I could not tell which limit I crossed")
+- feature-request / goal-gap: only if a missing affordance at the boundary clearly blocks a user outcome
+
+[Using Observation Tools]
+- After probing, call diff_since_last_action / read_network_errors / read_console_logs when the UI reaction is unclear
+- Use check_swarm_signals once mid-session; if another agent reported something in your area, try to reproduce it as a threshold probe and report in your own words
+
+[Reference: Implemented Features]
+${productSpec.features}
+${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${goalsSection(productSpec)}${guardrailPrompt(SHOAL_MODE)}${authPrompt(authPlan.handoff)}
+
+${untrustedContentPrompt()}`;
+
+  const startUrl = resolveLoginUrl(BASE_URL, authPlan.startPath);
+  await page.goto(startUrl, { waitUntil: "load", timeout: 15000 });
+  await page.waitForTimeout(RUN_TIMINGS.agentStartupMs);
+  const initialScreenshot = await takeScreenshot(page, "initial");
+
+  const opening = (() => {
+    switch (authPlan.handoff.kind) {
+      case "credentials":
+        return "The login page is open. Sign in with the exact credentials in [Authentication], then probe your assigned thresholds. Do not invent other usernames or passwords.";
+      case "guest":
+        return "The app is open. Start probing your assigned thresholds. If you see a login form, do not guess usernames or passwords — probe only what is available without an account.";
+      case "session":
+        return "The app is open and you are already logged in. Start probing your assigned thresholds.";
+      default: {
+        const _exhaustive: never = authPlan.handoff;
+        return `The app is open. Start probing. (${String(_exhaustive)})`;
+      }
+    }
+  })();
+
+  const sessionTools = BROWSER_TOOLS.map((t) => ({
+    name: t.name,
+    description: t.description ?? t.name,
+    input_schema: t.input_schema as Record<string, unknown>,
+    execute: async (input: Record<string, unknown>): Promise<ToolResultContent> => {
+      const { text, screenshot, sendToClaude } = await executeBrowserTool(t.name, input, {
+        ...browserToolBaseContext(),
+        page,
+        agentId: agent.id,
+        agentLog,
+        observation,
+        scenarioOutcomes: [],
+        cachedHashes,
+        pageHashUpdates,
+        closedIssues: [],
+      });
+      log.info(`  → ${formatToolCallLog(t.name, input, 60)}`);
+
+      return sendToClaude && screenshot
+        ? [
+            { type: "text", text },
+            { type: "image", source: { type: "base64", media_type: "image/png", data: screenshot.base64 } },
+          ]
+        : text;
+    },
+  }));
+
+  try {
+    const result = await runToolSession({
+      provider: llmProvider,
+      client,
+      model: defaultModel,
+      system: systemPrompt,
+      userPrompt: [
+        { type: "image", source: { type: "base64", media_type: "image/png", data: initialScreenshot.base64 } },
+        { type: "text", text: opening },
+      ],
+      tools: sessionTools,
+      maxIterations: MAX_ITERATIONS,
+      maxTokens: 1024,
+      onAfterTools: ({ results, iteration, maxIterations }) => {
+        agentLog.iterations = iteration;
+        if (iteration >= maxIterations) agentLog.status = "iteration_limit";
+
+        const remaining = maxIterations - iteration;
+        let budgetHint = `[${remaining} turns remaining]`;
+        if (remaining <= 2) {
+          budgetHint += " Last turns. Post any remaining threshold findings with post_feedback, then finish.";
+        } else if (remaining <= 4) {
+          budgetHint += " Start wrapping up remaining candidates.";
+        }
+
+        const PROGRESS_TOOLS = new Set(["navigate", "fill", "post_feedback"]);
+        const recent = agentLog.actions.slice(-5).map((a) => a.tool);
+        if (recent.length >= 5 && !recent.some((t) => PROGRESS_TOOLS.has(t))) {
+          budgetHint += " You seem stuck. Move to the next threshold candidate or a different area.";
+        }
+
+        const observationWarning = buildObservationWarning(observation);
+        if (observationWarning) {
+          budgetHint += `\n\n${observationWarning}\nUse read_console_logs or read_network_errors for details.`;
+        }
+
+        const last = results[results.length - 1];
+        if (!last) return;
+        const lastContent = last.content;
+        results[results.length - 1] = {
+          ...last,
+          content:
+            typeof lastContent === "string"
+              ? `${lastContent}\n\n${budgetHint}`
+              : ([...(lastContent as unknown[]), { type: "text" as const, text: budgetHint }] as Anthropic.ToolResultBlockParam["content"]),
+        };
+      },
+    });
+    agentLog.iterations = result.iterations;
+    if (agentLog.status !== "iteration_limit") agentLog.status = "completed";
+    if (result.iterations >= MAX_ITERATIONS) agentLog.status = "iteration_limit";
+  } catch (e) {
+    agentLog.status = "error";
+    agentLog.error = String(e);
+    log.error(`[${agent.name}] error:`, e);
+  } finally {
+    agentLog.completedAt = new Date().toISOString();
+    updatePageHashes(host, pageHashUpdates);
+  }
+
+  log.info(`[threshold] ${agent.name} done (feedback: ${agentLog.feedbacksSaved.length})`);
+  return agentLog;
+}
+
+// ================================================================
+// Main
+// ================================================================
+
+// verify モード: 検証専用エージェント 1 体で finding の再現を試み、結果を JSON に書き出す
+async function runVerifyMode(
+  browser: Awaited<ReturnType<typeof chromium.launch>>,
+  productSpec: ProductSpec,
+  scenarioOutcomes: ScenarioOutcome[],
+  finding: VerifyFinding,
+): Promise<void> {
+  log.info(`\n[verify] verifying fix for: "${finding.title}"`);
+  runLog.summary.totalAgents = 1;
+
+  const verifier: Agent = {
+    id: "agent_verifier",
+    name: "Verifier",
+    role: "qa",
+    persona: "A meticulous QA engineer who verifies whether previously reported issues are actually fixed. Skeptical by nature — retraces the exact flow that caused the problem before concluding anything.",
+    createdAt: new Date().toISOString(),
+  };
+
+  const scenario: Scenario = {
+    id: "verify",
+    title: `Verify fix: ${finding.title}`,
+    context: "You are verifying whether a previously reported issue has been fixed in the current build.",
+    goal: `Try hard to reproduce this previously reported issue:\n---\nTitle: ${finding.title}\n${finding.body}\n---\nRetrace the same flow that caused it. If the issue NO LONGER occurs after a genuine attempt, the fix is verified — call post_outcome with achieved=true. If it still occurs (even partially), call post_outcome with achieved=false and describe exactly what still happens.`,
+    constraints: "Focus only on verifying this one issue. Do not explore unrelated areas.",
+  };
+
+  const context = a
