@@ -244,6 +244,30 @@ export function planBrowserAuth(opts: {
   return { handoff: { kind: "guest" }, startPath: "/" };
 }
 
+export type DiscoveryStorageState =
+  | { status: "ready"; path: string; email?: string }
+  | { status: "missing-file"; path: string; email?: string };
+
+/**
+ * Session product discovery should open with.
+ * Same default as a browser agent with no persona role: a saved user session,
+ * then any other saved session. Credential-only accounts stay logged out here;
+ * Account Manager signs those in after the spec exists.
+ */
+export function discoveryStorageState(accounts: TestAccount[]): DiscoveryStorageState | undefined {
+  const plan = planBrowserAuth({
+    testAccounts: accounts,
+    accountRole: "user",
+    preferAccountSession: false,
+  });
+  if (plan.handoff.kind !== "session" || !plan.storageStatePath) return undefined;
+  const email = plan.handoff.email;
+  if (!fs.existsSync(plan.storageStatePath)) {
+    return { status: "missing-file", path: plan.storageStatePath, email };
+  }
+  return { status: "ready", path: plan.storageStatePath, email };
+}
+
 export function authPrompt(handoff: AuthHandoff): string {
   switch (handoff.kind) {
     case "session":

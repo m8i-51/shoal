@@ -7,7 +7,7 @@ vi.mock("../findings", () => ({ saveFinding: vi.fn() }));
 import * as fs from "fs";
 import { createMessageWithRetry } from "../llm-retry";
 import { saveFinding } from "../findings";
-import { loadTestAccounts, inspectAccountsFile, resolveAccountSetup, runAccountManager, loginCandidateUrls, resolveLoginUrl, planBrowserAuth, authPrompt, describeAuthPlan, loginLooksEstablished, storageStateHasSession, describeLoginFailure, pickAdminAccount, type TestAccount } from "../account-manager";
+import { loadTestAccounts, inspectAccountsFile, resolveAccountSetup, runAccountManager, loginCandidateUrls, resolveLoginUrl, planBrowserAuth, authPrompt, describeAuthPlan, loginLooksEstablished, storageStateHasSession, describeLoginFailure, pickAdminAccount, discoveryStorageState, type TestAccount } from "../account-manager";
 import type { ProductSpec } from "../product-discovery";
 import type { LLMClient } from "../llm-client";
 import type { Page, BrowserContext } from "playwright";
@@ -844,6 +844,41 @@ describe("planBrowserAuth / authPrompt", () => {
     });
     expect(describeAuthPlan("Ada", plan)).toContain("role mismatch");
     expect(authPrompt(plan.handoff)).not.toContain("secret");
+  });
+
+  it("discovery は保存済み user セッションを開き、ファイルが無ければ渡さない", () => {
+    const accounts: TestAccount[] = [
+      { email: "admin@x.com", password: "p", role: "admin", storageStatePath: "/states/admin.json" },
+      { email: "user@x.com", password: "p", role: "user", storageStatePath: "/states/user.json" },
+    ];
+    vi.mocked(fs.existsSync).mockImplementation((p) => p === "/states/user.json");
+    expect(discoveryStorageState(accounts)).toEqual({
+      status: "ready",
+      path: "/states/user.json",
+      email: "user@x.com",
+    });
+
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    expect(discoveryStorageState(accounts)).toEqual({
+      status: "missing-file",
+      path: "/states/user.json",
+      email: "user@x.com",
+    });
+  });
+
+  it("discovery は資格情報だけではセッションを注入しない", () => {
+    expect(discoveryStorageState([credsOnly])).toBeUndefined();
+  });
+
+  it("user セッションが無ければ他の保存済みセッションを discovery に使う", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    expect(discoveryStorageState([
+      { email: "admin@x.com", password: "p", role: "admin", storageStatePath: "/states/admin.json" },
+    ])).toEqual({
+      status: "ready",
+      path: "/states/admin.json",
+      email: "admin@x.com",
+    });
   });
 
   it("セッションが一つも無いときだけ資格情報を渡す", () => {

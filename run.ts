@@ -46,7 +46,7 @@ import { getRetentionDays, pruneRunArtifacts } from "./framework/retention";
 import { loadPersonaPack, formatPackForPrompt, type PersonaPack } from "./framework/persona-pack";
 import { buildTrackers, formatIssuesCreatedLine } from "./framework/trackers/index";
 import { setupObservation, buildObservationWarning } from "./framework/observation";
-import { discoverProduct, loadCachedSpec, resolveLoginPath, type ProductSpec } from "./framework/product-discovery";
+import { discoverProduct, isUnconfirmedDiscovery, loadCachedSpec, resolveLoginPath, type ProductSpec } from "./framework/product-discovery";
 import { designOrg } from "./framework/org-designer";
 import { designScenarios, findMultiActorScenario, pairAgentsToActors, type Scenario, type ScenarioOutcome } from "./framework/scenario-designer";
 import { runTriageAgent, type TriageResult } from "./framework/triage";
@@ -56,7 +56,7 @@ import type { AgentLog, Finding, RegressionCheck } from "./framework/types";
 import { resolveIssueId, formatIssueRef } from "./framework/issue-id";
 import type { ClosedIssue } from "./framework/trackers/types";
 import { loadTarget, applyLoadedTarget } from "./targets";
-import { runAccountManager, resolveAccountSetup, persistAccountSessions, planBrowserAuth, authPrompt, describeAuthPlan, resolveLoginUrl, type TestAccount, type BrowserAuthPlan } from "./framework/account-manager";
+import { runAccountManager, resolveAccountSetup, persistAccountSessions, planBrowserAuth, authPrompt, describeAuthPlan, resolveLoginUrl, discoveryStorageState, loadTestAccounts, type TestAccount, type BrowserAuthPlan } from "./framework/account-manager";
 import { estimateCost, formatCostUSD } from "./framework/cost";
 import {
   normalizeThresholdCandidates,
@@ -1302,7 +1302,11 @@ export async function main() {
   const scenarioOutcomes: ScenarioOutcome[] = [];
   try {
     const cached = loadCachedSpec(BASE_URL);
-    if (cached && !REFRESH_SPEC) {
+    const savedSession = discoveryStorageState(loadTestAccounts());
+    const replaceFailedGuestCache = Boolean(
+      cached && isUnconfirmedDiscovery(cached) && savedSession?.status === "ready" && !REFRESH_SPEC,
+    );
+    if (cached && !REFRESH_SPEC && !replaceFailedGuestCache) {
       const ageDays = cached.discoveredAt
         ? Math.floor((Date.now() - new Date(cached.discoveredAt).getTime()) / 86_400_000)
         : null;
@@ -1311,7 +1315,18 @@ export async function main() {
       log.info(`\n[product-discovery] using cache (${ageStr}, confidence: ${cached.confidence})${staleHint}`);
       productSpec = cached;
     } else {
-      const discoveryContext = await browser.newContext({ viewport: VIEWPORT });
+      if (replaceFailedGuestCache) {
+        log.info("\n[product-discovery] ignoring unconfirmed guest cache; a saved session is available");
+      }
+      const discoveryOptions: Parameters<typeof browser.newContext>[0] = { viewport: VIEWPORT };
+      if (savedSession?.status === "ready") {
+        discoveryOptions.storageState = savedSession.path;
+        const who = savedSession.email ? ` (${savedSession.email})` : "";
+        log.info(`[product-discovery] using saved session${who}: ${savedSession.path}`);
+      } else if (savedSession?.status === "missing-file") {
+        log.warn(`[product-discovery] saved session file missing, discovering as guest: ${savedSession.path}`);
+      }
+      const discoveryContext = await browser.newContext(discoveryOptions);
       const discoveryPage = await discoveryContext.newPage();
       productSpec = await discoverProduct(BASE_URL, discoveryPage, client, defaultModel, targetConfig.projectPath);
       await discoveryContext.close();
