@@ -1,5 +1,6 @@
 import type { LLMClient } from "./llm-client";
 import { runToolSession } from "./tool-session";
+import { ToolSessionNoOpError } from "./tool-types";
 import { normalizeThresholdCandidates, type ThresholdCandidate } from "./threshold";
 import { normalizeProductEdge, type ProductEdge } from "./product-edge";
 import type { Page } from "playwright";
@@ -515,17 +516,30 @@ ${untrustedContentPrompt()}`;
     },
   }));
 
-  await runToolSession({
-    provider: process.env.LLM_PROVIDER ?? "anthropic",
-    client,
-    model,
-    system: systemPrompt,
-    userPrompt: initialContent,
-    tools: sessionTools,
-    maxIterations: 8,
-    maxTokens: 2048,
-    shouldStop: ({ toolUses }) => toolUses.some((tu) => tu.name === "output_spec"),
-  });
+  try {
+    await runToolSession({
+      provider: process.env.LLM_PROVIDER ?? "anthropic",
+      client,
+      model,
+      system: systemPrompt,
+      userPrompt: initialContent,
+      tools: sessionTools,
+      maxIterations: 8,
+      maxTokens: 2048,
+      shouldStop: ({ toolUses }) => toolUses.some((tu) => tu.name === "output_spec"),
+    });
+  } catch (e) {
+    if (e instanceof ToolSessionNoOpError) {
+      // A silent no-op must not fall through to the fallback spec. Saving that
+      // would replace a confirmed cache with (auto-discovery failed).
+      log.error(
+        "[product-discovery] claude-cli made no tool calls, so this run did not save a spec. " +
+          "A previous product spec was left unchanged. " +
+          "REFRESH_SPEC=1 retries discovery; a silent no-op will not replace a confirmed spec with (auto-discovery failed).",
+      );
+    }
+    throw e;
+  }
 
   if (!spec) {
     log.info("  [product-discovery] spec not confirmed, using fallback");

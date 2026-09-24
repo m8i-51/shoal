@@ -4,6 +4,7 @@ import * as path from "path";
 import type { LLMClient } from "./llm-client";
 import type { Finding } from "./types";
 import { runToolSession } from "./tool-session";
+import { ToolSessionNoOpError } from "./tool-types";
 import type { IssueTracker } from "./trackers/index";
 import { recordIssueLink } from "./adoption";
 import { commentReturningUserReReports } from "./triage-rereport";
@@ -382,16 +383,26 @@ When merging findings of differing impact, use the highest.
     },
   }));
 
-  await runToolSession({
-    provider: process.env.LLM_PROVIDER ?? "anthropic",
-    client,
-    model,
-    system: systemPrompt,
-    userPrompt: `Triage the feedback and create issue tickets via ${tracker.name}.`,
-    tools: sessionTools,
-    maxIterations: 15,
-    maxTokens: 2048,
-  });
+  try {
+    await runToolSession({
+      provider: process.env.LLM_PROVIDER ?? "anthropic",
+      client,
+      model,
+      system: systemPrompt,
+      userPrompt: `Triage the feedback and create issue tickets via ${tracker.name}.`,
+      tools: sessionTools,
+      maxIterations: 15,
+      maxTokens: 2048,
+    });
+  } catch (e) {
+    if (e instanceof ToolSessionNoOpError) {
+      log.error(
+        "[triage] claude-cli made no tool calls. Findings stay unprocessed and triage was not marked complete. " +
+          "Run `shoal triage` to retry.",
+      );
+    }
+    throw e;
+  }
 
   const result = emptyTriageResult({
     issued: issuedIds,
