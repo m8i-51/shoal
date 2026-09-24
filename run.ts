@@ -16,7 +16,7 @@ import { createLLMClient } from "./framework/llm-client";
 import type { Tool } from "./framework/llm-client";
 import { runAgentLoop, sleep, rateLimitRetries } from "./framework/agent-loop";
 import { runToolSession } from "./framework/tool-session";
-import type { ToolResultContent } from "./framework/tool-types";
+import { ToolSessionNoOpError, type ToolResultContent } from "./framework/tool-types";
 import { collectedFindings, initRunLog, saveRunLog, saveFinding, getSwarmSignals, runLog } from "./framework/findings";
 import { loadAgents, addAgent, retireAgent, recordAgentMemories, formatAgentMemories, buildMemoryInputs, isFixedAgent, agentOrigin, resolveAgentAccountRole, type Agent } from "./framework/agent-store";
 import { computeRosterSlots, buildRunRoster, splitRosterForDispatch, partitionActiveAgents } from "./framework/roster";
@@ -1798,6 +1798,9 @@ Rules:
         runLog.summary.totalIssuesPosted += triageResult.issuesCreated;
       } catch (e) {
         log.error("[triage] error:", e);
+        // A no-op session leaves findings pending. Swallowing it still prints
+        // "All agents done" and looks like triage finished.
+        if (e instanceof ToolSessionNoOpError) throw e;
       }
     }
 

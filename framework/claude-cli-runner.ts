@@ -10,8 +10,9 @@
 import { z } from "zod";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { query as QueryFnType } from "@anthropic-ai/claude-agent-sdk";
-import type { SessionTool, ToolSessionResult, UserPrompt } from "./tool-types";
+import { ToolSessionNoOpError, type SessionTool, type ToolSessionResult, type UserPrompt } from "./tool-types";
 import { withOutputLanguage } from "./language";
+import * as log from "./log";
 
 export const SHOAL_MCP_SERVER = "shoal";
 
@@ -213,53 +214,65 @@ export async function runClaudeCliSession(opts: ClaudeCliRunnerOptions): Promise
 
   let text = "";
   let numTurns = 0;
+  // One retry: a claude-cli turn can return success without invoking MCP tools.
+  const maxAttempts = opts.tools.length > 0 ? 2 : 1;
 
-  try {
-    for await (const message of queryFn({
-      prompt,
-      options: {
-        model: opts.model,
-        systemPrompt: withOutputLanguage(opts.system),
-        tools: [], // disable Claude Code built-ins
-        mcpServers: { [SHOAL_MCP_SERVER]: server },
-        allowedTools,
-        permissionMode: "dontAsk",
-        maxTurns: opts.maxIterations,
-        abortController: abort,
-        env: {
-          ...process.env,
-          CLAUDE_AGENT_SDK_CLIENT_APP: "shoal/claude-cli",
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      for await (const message of queryFn({
+        prompt,
+        options: {
+          model: opts.model,
+          systemPrompt: withOutputLanguage(opts.system),
+          tools: [], // disable Claude Code built-ins
+          mcpServers: { [SHOAL_MCP_SERVER]: server },
+          allowedTools,
+          permissionMode: "dontAsk",
+          maxTurns: opts.maxIterations,
+          abortController: abort,
+          env: {
+            ...process.env,
+            CLAUDE_AGENT_SDK_CLIENT_APP: "shoal/claude-cli",
+          },
         },
-      },
-    })) {
-      if (message.type === "result") {
-        numTurns = message.num_turns ?? numTurns;
-        if (message.subtype === "success" && "result" in message && typeof message.result === "string") {
-          text = message.result;
-        } else if (message.subtype !== "success" && "errors" in message) {
-          const errors = (message as { errors?: string[] }).errors;
-          if (errors?.length) {
-            throw new Error(`Claude CLI session failed: ${errors.join("; ")}`);
+      })) {
+        if (message.type === "result") {
+          numTurns = message.num_turns ?? numTurns;
+          if (message.subtype === "success" && "result" in message && typeof message.result === "string") {
+            text = message.result;
+          } else if (message.subtype !== "success" && "errors" in message) {
+            const errors = (message as { errors?: string[] }).errors;
+            if (errors?.length) {
+              throw new Error(`Claude CLI session failed: ${errors.join("; ")}`);
+            }
+          }
+        } else if (message.type === "assistant" && "message" in message) {
+          const content = (message as { message?: { content?: unknown[] } }).message?.content;
+          if (Array.isArray(content)) {
+            const parts = content
+              .filter((b): b is { type: "text"; text: string } =>
+                !!b && typeof b === "object" && (b as { type?: string }).type === "text"
+              )
+              .map((b) => b.text);
+            if (parts.length) text = parts.join("\n");
           }
         }
-      } else if (message.type === "assistant" && "message" in message) {
-        const content = (message as { message?: { content?: unknown[] } }).message?.content;
-        if (Array.isArray(content)) {
-          const parts = content
-            .filter((b): b is { type: "text"; text: string } =>
-              !!b && typeof b === "object" && (b as { type?: string }).type === "text"
-            )
-            .map((b) => b.text);
-          if (parts.length) text = parts.join("\n");
-        }
       }
+    } catch (e) {
+      if (abort.signal.aborted) {
+        // Early stop via shouldStop — treat as success with captures
+        return { text, toolCaptures, iterations: iteration || numTurns || 1 };
+      }
+      throw e;
     }
-  } catch (e) {
-    if (abort.signal.aborted) {
-      // Early stop via shouldStop — treat as success with captures
-      return { text, toolCaptures, iterations: iteration || numTurns || 1 };
+
+    const calledNoTools = opts.tools.length > 0 && iteration === 0;
+    if (!calledNoTools) break;
+    if (attempt < maxAttempts) {
+      log.warn("[claude-cli] tool session ended without calling any tools; retrying once");
+      continue;
     }
-    throw e;
+    throw new ToolSessionNoOpError();
   }
 
   return {

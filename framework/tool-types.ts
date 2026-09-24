@@ -46,3 +46,14 @@ export interface ToolSessionResult {
   toolCaptures: Record<string, unknown>;
   iterations: number;
 }
+
+/**
+ * A claude-cli session that was given tools finished without calling any of them.
+ * Callers must not treat that as a completed step.
+ */
+export class ToolSessionNoOpError extends Error {
+  constructor() {
+    super("claude-cli tool session ended without calling any tools");
+    this.name = "ToolSessionNoOpError";
+  }
+}
