@@ -36,6 +36,7 @@ import {
 import type { Scenario, ScenarioOutcome } from "./scenario-designer";
 import type { ClosedIssue } from "./trackers/types";
 import type { Finding, RegressionCheck } from "./types";
+import type { PersonaInformation } from "./persona-contract";
 import type { RunTimings } from "./run-config";
 import { neutralizeMentions } from "./mentions";
 import { ISSUE_CATEGORIES, isIssueCategory } from "./issue-category";
@@ -66,6 +67,7 @@ export interface BrowserAgentLog {
   feedbacksSaved: { title: string; category: string; findingId: string }[];
   regressionChecks: RegressionCheck[];
   error: string | null;
+  information?: "first-run";
 }
 
 export interface Screenshot {
@@ -100,6 +102,7 @@ export interface BrowserToolContext {
   /** Target-config API tool executor, used for any tool this switch does not own. */
   executeAppTool: (toolName: string, input: Record<string, unknown>, agentId: string) => Promise<unknown>;
   trackers: BrowserToolTrackers;
+  information?: PersonaInformation;
 }
 
 export interface BrowserToolResult {
@@ -291,6 +294,7 @@ export async function executeBrowserTool(
           timestamp: new Date().toISOString(),
           screenshotPath: screenshot.filePath,
           ...(findingTracePath ? { tracePath: findingTracePath } : {}),
+          ...(ctx.information === "first-run" ? { information: "first-run" as const } : {}),
         };
         saveFinding(finding);
         agentLog.feedbacksSaved.push({ title: String(title), category: safeCategory, findingId: finding.id });

@@ -45,6 +45,33 @@ describe("formatPackForPrompt", () => {
     };
     expect(formatPackForPrompt(pack)).toContain("accountRole: user");
   });
+
+  it("contract があれば traits と comprehension をプロンプトに含める", () => {
+    const pack: PersonaPack = {
+      name: "P",
+      personas: [{
+        name: "Takuma",
+        role: "planner",
+        persona: "busy",
+        contract: {
+          traits: "speeds through copy, skims numbers",
+          behavioralRules: {
+            discovery: "Thumb-scroll 1–2 screens.",
+            comprehension: "Mash Next on tutorials; do not read the body.",
+            helpSeeking: "Does not search in-app.",
+            exploration: "At most two new screens.",
+          },
+          knowledgeBoundary: { doesNotKnow: ["score meaning"], mayInferFrom: ["labels"] },
+          stateRules: { confusionIncreasesWhen: ["numbers"], confusionDecreasesWhen: ["one sentence"] },
+          abandonment: ["90 seconds"],
+        },
+      }],
+    };
+    const result = formatPackForPrompt(pack);
+    expect(result).toContain("Contract:");
+    expect(result).toContain("speeds through copy");
+    expect(result).toContain("Mash Next on tutorials");
+  });
 });
 
 describe("loadPersonaPack", () => {
@@ -121,6 +148,41 @@ personas:
       );
       const pack = await loadPersonaPack();
       expect(pack?.personas).toHaveLength(1);
+    });
+
+    it("YAML の contract を読み、不正な contract はペルソナを残して省略する", async () => {
+      process.env.SHOAL_PERSONAS = "./with-contract.yaml";
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(`
+personas:
+  - name: "Aiko"
+    role: "newcomer"
+    persona: "first-time"
+    contract:
+      traits: "cautious reader"
+      behavioralRules:
+        discovery: "Scroll the page."
+        comprehension: "Read every tutorial step."
+        helpSeeking: "Looks for help."
+        exploration: "Opens related screens."
+      knowledgeBoundary:
+        doesNotKnow: ["hidden shortcuts"]
+        mayInferFrom: ["on-screen copy"]
+      stateRules:
+        confusionIncreasesWhen: ["jargon"]
+        confusionDecreasesWhen: ["highlighted target"]
+      abandonment:
+        - "login wall"
+  - name: "Broken"
+    role: "r"
+    persona: "p"
+    contract:
+      traits: "incomplete"
+` as unknown as ReturnType<typeof fs.readFileSync>);
+      const pack = await loadPersonaPack();
+      expect(pack?.personas).toHaveLength(2);
+      expect(pack?.personas[0].contract?.behavioralRules.comprehension).toContain("Read every tutorial");
+      expect(pack?.personas[1].contract).toBeUndefined();
     });
 
     it("name/role/persona を欠くエントリはスキップする", async () => {

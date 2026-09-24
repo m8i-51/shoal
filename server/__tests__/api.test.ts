@@ -725,6 +725,22 @@ describe("POST /api/runs/start", () => {
     expect(spawnRun).toHaveBeenCalledWith(expect.objectContaining({ maxBrowsers: 3, maxExplorers: 0, maxThresholds: 8 }));
   });
 
+  it("browserInformation を spawnRun に渡す", async () => {
+    vi.mocked(spawnRun).mockReturnValue("run_999");
+    const res = await request(app)
+      .post("/api/runs/start")
+      .send({ baseUrl: "https://example.com", browserInformation: "first-run" });
+    expect(res.status).toBe(200);
+    expect(spawnRun).toHaveBeenCalledWith(expect.objectContaining({ browserInformation: "first-run" }));
+  });
+
+  it("不正な browserInformation は 400（spawnRun は呼ばれない）", async () => {
+    const res = await request(app).post("/api/runs/start").send({ browserInformation: "naive" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/browserInformation/);
+    expect(spawnRun).not.toHaveBeenCalled();
+  });
+
   it("不正な mode は 400（spawnRun は呼ばれない）", async () => {
     const res = await request(app).post("/api/runs/start").send({ mode: "godmode" });
     expect(res.status).toBe(400);
@@ -932,6 +948,18 @@ describe("personas API", () => {
       role: "first-time user",
       persona: "Needs clear onboarding.",
       lenses: ["trust"],
+      contract: {
+        traits: "speeds through copy",
+        behavioralRules: {
+          discovery: "Thumb-scroll 1–2 screens.",
+          comprehension: "Mash Next on tutorials.",
+          helpSeeking: "Does not search in-app.",
+          exploration: "At most two new screens.",
+        },
+        knowledgeBoundary: { doesNotKnow: ["score meaning"], mayInferFrom: ["labels"] },
+        stateRules: { confusionIncreasesWhen: ["numbers"], confusionDecreasesWhen: ["one sentence"] },
+        abandonment: ["90 seconds"],
+      },
     });
     vi.mocked(addAgent).mockReturnValue({
       id: "agent_1",
@@ -948,7 +976,11 @@ describe("personas API", () => {
     const res = await request(app).post("/api/personas").send({ seed: "初めて使う人" });
     expect(res.status).toBe(201);
     expect(res.body.origin).toBe("fixed");
-    expect(addAgent).toHaveBeenCalledWith(expect.objectContaining({ origin: "fixed", seed: "初めて使う人" }));
+    expect(addAgent).toHaveBeenCalledWith(expect.objectContaining({
+      origin: "fixed",
+      seed: "初めて使う人",
+      contract: expect.objectContaining({ traits: "speeds through copy" }),
+    }));
   });
 
   it("POST /api/personas returns 502 on generation failure", async () => {
@@ -984,6 +1016,54 @@ describe("personas API", () => {
     const rest = await request(app).post("/api/personas/f1/restore");
     expect(rest.status).toBe(200);
     expect(rest.body.status).toBe("active");
+  });
+
+  it("PATCH /api/personas/:id rejects an invalid contract", async () => {
+    vi.mocked(loadAgents).mockReturnValue([
+      { id: "f1", name: "A", role: "r", persona: "p", createdAt: "t", origin: "fixed", status: "active" },
+    ] as never);
+    vi.mocked(updateAgent).mockClear();
+    const res = await request(app).patch("/api/personas/f1").send({ contract: { traits: "x" } });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/contract/i);
+    expect(updateAgent).not.toHaveBeenCalled();
+  });
+
+  it("PATCH /api/personas/:id stores information: first-run on the contract", async () => {
+    vi.mocked(loadAgents).mockReturnValue([
+      { id: "f1", name: "A", role: "r", persona: "p", createdAt: "t", origin: "fixed", status: "active" },
+    ] as never);
+    vi.mocked(updateAgent).mockImplementation((_id, patch) => ({
+      id: "f1",
+      name: "A",
+      role: "r",
+      persona: "p",
+      createdAt: "t",
+      origin: "fixed",
+      status: "active",
+      ...patch,
+    }) as never);
+    const contract = {
+      traits: "speeds through copy",
+      behavioralRules: {
+        discovery: "Thumb-scroll 1–2 screens.",
+        comprehension: "Mash Next on tutorials.",
+        helpSeeking: "Does not search in-app.",
+        exploration: "At most two new screens.",
+      },
+      knowledgeBoundary: { doesNotKnow: ["score meaning"], mayInferFrom: ["labels"] },
+      stateRules: { confusionIncreasesWhen: ["jargon"], confusionDecreasesWhen: ["one sentence"] },
+      abandonment: ["90 seconds lost"],
+      information: "first-run",
+    };
+    const res = await request(app).patch("/api/personas/f1").send({ contract });
+    expect(res.status).toBe(200);
+    expect(updateAgent).toHaveBeenCalledWith(
+      "f1",
+      expect.objectContaining({
+        contract: expect.objectContaining({ information: "first-run" }),
+      }),
+    );
   });
 });
 

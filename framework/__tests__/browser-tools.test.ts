@@ -311,6 +311,15 @@ describe("post_feedback", () => {
     expect(collectedFindings[0].category).toBe("bug");
   });
 
+  it("first-run エージェントの finding に information を付ける", async () => {
+    await executeBrowserTool(
+      "post_feedback",
+      { title: "lost", body: "I don't know what this is", category: "ux" },
+      makeContext({ information: "first-run" }),
+    );
+    expect(collectedFindings[0].information).toBe("first-run");
+  });
+
   it("トレース有効時は finding にトレースを紐づける", async () => {
     await executeBrowserTool(
       "post_feedback",

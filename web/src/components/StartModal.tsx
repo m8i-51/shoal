@@ -14,6 +14,7 @@ export function StartModal({ onClose, onStarted }: Props) {
   const [maxExplorers, setMaxExplorers] = useState(0);
   const [maxThresholds, setMaxThresholds] = useState(1);
   const [mode, setMode] = useState("safe");
+  const [browserInformation, setBrowserInformation] = useState("mixed");
   const [llmBaseUrl, setLlmBaseUrl] = useState("");
   const [llmApiKey, setLlmApiKey] = useState("");
   const [llmModel, setLlmModel] = useState("");
@@ -22,7 +23,7 @@ export function StartModal({ onClose, onStarted }: Props) {
 
   const handleStart = async () => {
     setLoading(true);
-    const body: Record<string, unknown> = { baseUrl, maxBrowsers, maxExplorers, maxThresholds, mode };
+    const body: Record<string, unknown> = { baseUrl, maxBrowsers, maxExplorers, maxThresholds, mode, browserInformation };
     if (llmBaseUrl) body.llmBaseUrl = llmBaseUrl;
     if (llmApiKey) body.llmApiKey = llmApiKey;
     if (llmModel) body.llmModel = llmModel;
@@ -107,6 +108,20 @@ export function StartModal({ onClose, onStarted }: Props) {
               <option value="full">{t("startModal.modeFull")}</option>
             </select>
             <span style={styles.modeHint}>{t(`startModal.modeHint.${mode}`)}</span>
+          </label>
+
+          <label style={styles.label}>
+            {t("startModal.browserInformation")}
+            <select
+              value={browserInformation}
+              onChange={(e) => setBrowserInformation(e.target.value)}
+              style={styles.input}
+            >
+              <option value="mixed">{t("startModal.browserInformationMixed")}</option>
+              <option value="first-run">{t("startModal.browserInformationFirstRun")}</option>
+              <option value="informed">{t("startModal.browserInformationInformed")}</option>
+            </select>
+            <span style={styles.modeHint}>{t(`startModal.browserInformationHint.${browserInformation}`)}</span>
           </label>
 
           <p style={styles.fixedHint}>{t("startModal.fixedRosterHint")}</p>

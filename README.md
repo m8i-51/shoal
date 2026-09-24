@@ -86,6 +86,10 @@ Target App (any URL)
 
 Each agent carries a distinct perspective — accessibility, security, business logic, UI design, new user experience, and more. They operate on a shared understanding of the app's purpose and goals. Coverage is tracked across runs, so each session naturally focuses on areas that haven't been explored yet.
 
+**Persona contracts** — a persona is not a bio. Each recruit gets observable rules: how they scan a page, whether they skip a tutorial or read every step, what they do not know, when confusion rises, when they close the tab. Two people on the same four-step onboarding should fork. The dashboard seed, `personas.yaml`, and the persona designer all write this contract; browser and API agents follow it even when it conflicts with being a thorough tester.
+
+**First-run (screen only)** — a contract can also subtract what that person *knows*. First-run browser agents do not get the product brief, the feature list, console logs, or the accessibility tree: the screen is the product. Explorers keep today's briefing. Switch this per persona on the Personas panel, or for the whole browser lane in the Start dialog (mixed / all first-run / all explorers). API and threshold agents stay informed. Product Discovery, goals, and Product Edge do not turn off.
+
 ---
 
 ## What it finds

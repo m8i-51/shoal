@@ -19,6 +19,8 @@ import { runToolSession } from "./framework/tool-session";
 import { ToolSessionNoOpError, type ToolResultContent } from "./framework/tool-types";
 import { collectedFindings, initRunLog, saveRunLog, saveFinding, getSwarmSignals, runLog } from "./framework/findings";
 import { loadAgents, addAgent, retireAgent, recordAgentMemories, formatAgentMemories, buildMemoryInputs, isFixedAgent, agentOrigin, resolveAgentAccountRole, type Agent } from "./framework/agent-store";
+import { formatPersonaContract, parsePersonaContract, parseBrowserInformationMode, effectiveInformation, PERSONA_CONTRACT_GENERATION_SPEC, type AgentLane, type PersonaInformation } from "./framework/persona-contract";
+import { formatGoalsSection, formatAppOverview, formatFeatureReference, formatBrowserToolGuidance } from "./framework/browser-prompt";
 import { computeRosterSlots, buildRunRoster, splitRosterForDispatch, partitionActiveAgents } from "./framework/roster";
 import { updateCoverage, computeWeightedSummary, getLastRunPaths, getFindingHotspots } from "./framework/coverage";
 import {
@@ -77,6 +79,7 @@ import {
   PERSONA_DESIGNER_TOOLS,
   REPORT_REGRESSION_TOOL,
   browserTools,
+  browserToolsForInformation,
   explorerTools,
   regressionTools,
 } from "./framework/agent-tools";
@@ -127,6 +130,7 @@ for (const name of ["shoal.config.ts", "shoal.config.js", "shoal.config.mjs"]) {
 }
 
 const SHOAL_MODE = getShoalMode();
+const BROWSER_INFORMATION_MODE = parseBrowserInformationMode(process.env.SHOAL_BROWSER_INFORMATION);
 const VIEWPORT = resolveViewport();
 if (SHOAL_MODE !== "full") log.info(`[guardrails] mode: ${SHOAL_MODE}`);
 const APP_TOOLS = filterAppTools(targetConfig.appTools, SHOAL_MODE);
@@ -225,11 +229,6 @@ function browserToolBaseContext(): Pick<
 
 
 const EXPLORER_TOOLS: Tool[] = explorerTools(APP_TOOLS);
-
-function goalsSection(spec: ProductSpec): string {
-  if (!spec.appGoals?.length) return "";
-  return `\n[App Goals]\nThese are user/business success conditions (outcomes), not a UI widget checklist. Use category "goal-gap" only when an outcome is blocked. Do not treat missing or mismatched controls (search, filters, sort, badges, etc.) as goal-gap — file those as bug / ux / feature-request instead.\n${spec.appGoals.map((g) => `- ${g}`).join("\n")}\n`;
-}
 const REGRESSION_TOOLS: Tool[] = regressionTools(APP_TOOLS);
 
 // ブラウザレーンのツール。API レーンが有効なときだけ [API check] ツールを含める
@@ -408,7 +407,7 @@ async function runExplorer(
   const systemPrompt = `You are "${agent.name}".
 Role: ${agent.role}
 Persona: ${agent.persona}
-
+${formatPersonaContract(agent.contract, "informed")}
 You are an employee using "${productSpec.appName}".
 You have API tools only — not a real browser. You cannot click UI controls, toggle themes, open notification panels, use a hamburger menu, or complete OAuth in a page.
 If the assigned task requires a real UI, call post_outcome with achieved=false and say it needs the browser lane.
@@ -428,7 +427,7 @@ When writing the body, match the tone to the category:
 
 [Implemented Features]
 ${productSpec.features}
-${productSpec.uiFeatures ? `\n[UI-Only Features]\nThese features exist in the UI but may not be reflected in API responses. Keep them in mind when interpreting API results.\n${productSpec.uiFeatures}\n` : ""}${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${goalsSection(productSpec)}${assignment.scenario
+${productSpec.uiFeatures ? `\n[UI-Only Features]\nThese features exist in the UI but may not be reflected in API responses. Keep them in mind when interpreting API results.\n${productSpec.uiFeatures}\n` : ""}${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${formatGoalsSection(productSpec)}${assignment.scenario
     ? `\n[Your Task for This Run]\nTitle: ${assignment.scenario.title}\nYou are: ${assignment.scenario.context}\nGoal: ${assignment.scenario.goal}\nConstraints: ${assignment.scenario.constraints}\n\nFocus on completing this task naturally. Report any issues you encounter along the way.\nWhen done (or if you cannot complete the goal), call post_outcome with achieved=true/false and a brief reason.\n`
     : assignment.lens
     ? `\n[Focus Area for This Run]\n${assignment.lens}\nKeep this perspective in mind and prioritize reporting related issues.\n`
@@ -485,7 +484,7 @@ ${issueList}
 
 [Reference: Implemented Features]
 ${productSpec.features}
-${productSpec.uiFeatures ? `\n[UI-Only Features]\nThese features exist in the UI but may not be reflected in API responses.\n${productSpec.uiFeatures}\n` : ""}${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${goalsSection(productSpec)}${guardrailPrompt(SHOAL_MODE)}
+${productSpec.uiFeatures ? `\n[UI-Only Features]\nThese features exist in the UI but may not be reflected in API responses.\n${productSpec.uiFeatures}\n` : ""}${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${formatGoalsSection(productSpec)}${guardrailPrompt(SHOAL_MODE)}
 
 ${untrustedContentPrompt()}`;
 
@@ -553,6 +552,9 @@ ${pathCoverageStep}
 6. Call get_scenarios to see the user test scenarios generated for this run — about 70% of agents will be assigned a scenario, so recruit personas whose background fits those scenarios
 7. Call get_agents to check the current agent roster (archived agents are omitted; origin is included)
 8. Adjust AUTO agents only so that active autos == ${autoSlots}${testAccounts.length > 0 ? "\n   — set accountRole on each new agent to a short token matching an available test account (user, instructor, admin). Keep role as a narrative description of the person" : ""}
+   — every add_agent MUST include a behavioral contract. ${PERSONA_CONTRACT_GENERATION_SPEC}
+   — look at existing agents' contract traits. If the roster already has a tutorial-skipper, recruit a reader (or vice versa). Do not hire two people who would both read a 4-step tutorial carefully.
+   — if no active agent is information: first-run, give one new-user recruit information: first-run. Never set first-run on accessibility or security specialists.
    — give 1–2 new recruits an "environment" (mobile device, dark mode, non-default locale, slow connection) that naturally fits their persona's life; leave the rest on desktop
 9. Do not retire fixed agents. Only retire autos when above the autoSlots target.`;
 
@@ -620,15 +622,19 @@ ${pathCoverageStep}
             createdAt: a.createdAt,
             origin: agentOrigin(a),
             status: a.status ?? "active",
+            traits: a.contract?.traits,
+            comprehension: a.contract?.behavioralRules.comprehension,
+            information: a.contract?.information === "first-run" ? "first-run" : "informed",
           }));
           log.info(`  [persona-designer] current agents: ${agents.length}`);
         } else if (t.name === "add_agent") {
-          const { name, role, persona, environment, accountRole } = input as {
+          const { name, role, persona, environment, accountRole, contract } = input as {
             name?: string;
             role?: string;
             persona?: string;
             environment?: EnvironmentProfile;
             accountRole?: string;
+            contract?: unknown;
           };
           try {
             const cleanEnv = sanitizeEnvironment(environment);
@@ -640,6 +646,7 @@ ${pathCoverageStep}
               origin: "auto",
               status: "active",
               ...(accountRole?.trim() ? { accountRole: accountRole.trim() } : {}),
+              contract: parsePersonaContract(contract),
             });
             result = agent;
             log.info(`  [persona-designer] created: ${agent.name} (${agent.role})${agent.accountRole ? ` [accountRole: ${agent.accountRole}]` : ""}${cleanEnv ? ` [env: ${Object.entries(cleanEnv).map(([k, v]) => `${k}=${v}`).join(", ")}]` : ""}`);
@@ -676,7 +683,7 @@ ${pathCoverageStep}
       userPrompt: "Design and manage user personas for this run.",
       tools: sessionTools,
       maxIterations: DEFAULT_PERSONA_DESIGNER_ITERATIONS,
-      maxTokens: 1024,
+      maxTokens: 2048,
     });
     log.info("[persona-designer] done");
   } catch (e) {
@@ -717,6 +724,7 @@ function browserLogToAgentLog(
     })),
     regressionChecks: log.regressionChecks ?? [],
     error: log.error,
+    ...(log.information === "first-run" ? { information: "first-run" as const } : {}),
   };
 }
 
@@ -753,6 +761,7 @@ type BrowserAgentExtras = {
   maxIterations?: number;
   closedIssues?: ClosedIssue[];
   logPrefix?: string;
+  lane?: AgentLane;
 };
 
 async function runBrowserAgent(
@@ -768,12 +777,18 @@ async function runBrowserAgent(
   extras: BrowserAgentExtras = {},
 ): Promise<BrowserAgentLog> {
   const logPrefix = extras.logPrefix ?? "browser";
+  const lane: AgentLane = extras.lane ?? "browser";
+  const information: PersonaInformation = effectiveInformation(agent.contract, {
+    mode: BROWSER_INFORMATION_MODE,
+    lane,
+  });
   const assignmentLabel = assignment.scenario
     ? `[scenario: ${assignment.scenario.title.slice(0, 35)}]`
     : assignment.lens
     ? `[lens: ${assignment.lens.slice(0, 30)}...]`
     : "[free exploration]";
-  log.info(`\n[${logPrefix}] ${agent.name} start ${assignmentLabel}`);
+  const informationTag = information === "first-run" ? ":first-run" : "";
+  log.info(`\n[${logPrefix}${informationTag}] ${agent.name} start ${assignmentLabel}`);
 
   const agentLog: BrowserAgentLog = {
     agentName: agent.name,
@@ -787,6 +802,7 @@ async function runBrowserAgent(
     feedbacksSaved: [],
     regressionChecks: [],
     error: null,
+    ...(information === "first-run" ? { information } : {}),
   };
 
   const observation = setupObservation(page);
@@ -801,12 +817,11 @@ async function runBrowserAgent(
   const systemPrompt = `You are "${agent.name}".
 Role: ${agent.role}
 Persona: ${agent.persona}
-
+${formatPersonaContract(agent.contract, information)}
 You are a real user of "${productSpec.appName}".
 Use the browser tools to navigate the app and carry out everyday tasks.
 
-[App Overview]
-${productSpec.appDescription}
+${formatAppOverview(productSpec, information)}
 
 [How to Proceed]
 1. Navigate to a page with navigate
@@ -821,28 +836,9 @@ When writing the body, match the tone to the category:
 - feature-request: aspirational ("It would have been useful if...", "I wished I could...")
 - goal-gap: goal-oriented ("I was trying to X, but couldn't because...")
 
-[Using Observation Tools]
-- To verify an action was actually applied, call diff_since_last_action
-- If data isn't reflected or errors appear, call read_network_errors
-- For unexpected behavior, call read_console_logs to check JS errors
-- If problems are found, record them with post_feedback
+${formatBrowserToolGuidance(information, { includeApiChecks: MAX_EXPLORERS > 0 })}
 
-[Using API Check Tools (tools prefixed with [API check])]
-- After a browser action, verify the actual saved state via API
-- Data visible in the browser but missing in the API (or vice versa) is an inconsistency bug — report with post_feedback
-
-[Using view_screen]
-- Call it once right after navigate
-- Do not call it repeatedly on the same page
-
-[Using check_swarm_signals]
-- Call it once mid-session to see what other agents exploring this app have reported
-- If a signal matches the area you are in, try to reproduce it as YOUR persona — a finding confirmed by different personas becomes a stronger issue
-- Report reproductions with post_feedback in your own words; do not copy the other agent's report
-
-[Reference: Implemented Features]
-${productSpec.features}
-${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${goalsSection(productSpec)}${assignment.actor && assignment.scenario
+${formatFeatureReference(productSpec, information)}${assignment.actor && assignment.scenario
     ? `\n[Your Task for This Run — Two-User Scenario]\nTitle: ${assignment.scenario.title}\nSituation: ${assignment.scenario.context}\nYou are the "${assignment.actor.role}" actor. Your goal: ${assignment.actor.goal}\n\nRIGHT NOW another agent is using this app as "${assignment.actor.partnerRole}" — your actions and theirs may affect the same data at the same time.\nWhile completing your goal, pay special attention to concurrency and permission issues:\n- data that goes stale and never refreshes after the other user changes it\n- conflicting edits that silently overwrite each other\n- permission or status changes that do not take effect (or take effect inconsistently) mid-session\n- realtime updates, locks, or notifications that never arrive\nReport such issues with post_feedback (usually category "bug").\nWhen done (or if you cannot complete the goal), call post_outcome with achieved=true/false and a brief reason.`
     : assignment.scenario
     ? `\n[Your Task for This Run]\nTitle: ${assignment.scenario.title}\nYou are: ${assignment.scenario.context}\nGoal: ${assignment.scenario.goal}\nConstraints: ${assignment.scenario.constraints}\n\nFocus on completing this task naturally as this user. Report any issues you encounter along the way.\nWhen done (or if you cannot complete the goal), call post_outcome with achieved=true/false and a brief reason.`
@@ -874,7 +870,11 @@ ${untrustedContentPrompt()}`;
     }
   })();
 
-  const sessionTools = [...BROWSER_TOOLS, ...(extras.extraTools ?? [])].map((t) => ({
+  const laneTools = browserToolsForInformation(BROWSER_TOOLS, information);
+  const sessionTools = [
+    ...laneTools,
+    ...(information === "informed" ? extras.extraTools ?? [] : []),
+  ].map((t) => ({
     name: t.name,
     description: t.description ?? t.name,
     input_schema: t.input_schema as Record<string, unknown>,
@@ -890,6 +890,7 @@ ${untrustedContentPrompt()}`;
         pageHashUpdates,
         scenario: assignment.scenario,
         closedIssues: extras.closedIssues ?? [],
+        information,
       });
       log.info(`  → ${formatToolCallLog(t.name, input, 60)}`);
 
@@ -1103,7 +1104,7 @@ When writing the body, match the tone to the category:
 
 [Reference: Implemented Features]
 ${productSpec.features}
-${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${goalsSection(productSpec)}${guardrailPrompt(SHOAL_MODE)}${authPrompt(authPlan.handoff)}
+${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${formatGoalsSection(productSpec)}${guardrailPrompt(SHOAL_MODE)}${authPrompt(authPlan.handoff)}
 
 ${untrustedContentPrompt()}`;
 
@@ -1736,6 +1737,7 @@ Rules:
               maxIterations: regressionMaxIterations(closedIssues.length),
               closedIssues,
               logPrefix: "regression",
+              lane: "regression",
             },
           );
           return { kind: "regression", agent: regressionAgent, log };

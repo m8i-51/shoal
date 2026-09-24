@@ -25,6 +25,8 @@ export interface Finding {
   screenshotPath?: string;
   /** Playwright trace zip — per-finding chunk when saved, else agent session fallback */
   tracePath?: string;
+  /** Set when the reporting browser agent ran first-run (no spec, screen only). */
+  information?: "first-run";
 }
 
 /**
@@ -60,6 +62,8 @@ export interface AgentLog {
   issuesPosted: IssuePosted[];
   regressionChecks: RegressionCheck[];
   error: string | null;
+  /** Set when this browser agent ran first-run (no spec, screen only). */
+  information?: "first-run";
 }
 
 export interface RunLog {

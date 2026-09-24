@@ -37,9 +37,13 @@ export function handleStartRun(input: {
   maxExplorers?: number;
   maxThresholds?: number;
   mode?: string;
+  browserInformation?: "mixed" | "first-run" | "informed";
 }): { runId: string; note: string } {
   if (input.mode !== undefined && !["read-only", "safe", "full"].includes(input.mode)) {
     throw new Error("mode must be one of: read-only, safe, full");
+  }
+  if (input.browserInformation !== undefined && !["mixed", "first-run", "informed"].includes(input.browserInformation)) {
+    throw new Error("browserInformation must be one of: mixed, first-run, informed");
   }
   if (hasActiveRun()) {
     throw new Error("a run is already in progress");
@@ -195,6 +199,7 @@ export function buildMcpServer(): McpServer {
         maxExplorers: z.number().int().min(0).max(8).optional().describe("API explorer agent count (default from .env)"),
         maxThresholds: z.number().int().min(0).max(8).optional().describe("Threshold agent count (default 1; 0 disables)"),
         mode: z.enum(["read-only", "safe", "full"]).optional().describe("Safety mode (default safe)"),
+        browserInformation: z.enum(["mixed", "first-run", "informed"]).optional().describe("What browser agents know this run: mixed (follow each persona), first-run (screen only), informed (product brief + diagnostic tools). API and threshold agents are always informed. Default mixed."),
       },
     },
     async (input) => {

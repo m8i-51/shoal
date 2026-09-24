@@ -70,6 +70,15 @@ describe("spawnRun", () => {
     expect(env.LLM_MODEL).toBe("model-x");
   });
 
+  it("browserInformation を内部 env SHOAL_BROWSER_INFORMATION として渡す", () => {
+    const fakeChild = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(fakeChild as never);
+
+    spawnRun({ browserInformation: "first-run" });
+    const [, , spawnOpts] = vi.mocked(spawn).mock.calls[0];
+    expect((spawnOpts as { env: Record<string, string> }).env.SHOAL_BROWSER_INFORMATION).toBe("first-run");
+  });
+
   it("llmBaseUrl 指定時はサーバー自身の LLM 資格情報を子プロセスに継承させない", () => {
     const fakeChild = createFakeChild();
     vi.mocked(spawn).mockReturnValue(fakeChild as never);

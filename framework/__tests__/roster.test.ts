@@ -6,6 +6,7 @@ import {
   partitionActiveAgents,
 } from "../roster";
 import type { Agent } from "../agent-store";
+import { sampleContract } from "./persona-contract-fixtures";
 
 function agent(partial: Partial<Agent> & Pick<Agent, "id" | "name">): Agent {
   return {
@@ -112,6 +113,33 @@ describe("splitRosterForDispatch", () => {
     expect(browsers[0].id).toBe("f1");
     expect(explorers.map((a) => a.id).sort()).toEqual(["a1", "a2"]);
     expect(regression).toBeNull();
+  });
+
+  it("puts one first-run and one informed browser when slots >= 2", () => {
+    const roster = [
+      agent({ id: "a-fr", name: "FR", origin: "auto", contract: sampleContract({ information: "first-run" }) }),
+      agent({ id: "a-inf", name: "Inf", origin: "auto" }),
+      agent({ id: "a-inf2", name: "Inf2", origin: "auto" }),
+    ];
+    const { browsers, explorers } = splitRosterForDispatch(roster, {
+      maxBrowsers: 2,
+      maxExplorers: 1,
+    });
+    expect(browsers.map((a) => a.id).sort()).toEqual(["a-fr", "a-inf"]);
+    expect(explorers.map((a) => a.id)).toEqual(["a-inf2"]);
+  });
+
+  it("still prefers a fixed agent when there is only one browser slot", () => {
+    const { browsers, explorers } = splitRosterForDispatch(
+      [
+        agent({ id: "a-fr", name: "FR", origin: "auto", contract: sampleContract({ information: "first-run" }) }),
+        agent({ id: "f1", name: "F1", origin: "fixed" }),
+        agent({ id: "a2", name: "A2", origin: "auto" }),
+      ],
+      { maxBrowsers: 1, maxExplorers: 2 },
+    );
+    expect(browsers[0].id).toBe("f1");
+    expect(explorers.map((a) => a.id).sort()).toEqual(["a-fr", "a2"]);
   });
 });
 
