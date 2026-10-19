@@ -10,6 +10,7 @@ This directory holds **architecture decision records (ADRs)** for shoal — why 
 | Doc | Topic |
 |-----|--------|
 | [2026-08-27-site-map-coverage.md](design/2026-08-27-site-map-coverage.md) | Path-level site map memory and coverage |
+| [2026-10-19-explore-action-graph.md](design/2026-10-19-explore-action-graph.md) | Screen → control → next screen memory |
 | [2026-08-27-fixed-persona-roster.md](design/2026-08-27-fixed-persona-roster.md) | Dashboard fixed personas (seed → generate) |
 | [2026-08-27-threshold-agent.md](design/2026-08-27-threshold-agent.md) | Threshold agent lane |
 | [2026-09-02-product-edge.md](design/2026-09-02-product-edge.md) | Product edge and edge-risk triage |

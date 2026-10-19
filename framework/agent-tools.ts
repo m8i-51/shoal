@@ -122,7 +122,7 @@ export const PERSONA_DESIGNER_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: "get_path_coverage",
-    description: "Get site-map coverage vs known paths (unvisited / reached / explored rates), plus paths touched in the most recent run. Use this to recruit agents who will naturally fill coverage gaps. / 既知パスに対するサイトマップ網羅（未訪問・reached・explored・％）と直近runで触ったパスを取得する。網羅の穴を埋めるペルソナ採用に使う",
+    description: "Get site-map coverage vs known paths (unvisited / reached / explored rates), paths touched in the most recent run, and open action branches (screens that still have an unpressed control). Use this to recruit agents who will naturally fill coverage gaps. / 既知パスに対するサイトマップ網羅と、未押しの操作が残っている画面を取得する。網羅の穴を埋めるペルソナ採用に使う",
     input_schema: { type: "object", properties: {}, required: [] },
   },
   {

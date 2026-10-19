@@ -36,6 +36,17 @@ import {
   MAX_DISCOVERED_PER_RUN,
   type SiteMap,
 } from "./framework/site-map";
+import {
+  loadExploreGraph,
+  saveExploreGraph,
+  observeScreen,
+  recordPress,
+  parseClickableControls,
+  formatFrontierHint,
+  formatOpenBranches,
+  formatExploreGraphLogLine,
+  type ExploreGraph,
+} from "./framework/explore-graph";
 import { computeExperienceScore, formatExperienceLine } from "./framework/experience-score";
 import { updateAdoption } from "./framework/adoption";
 import { getShoalMode, filterAppTools, guardrailPrompt } from "./framework/guardrails";
@@ -518,6 +529,7 @@ async function runPersonaDesigner(
   personaPack: PersonaPack | null = null,
   siteMap: SiteMap | null = null,
   autoSlots = 2,
+  exploreGraph: ExploreGraph | null = null,
 ): Promise<void> {
   log.info("\n[persona-designer] starting...");
 
@@ -525,7 +537,7 @@ async function runPersonaDesigner(
     ? `\n[Available Test Accounts (one per role)]\n${testAccounts.map((a) => `- ${a.role}: ${a.email}`).join("\n")}\nWhen recruiting agents, set accountRole to one of these short tokens (user, instructor, admin). Keep role as a narrative description of the person — never put that sentence in accountRole.`
     : "";
 
-  const pathCoverageStep = "3. Call get_path_coverage to review site-map coverage (unvisited / reached / explored rates and gaps) — recruit agents whose role would naturally fill UNVISITED or thinly visited paths\n4. Call get_finding_hotspots to see where problems have clustered across all past runs — recruit agents to under-investigated areas, or specialists to problem hotspots";
+  const pathCoverageStep = "3. Call get_path_coverage to review site-map coverage (unvisited / reached / explored rates and gaps) and open action branches — recruit agents whose role would naturally fill UNVISITED paths, thinly visited paths, or screens that still have an unpressed control\n4. Call get_finding_hotspots to see where problems have clustered across all past runs — recruit agents to under-investigated areas, or specialists to problem hotspots";
 
   const personaTemplateStep = personaPack
     ? "2. Call get_persona_templates to get project-specific persona archetypes — prefer these over inventing new personas from scratch"
@@ -577,9 +589,10 @@ ${pathCoverageStep}
           log.info(`  [persona-designer] persona templates fetched (${personaPack?.personas.length ?? 0})`);
         } else if (t.name === "get_path_coverage") {
           if (siteMap) {
+            const branches = exploreGraph ? `\n\n${formatOpenBranches(exploreGraph)}` : "";
             result = formatSiteMapForPersona(siteMap, {
               recentPaths: lastRunPaths?.visitedPaths ?? [],
-            });
+            }) + branches;
           } else if (!lastRunPaths || lastRunPaths.visitedPaths.length === 0) {
             result = "(no path coverage data yet — this is the first run or no paths were recorded)";
           } else {
@@ -755,6 +768,24 @@ function recordRegressionAgentRun(agent: Agent, browserLog: BrowserAgentLog): vo
 
 
 
+const EXPLORE_OBSERVE_TOOLS = new Set(["click", "navigate", "fill", "select", "view_screen"]);
+
+async function updateExploreGraph(
+  graph: ExploreGraph,
+  page: Page,
+  origin: string,
+  step: { tool: string; input: Record<string, unknown>; text: string; beforePath: string | null },
+): Promise<void> {
+  const afterPath = normalizePath(page.url(), origin);
+  if (step.tool === "click" && step.text.startsWith("Clicked:") && step.beforePath) {
+    const description = String(step.input.description ?? step.input.ref ?? "");
+    recordPress(graph, step.beforePath, description, afterPath);
+  }
+  if (!afterPath || !EXPLORE_OBSERVE_TOOLS.has(step.tool)) return;
+  const snapshot = await page.ariaSnapshot({ mode: "ai", depth: 6 });
+  observeScreen(graph, afterPath, parseClickableControls(snapshot));
+}
+
 type BrowserAgentExtras = {
   extraTools?: Anthropic.Tool[];
   extraPrompt?: string;
@@ -775,6 +806,7 @@ async function runBrowserAgent(
   runId: string = "",
   discoverBudget: { used: number } | null = null,
   extras: BrowserAgentExtras = {},
+  exploreGraph: ExploreGraph | null = null,
 ): Promise<BrowserAgentLog> {
   const logPrefix = extras.logPrefix ?? "browser";
   const lane: AgentLane = extras.lane ?? "browser";
@@ -813,6 +845,10 @@ async function runBrowserAgent(
   const cachedHashes = loadPageHashes(host);
   const pageHashUpdates: Record<string, string> = {};
   const MAX_ITERATIONS = extras.maxIterations ?? browserIterations();
+  const steerFrontier = Boolean(exploreGraph) && lane === "browser" && !assignment.scenario;
+  const frontierPrompt = steerFrontier
+    ? `\n[Branch coverage]\nAcross runs, which control was pressed on each screen, and where it led, is remembered. A control is not finished while any branch past it is still untried. When a turn includes an [explore frontier] note, follow it: press an unpressed control before repeating one, and re-enter a pressed control when it is the way to a branch you have not taken.\n`
+    : "";
 
   const systemPrompt = `You are "${agent.name}".
 Role: ${agent.role}
@@ -829,7 +865,7 @@ ${formatAppOverview(productSpec, information)}
 3. If you find any issues, record them with post_feedback (they become Issues after triage)
 4. Move to another page and repeat
 5. Finish within ${MAX_ITERATIONS} actions
-
+${frontierPrompt}
 When writing the body, match the tone to the category:
 - bug: technical ("The endpoint returned 500 when...", "Expected X but got Y")
 - ux: experiential ("I tried to find the button but...", "It was unclear what would happen if...")
@@ -852,6 +888,17 @@ ${untrustedContentPrompt()}`;
   await page.goto(startUrl, { waitUntil: "load", timeout: 15000 });
   await page.waitForTimeout(RUN_TIMINGS.agentStartupMs);
   const initialScreenshot = await takeScreenshot(page, "initial");
+  if (exploreGraph) {
+    try {
+      const startPath = normalizePath(page.url(), siteMapOrigin);
+      if (startPath) {
+        const snapshot = await page.ariaSnapshot({ mode: "ai", depth: 6 });
+        observeScreen(exploreGraph, startPath, parseClickableControls(snapshot));
+      }
+    } catch (e) {
+      log.warn(`  [explore-graph] initial snapshot failed:`, e);
+    }
+  }
 
   const opening = (() => {
     switch (authPlan.handoff.kind) {
@@ -879,6 +926,7 @@ ${untrustedContentPrompt()}`;
     description: t.description ?? t.name,
     input_schema: t.input_schema as Record<string, unknown>,
     execute: async (input: Record<string, unknown>): Promise<ToolResultContent> => {
+      const beforePath = exploreGraph ? normalizePath(page.url(), siteMapOrigin) : null;
       const { text, screenshot, sendToClaude } = await executeBrowserTool(t.name, input, {
         ...browserToolBaseContext(),
         page,
@@ -926,6 +974,19 @@ ${untrustedContentPrompt()}`;
         }
       }
 
+      if (exploreGraph) {
+        try {
+          await updateExploreGraph(exploreGraph, page, siteMapOrigin, {
+            tool: t.name,
+            input,
+            text,
+            beforePath,
+          });
+        } catch (e) {
+          log.warn(`  [explore-graph] update failed:`, e);
+        }
+      }
+
       return sendToClaude && screenshot
         ? [
             { type: "text", text },
@@ -943,7 +1004,12 @@ ${untrustedContentPrompt()}`;
       system: systemPrompt,
       userPrompt: [
         { type: "image", source: { type: "base64", media_type: "image/png", data: initialScreenshot.base64 } },
-        { type: "text", text: opening },
+        { type: "text", text: (() => {
+          if (!steerFrontier || !exploreGraph) return opening;
+          const startPath = normalizePath(page.url(), siteMapOrigin);
+          const frontier = startPath ? formatFrontierHint(exploreGraph, startPath) : null;
+          return frontier ? `${opening}\n\n${frontier}` : opening;
+        })() },
       ],
       tools: sessionTools,
       maxIterations: MAX_ITERATIONS,
@@ -969,6 +1035,16 @@ ${untrustedContentPrompt()}`;
         const observationWarning = buildObservationWarning(observation);
         if (observationWarning) {
           budgetHint += `\n\n${observationWarning}\nUse read_console_logs or read_network_errors for details.`;
+        }
+
+        if (steerFrontier && exploreGraph) {
+          try {
+            const frontierPath = normalizePath(page.url(), siteMapOrigin);
+            const frontier = frontierPath ? formatFrontierHint(exploreGraph, frontierPath) : null;
+            if (frontier) budgetHint += `\n\n${frontier}`;
+          } catch (e) {
+            log.warn(`  [explore-graph] frontier hint failed:`, e);
+          }
         }
 
         const last = results[results.length - 1];
@@ -1431,6 +1507,8 @@ export async function main() {
     for (const w of sitemapSeed.warnings) log.warn(`  [site-map] ${w}`);
     if (sitemapSeed.seeded > 0) log.info(`  [site-map] seeded ${sitemapSeed.seeded} paths from sitemap`);
     log.info(`  ${formatSiteMapLogLine(sharedSiteMap)}`);
+    const sharedExploreGraph = loadExploreGraph(siteMapOrigin);
+    log.info(`  ${formatExploreGraphLogLine(sharedExploreGraph)}`);
     const discoverBudget = { used: 0 };
 
     // 5.5 HR agent
@@ -1465,6 +1543,7 @@ export async function main() {
       personaPack,
       sharedSiteMap,
       slots.autoSlots,
+      sharedExploreGraph,
     );
 
     // 6. Deterministic run roster (surplus autos excluded even if HR over-recruited)
@@ -1624,7 +1703,7 @@ export async function main() {
           onPage: (page) => applyNetworkThrottle(page, agent.environment?.networkThrottle),
         }),
         async (page) => {
-          const log = await runBrowserAgent(agent, page, productSpec, assignment, scenarioOutcomes, authPlan, sharedSiteMap, runLog.runId, discoverBudget);
+          const log = await runBrowserAgent(agent, page, productSpec, assignment, scenarioOutcomes, authPlan, sharedSiteMap, runLog.runId, discoverBudget, {}, sharedExploreGraph);
           return { kind: "browser", agent, log };
         },
       );
@@ -1700,6 +1779,7 @@ Rules:
                 logPrefix: "regression",
                 lane: "regression",
               },
+              sharedExploreGraph,
             );
             return { kind: "regression", agent: regressionAgent, log };
           },
@@ -1711,6 +1791,8 @@ Rules:
     const allVisitedPaths = laneResults.flatMap((r) => r.log.visitedPaths);
     saveSiteMap(sharedSiteMap);
     log.info(`  ${formatSiteMapLogLine(sharedSiteMap)}`);
+    saveExploreGraph(sharedExploreGraph);
+    log.info(`  ${formatExploreGraphLogLine(sharedExploreGraph)}`);
     for (const result of laneResults) {
       switch (result.kind) {
         case "browser":

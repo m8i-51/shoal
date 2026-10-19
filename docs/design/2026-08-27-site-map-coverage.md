@@ -70,7 +70,7 @@
 - query 付き正規化
 - ユーザー設定の include/exclude
 - 認証付き sitemap
-- ブラウザへの毎ターン強制誘導
+- ブラウザへの毎ターン強制誘導（操作の分岐は [2026-10-19-explore-action-graph.md](2026-10-19-explore-action-graph.md)。ヒントは出すが、クリックはエージェントが選ぶ）
 - HTML レポートへの網羅行
 
 ## 配置
