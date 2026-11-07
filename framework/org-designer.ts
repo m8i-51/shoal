@@ -1,7 +1,20 @@
 import type { LLMClient } from "./llm-client";
 import { completeText } from "./tool-session";
 import type { ProductSpec } from "./product-discovery";
+import {
+  BOUNDARY_PUSHING_CONTRACT,
+  BOUNDARY_PUSHING_SEED,
+  formatPersonaContract,
+} from "./persona-contract";
 import * as log from "./log";
+
+/** Appended to every org-design result so the roster always hears this person. */
+export function boundaryPushingRosterNote(): string {
+  return `[Boundary-pushing persona]
+Always keep one roster member with seed "${BOUNDARY_PUSHING_SEED}".
+Use this contract as written. Do not rewrite Exploration into steps for this app, and do not turn discovery's threshold candidates into instructions. Only an area hint, applied at run time, says where they look first.
+${formatPersonaContract(BOUNDARY_PUSHING_CONTRACT, "informed")}`;
+}
 
 export interface OrgDesign {
   personaGuidance: string;
@@ -77,6 +90,7 @@ Do not recruit two people who would both read the tutorial carefully. Check exis
 **Always include as supplement (1–2 personas regardless of app type):**
 - 1 UX evaluator: focuses on visual consistency, interaction patterns, HIG/Material compliance
 - 1 edge-case/accessibility evaluator: focuses on error handling, accessibility, stress scenarios
+- 1 boundary-pushing person (required). Seed: "${BOUNDARY_PUSHING_SEED}". Copy this exploration rule verbatim — it is how they use any app, not a checklist of this product's fields: "When an input suggests a limit, try that limit once."
 
 ## Recruitment instructions for the persona designer agent
 (Concrete guidelines based on the above — emphasize that the majority of personas should reflect real users of this specific app, with expert evaluators as a minority supplement)`,
@@ -98,7 +112,9 @@ When recruiting UX/design-oriented agents, give them awareness of these standard
   - Hick's Law: flag screens with too many choices that slow down decision-making
   - Miller's Law: flag when more than ~7 items are shown without grouping or progressive disclosure
   - Jakob's Law: flag interactions that contradict conventions users expect from similar apps (e.g., swipe to delete, pull to refresh, hamburger menus)
-  - Nielsen's heuristics: check for missing system status feedback, unclear error messages, lack of undo, and forcing users to recall rather than recognize`;
+  - Nielsen's heuristics: check for missing system status feedback, unclear error messages, lack of undo, and forcing users to recall rather than recognize
+
+${boundaryPushingRosterNote()}`;
 
   log.info("[persona-policy] done");
   return { personaGuidance };

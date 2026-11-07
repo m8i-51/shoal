@@ -8,6 +8,7 @@ vi.mock("../tool-session", () => ({
 
 import { completeText } from "../tool-session";
 import { designOrg, UNIVERSAL_LENSES } from "../org-designer";
+import { BOUNDARY_PUSHING_EXPLORATION_MARK, BOUNDARY_PUSHING_SEED } from "../persona-contract";
 import type { ProductSpec } from "../product-discovery";
 import type { LLMClient } from "../llm-client";
 
@@ -75,6 +76,18 @@ describe("designOrg", () => {
     const { personaGuidance } = await designOrg(makeSpec(), {} as LLMClient, "m");
     expect(personaGuidance).toContain("Design Standards Reference");
     expect(personaGuidance).toContain("Apple HIG");
+  });
+
+  it("roster guidance includes the boundary-pushing persona without a probe checklist", async () => {
+    vi.mocked(completeText).mockResolvedValue("base policy");
+    const { personaGuidance } = await designOrg(makeSpec(), {} as LLMClient, "m");
+    expect(personaGuidance).toContain(BOUNDARY_PUSHING_SEED);
+    expect(personaGuidance.toLowerCase()).toContain(BOUNDARY_PUSHING_EXPLORATION_MARK);
+    expect(personaGuidance).toContain("post_feedback");
+    expect(personaGuidance).not.toContain("howToProbe");
+    const prompt = vi.mocked(completeText).mock.calls[0][0].userPrompt;
+    expect(prompt).toContain(BOUNDARY_PUSHING_SEED);
+    expect(prompt).toContain("not a checklist of this product's fields");
   });
 
   it("採用方針に行動契約（同じ画面での分岐）を含める", async () => {

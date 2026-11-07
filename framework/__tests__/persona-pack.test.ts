@@ -94,6 +94,7 @@ personas:
       expect(pack?.name).toBe("Test Pack");
       expect(pack?.personas).toHaveLength(1);
       expect(pack?.personas[0].name).toBe("Aiko");
+      expect(pack?.personas[0].contract).toBeUndefined();
     });
 
     it("personas.json があれば JSON をパースして返す", async () => {

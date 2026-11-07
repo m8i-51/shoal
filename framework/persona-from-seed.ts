@@ -2,6 +2,8 @@ import { createLLMClient, type LLMClient } from "./llm-client.js";
 import { completeText } from "./tool-session.js";
 import type { ProductSpec } from "./product-discovery.js";
 import {
+  BOUNDARY_PUSHING_CONTRACT,
+  isBoundaryPushingSeed,
   parsePersonaContract,
   PERSONA_CONTRACT_GENERATION_SPEC,
   PersonaContractError,
@@ -65,6 +67,15 @@ export function parseGeneratedPersona(raw: unknown): GeneratedPersonaFields {
   }
 
   return { name, role, persona, lenses, contract, ...(accountRole ? { accountRole } : {}) };
+}
+
+/**
+ * A boundary-pushing seed keeps the canonical contract, so the model cannot
+ * turn "push the limit" into a checklist for this one app.
+ */
+export function applyBoundaryPushingSeed(seed: string, fields: GeneratedPersonaFields): GeneratedPersonaFields {
+  if (!isBoundaryPushingSeed(seed)) return fields;
+  return { ...fields, contract: BOUNDARY_PUSHING_CONTRACT };
 }
 
 function extractJsonObject(text: string): unknown {
@@ -132,5 +143,5 @@ Seed: ${trimmedSeed}
 Expand this seed into the JSON object described above.`,
   });
 
-  return parseGeneratedPersona(extractJsonObject(text));
+  return applyBoundaryPushingSeed(trimmedSeed, parseGeneratedPersona(extractJsonObject(text)));
 }

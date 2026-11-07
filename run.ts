@@ -19,9 +19,9 @@ import { runToolSession } from "./framework/tool-session";
 import { ToolSessionNoOpError, type ToolResultContent } from "./framework/tool-types";
 import { collectedFindings, initRunLog, saveRunLog, saveFinding, getSwarmSignals, runLog } from "./framework/findings";
 import { loadAgents, addAgent, retireAgent, recordAgentMemories, formatAgentMemories, buildMemoryInputs, isFixedAgent, agentOrigin, resolveAgentAccountRole, type Agent } from "./framework/agent-store";
-import { formatPersonaContract, parsePersonaContract, parseBrowserInformationMode, effectiveInformation, PERSONA_CONTRACT_GENERATION_SPEC, type AgentLane, type PersonaInformation } from "./framework/persona-contract";
+import { formatPersonaContract, parsePersonaContract, parseBrowserInformationMode, effectiveInformation, PERSONA_CONTRACT_GENERATION_SPEC, isBoundaryPushingAgent, BOUNDARY_PUSHING_SEED, type AgentLane, type PersonaInformation } from "./framework/persona-contract";
 import { formatGoalsSection, formatAppOverview, formatFeatureReference, formatBrowserToolGuidance } from "./framework/browser-prompt";
-import { computeRosterSlots, buildRunRoster, splitRosterForDispatch, partitionActiveAgents } from "./framework/roster";
+import { computeRosterSlots, buildRunRoster, splitRosterForDispatch, partitionActiveAgents, ensureBoundaryPushingPersona, reserveBoundaryBrowserSeat } from "./framework/roster";
 import { updateCoverage, computeWeightedSummary, getLastRunPaths, getFindingHotspots } from "./framework/coverage";
 import {
   loadSiteMap,
@@ -71,6 +71,7 @@ import type { ClosedIssue } from "./framework/trackers/types";
 import { loadTarget, applyLoadedTarget } from "./targets";
 import { runAccountManager, resolveAccountSetup, persistAccountSessions, planBrowserAuth, authPrompt, describeAuthPlan, resolveLoginUrl, discoveryStorageState, loadTestAccounts, type TestAccount, type BrowserAuthPlan } from "./framework/account-manager";
 import { estimateCost, formatCostUSD } from "./framework/cost";
+import { boundaryVisitAreas, formatBoundaryAreaHint, normalizeThresholdCandidates } from "./framework/threshold";
 import { formatToolCallLog, redactToolInput } from "./framework/redact";
 import {
   executeBrowserTool,
@@ -559,6 +560,7 @@ ${pathCoverageStep}
    — every add_agent MUST include a behavioral contract. ${PERSONA_CONTRACT_GENERATION_SPEC}
    — look at existing agents' contract traits. If the roster already has a tutorial-skipper, recruit a reader (or vice versa). Do not hire two people who would both read a 4-step tutorial carefully.
    — if no active agent is information: first-run, give one new-user recruit information: first-run. Never set first-run on accessibility or security specialists.
+   — one boundary-pushing person must be on the roster (seed "${BOUNDARY_PUSHING_SEED}"). If none is active, use one auto slot for them and copy their exploration rule verbatim from the organization guidelines. Do not rewrite it into a checklist for this app, and do not add a second one.
    — give 1–2 new recruits an "environment" (mobile device, dark mode, non-default locale, slow connection) that naturally fits their persona's life; leave the rest on desktop
 9. Do not retire fixed agents. Only retire autos when above the autoSlots target.`;
 
@@ -1332,19 +1334,31 @@ export async function main() {
 
     // 6. Deterministic run roster (surplus autos excluded even if HR over-recruited)
     const { fixed, autos } = partitionActiveAgents(loadAgents());
-    const runRoster = buildRunRoster({ fixed, autos, autoSlots: slots.autoSlots });
-    if (runRoster.length === 0) {
+    const builtRoster = buildRunRoster({ fixed, autos, autoSlots: slots.autoSlots });
+    if (builtRoster.length === 0) {
       log.error("No agents found. Check agents.json or create fixed personas in the dashboard.");
       process.exit(1);
     }
+    const runRoster = ensureBoundaryPushingPersona(builtRoster);
+    const boundaryPerson = runRoster.find((agent) => isBoundaryPushingAgent(agent));
+    const dispatchCaps = reserveBoundaryBrowserSeat(runRoster, {
+      maxBrowsers: MAX_BROWSERS,
+      maxExplorers: MAX_EXPLORERS,
+    });
+    if (dispatchCaps.maxBrowsers !== MAX_BROWSERS) {
+      log.info(
+        `[roster] browser seat for ${boundaryPerson?.name ?? "boundary-pushing persona"}: ${MAX_BROWSERS}→${dispatchCaps.maxBrowsers}`,
+      );
+      MAX_BROWSERS = dispatchCaps.maxBrowsers;
+    }
 
     const { explorers: explorerAgents, browsers: browserAgents } =
-      splitRosterForDispatch(runRoster, { maxBrowsers: MAX_BROWSERS, maxExplorers: MAX_EXPLORERS });
+      splitRosterForDispatch(runRoster, dispatchCaps);
 
     // 6.5. roster サイズを記録（実際に走った agent 数は run 終了時に runLog.agents.length で確定）
     runLog.summary.totalAgents = runRoster.length;
     log.info(
-      `\nroster: ${runRoster.length} (fixed ${fixed.length} + auto ${Math.min(autos.length, slots.autoSlots)})`,
+      `\nroster: ${runRoster.length} (fixed ${fixed.length} + auto ${Math.min(autos.length, slots.autoSlots)}); ${boundaryPerson?.name ?? "boundary-pushing persona"} pushes boundaries`,
     );
     log.info(`explorers: ${explorerAgents.length} (max: ${MAX_EXPLORERS}) / browsers: ${browserAgents.length} (max: ${MAX_BROWSERS})`);
 
@@ -1420,6 +1434,13 @@ export async function main() {
     const budgetStopped = isBudgetExceeded();
     if (budgetStopped) log.info(`\n${budgetStopLine()}`);
 
+    const boundaryAreas = boundaryVisitAreas(
+      normalizeThresholdCandidates(productSpec.thresholdCandidates),
+    );
+    if (boundaryPerson && boundaryAreas.length > 0) {
+      log.info(`[browser] ${boundaryPerson.name} looks first at: ${boundaryAreas.join(", ")}`);
+    }
+
     type LaneResult =
       | { kind: "browser"; agent: Agent; log: BrowserAgentLog }
       | { kind: "regression"; agent: Agent; log: BrowserAgentLog };
@@ -1438,6 +1459,9 @@ export async function main() {
     const browserJobs = (budgetStopped ? [] : browserAgents).map(async (agent): Promise<LaneResult> => {
       const assignment = pairAssignments.get(agent.id) ?? pickAssignment(dispatchIdx++, dispatchScenarios, "browser");
       agentAssignments.set(agent.id, assignment);
+      const areaHint = isBoundaryPushingAgent(agent)
+        ? formatBoundaryAreaHint(agent.name, boundaryAreas)
+        : "";
 
       const accountRole = assignment.actor?.role ?? resolveAgentAccountRole(agent);
       const authPlan = planBrowserAuth({
@@ -1465,7 +1489,7 @@ export async function main() {
           onPage: (page) => applyNetworkThrottle(page, agent.environment?.networkThrottle),
         }),
         async (page) => {
-          const log = await runBrowserAgent(agent, page, productSpec, assignment, scenarioOutcomes, authPlan, sharedSiteMap, runLog.runId, discoverBudget, {}, sharedExploreGraph);
+          const log = await runBrowserAgent(agent, page, productSpec, assignment, scenarioOutcomes, authPlan, sharedSiteMap, runLog.runId, discoverBudget, { extraPrompt: areaHint }, sharedExploreGraph);
           return { kind: "browser", agent, log };
         },
       );

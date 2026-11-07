@@ -49,6 +49,67 @@ export interface PersonaContract {
   information?: PersonaInformation;
 }
 
+/**
+ * Seed for the person who pushes visible limits. Org design and the dashboard
+ * seed path both use this string. A Japanese seed that says 境界を押し込む
+ * is the same person.
+ */
+export const BOUNDARY_PUSHING_SEED = "someone who pushes every visible limit";
+
+/**
+ * Lowercase phrase that identifies this contract. It is app-agnostic:
+ * any screen, not a checklist of one product's fields.
+ */
+export const BOUNDARY_PUSHING_EXPLORATION_MARK =
+  "when an input suggests a limit, try that limit once";
+
+export const BOUNDARY_PUSHING_CONTRACT: PersonaContract = {
+  traits: "fills to the shown limit, sends empty, types a huge number, clicks again",
+  behavioralRules: {
+    discovery:
+      "Scan for a field, counter, or button that mentions a maximum, a remainder, or that it is required. Open that screen before wandering.",
+    comprehension: "Read the limit written on the control itself. Skip long copy that does not state a limit.",
+    helpSeeking: "If the app does not say what went wrong, do not open a help article. Say what you just did.",
+    exploration:
+      "When an input suggests a limit, try that limit once. Also send that input empty, and try one huge number. Press a control that looks finished a second time. This is how you use any app, not a checklist for one product.",
+  },
+  knowledgeBoundary: {
+    doesNotKnow: [
+      "quotas that are not written on the screen",
+      "which values the server will accept",
+    ],
+    mayInferFrom: [
+      "placeholders, counters, maxlength, and helper text",
+      "the label on the control you are about to use",
+    ],
+  },
+  stateRules: {
+    confusionIncreasesWhen: [
+      "the app takes the input and then fails with no message",
+      "a message appears that does not name the limit",
+    ],
+    confusionDecreasesWhen: ["the message names the limit and what to do next"],
+  },
+  abandonment: [
+    "the same control fails three times the same way",
+    "the limit is clear and the app explains it",
+  ],
+  information: "informed",
+};
+
+export function isBoundaryPushingSeed(seed: string): boolean {
+  const normalized = seed.trim().toLowerCase();
+  if (!normalized) return false;
+  return normalized === BOUNDARY_PUSHING_SEED || normalized.includes("境界を押し込む");
+}
+
+/** True when this person is the boundary-pushing persona (by seed or exploration rule). */
+export function isBoundaryPushingAgent(agent: { contract?: PersonaContract; seed?: string }): boolean {
+  if (agent.seed && isBoundaryPushingSeed(agent.seed)) return true;
+  const exploration = agent.contract?.behavioralRules.exploration.toLowerCase() ?? "";
+  return exploration.includes(BOUNDARY_PUSHING_EXPLORATION_MARK);
+}
+
 const TRAITS_MAX = 160;
 const RULE_MAX = 280;
 const ITEM_MAX = 200;
