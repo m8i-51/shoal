@@ -48,7 +48,6 @@
     "baseUrlPlaceholder": "http://localhost:3000",
     "maxBrowsers": "Browser agents",
     "maxExplorers": "API agents",
-    "maxThresholds": "Threshold agents",
     "start": "Start",
     "cancel": "Cancel",
     "running": "Running…",
@@ -74,7 +73,7 @@
     "browserInformationInformed": "All explorers",
     "browserInformationHint": {
       "mixed": "Each browser persona keeps their own setting. First-run people get no spec and no logs.",
-      "first-run": "Every browser agent this run is first-run: no spec, no console, screen only. API and threshold agents stay informed.",
+      "first-run": "Every browser agent this run is first-run: no spec, no console, screen only. API explorers stay informed.",
       "informed": "Every browser agent this run gets the product brief and diagnostic tools, even if their persona is first-run."
     },
     "fixedRosterHint": "If you have fixed personas, the run may raise agent counts so all of them join."
