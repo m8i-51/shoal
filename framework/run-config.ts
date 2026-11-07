@@ -24,7 +24,7 @@ export interface RunTimings {
   betweenExplorerBatchesMs: number;
   /** Pause before the regression lane starts. */
   beforeRegressionMs: number;
-  /** Pause before launching the browser/threshold lanes. */
+  /** Pause before launching the browser lane. */
   beforeBrowserLaneMs: number;
   /** Pause before triage. */
   beforeTriageMs: number;
@@ -43,7 +43,6 @@ export const RUN_TIMINGS: RunTimings = {
 
 /** Turn budget per agent lane. */
 export const DEFAULT_BROWSER_ITERATIONS = 12;
-export const DEFAULT_THRESHOLD_ITERATIONS = 12;
 export const DEFAULT_PERSONA_DESIGNER_ITERATIONS = 8;
 
 /** How many explorer agents run at once. */
@@ -77,11 +76,6 @@ export function positiveIntFromEnv(
 /** Turns a browser agent may take (`SHOAL_BROWSER_ITERATIONS`). */
 export function browserIterations(env: NodeJS.ProcessEnv = process.env): number {
   return positiveIntFromEnv("SHOAL_BROWSER_ITERATIONS", DEFAULT_BROWSER_ITERATIONS, { max: 100, env });
-}
-
-/** Turns a threshold agent may take (`SHOAL_THRESHOLD_ITERATIONS`). */
-export function thresholdIterations(env: NodeJS.ProcessEnv = process.env): number {
-  return positiveIntFromEnv("SHOAL_THRESHOLD_ITERATIONS", DEFAULT_THRESHOLD_ITERATIONS, { max: 100, env });
 }
 
 /** Explorer agents run in parallel batches of this size (`SHOAL_EXPLORER_CONCURRENCY`). */

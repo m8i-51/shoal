@@ -36,7 +36,7 @@ export type PersonaInformation = (typeof PERSONA_INFORMATION)[number];
 export const BROWSER_INFORMATION_MODES = ["mixed", "first-run", "informed"] as const;
 export type BrowserInformationMode = (typeof BROWSER_INFORMATION_MODES)[number];
 
-export type AgentLane = "browser" | "explorer" | "threshold" | "regression";
+export type AgentLane = "browser" | "explorer" | "regression";
 
 export interface PersonaContract {
   /** Short behavioral signature shown in the roster (not age/job). */
@@ -122,7 +122,6 @@ export function effectiveInformation(
 ): PersonaInformation {
   switch (opts.lane) {
     case "explorer":
-    case "threshold":
     case "regression":
       return "informed";
     case "browser": {

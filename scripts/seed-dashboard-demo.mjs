@@ -95,7 +95,7 @@ const runs = [
         startedAt: "2026-08-28T10:01:00.000Z",
         completedAt: "2026-08-28T10:17:00.000Z",
         visitedPaths: ["/", "/admin", "/items"],
-        agentType: "threshold",
+        agentType: "browser",
       }),
     ],
     findings: [

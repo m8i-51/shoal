@@ -1,7 +1,7 @@
 /**
  * image-tokens.ts — how much of a run's input spend was screenshots.
  *
- * Browser and threshold agents send a full-page PNG with almost every turn, so
+ * Browser agents send a full-page PNG with almost every turn, so
  * images are usually the majority of a run's input tokens. The run log reported
  * one `inputTokens` figure, which left an operator looking at a surprising bill
  * with no way to tell whether the cause was chatty prompts or screenshot

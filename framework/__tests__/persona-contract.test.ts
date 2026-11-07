@@ -127,10 +127,9 @@ describe("personaInformation / effectiveInformation", () => {
     expect(parseBrowserInformationMode("naive")).toBe("mixed");
   });
 
-  it("keeps explorer/threshold/regression informed even when the run is first-run", () => {
+  it("keeps explorer/regression informed even when the run is first-run", () => {
     const firstRun = sampleContract({ information: "first-run" });
     expect(effectiveInformation(firstRun, { mode: "first-run", lane: "explorer" })).toBe("informed");
-    expect(effectiveInformation(firstRun, { mode: "first-run", lane: "threshold" })).toBe("informed");
     expect(effectiveInformation(firstRun, { mode: "first-run", lane: "regression" })).toBe("informed");
   });
 

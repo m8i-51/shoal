@@ -49,7 +49,7 @@ export interface RegressionCheck {
 }
 
 export interface AgentLog {
-  agentType: "explorer" | "regression" | "browser" | "threshold";
+  agentType: "explorer" | "regression" | "browser";
   agentId: string;
   agentName: string;
   role: string;

@@ -99,7 +99,7 @@ export interface ProductSpec {
   discoveredAt?: string;
   /** Path of the login / sign-in page when one was observed (e.g. `/login`). */
   loginPath?: string;
-  /** Inferred boundaries for the threshold agent lane (empty when unknown / cached old specs). */
+  /** Inferred boundaries from discovery (empty when unknown / cached old specs). Not an agent lane. */
   thresholdCandidates?: ThresholdCandidate[];
   /** What the product is deliberately sharp about (undefined when nothing was declared or inferred). */
   productEdge?: ProductEdge;
