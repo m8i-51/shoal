@@ -493,11 +493,10 @@ app.get("/api/runs/:runId/report", (req, res) => {
 // API: start a run
 // ----------------------------------------------------------------
 app.post("/api/runs/start", (req, res) => {
-  const { baseUrl, maxBrowsers, maxExplorers, maxThresholds, mode, browserInformation, llmBaseUrl, llmApiKey, llmModel } = req.body as {
+  const { baseUrl, maxBrowsers, maxExplorers, mode, browserInformation, llmBaseUrl, llmApiKey, llmModel } = req.body as {
     baseUrl?: string;
     maxBrowsers?: number;
     maxExplorers?: number;
-    maxThresholds?: number;
     mode?: string;
     browserInformation?: string;
     llmBaseUrl?: string;
@@ -512,8 +511,8 @@ app.post("/api/runs/start", (req, res) => {
     res.status(400).json({ error: "browserInformation must be one of: mixed, first-run, informed" });
     return;
   }
-  if (!isValidAgentCount(maxBrowsers) || !isValidAgentCount(maxExplorers) || !isValidAgentCount(maxThresholds)) {
-    res.status(400).json({ error: "maxBrowsers, maxExplorers, and maxThresholds must be integers between 0 and 8" });
+  if (!isValidAgentCount(maxBrowsers) || !isValidAgentCount(maxExplorers)) {
+    res.status(400).json({ error: "maxBrowsers and maxExplorers must be integers between 0 and 8" });
     return;
   }
   if (hasActiveRun()) {
@@ -533,7 +532,6 @@ app.post("/api/runs/start", (req, res) => {
     baseUrl,
     maxBrowsers,
     maxExplorers,
-    maxThresholds,
     mode,
     browserInformation: browserInformation as BrowserInformationMode | undefined,
     llmBaseUrl,

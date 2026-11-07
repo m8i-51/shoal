@@ -1,7 +1,7 @@
 # Threshold Agent Lane — Design Spec
 
 **Date:** 2026-08-27  
-**Status:** Approved for implementation
+**Status:** Superseded by [2026-11-07-threshold-as-persona.md](2026-11-07-threshold-as-persona.md)
 
 ## Problem
 

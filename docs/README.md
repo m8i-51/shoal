@@ -12,7 +12,8 @@ This directory holds **architecture decision records (ADRs)** for shoal — why 
 | [2026-08-27-site-map-coverage.md](design/2026-08-27-site-map-coverage.md) | Path-level site map memory and coverage |
 | [2026-10-19-explore-action-graph.md](design/2026-10-19-explore-action-graph.md) | Screen → control → next screen memory |
 | [2026-08-27-fixed-persona-roster.md](design/2026-08-27-fixed-persona-roster.md) | Dashboard fixed personas (seed → generate) |
-| [2026-08-27-threshold-agent.md](design/2026-08-27-threshold-agent.md) | Threshold agent lane |
+| [2026-08-27-threshold-agent.md](design/2026-08-27-threshold-agent.md) | Threshold agent lane (superseded) |
+| [2026-11-07-threshold-as-persona.md](design/2026-11-07-threshold-as-persona.md) | Boundary probing as a browser persona |
 | [2026-09-02-product-edge.md](design/2026-09-02-product-edge.md) | Product edge and edge-risk triage |
 | [2026-09-19-persona-contract.md](design/2026-09-19-persona-contract.md) | Behavioral persona contracts (skip vs read) |
 | [2026-09-19-first-run-persona.md](design/2026-09-19-first-run-persona.md) | First-run personas (knowledge + observation subtraction) |

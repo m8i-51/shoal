@@ -12,6 +12,10 @@ to `0.1.20` or earlier, so those releases are not separately documented here.
 
 ## [Unreleased]
 
+### Breaking
+
+- **The threshold agent lane is gone.** There is no `agentType: "threshold"`, no Swarm `TH` badge, and no `MAX_THRESHOLDS` or `SHOAL_THRESHOLD_ITERATIONS`. The dashboard start API and the MCP `start_run` tool no longer accept `maxThresholds`. A client that still sends `maxThresholds` is ignored — the value is not forwarded. Boundary probing is a browser persona: when an input suggests a limit, they try that limit once, and also empty and one huge number. Product Discovery still records `thresholdCandidates` (a cached spec still loads). Only `area` hints where that person looks first. `signal` and `howToProbe` are not instructions. Findings are that person's `post_feedback`, the same path as other browser personas. Triage severity and Product Edge are unchanged.
+
 ## [0.2.3] — 2026-09-07
 
 ### Security

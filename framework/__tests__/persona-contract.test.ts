@@ -17,6 +17,11 @@ import {
   parseBrowserInformationMode,
   effectiveInformation,
   PersonaContractError,
+  BOUNDARY_PUSHING_CONTRACT,
+  BOUNDARY_PUSHING_EXPLORATION_MARK,
+  BOUNDARY_PUSHING_SEED,
+  isBoundaryPushingAgent,
+  isBoundaryPushingSeed,
 } from "../persona-contract";
 import { sampleContract } from "./persona-contract-fixtures";
 
@@ -127,10 +132,9 @@ describe("personaInformation / effectiveInformation", () => {
     expect(parseBrowserInformationMode("naive")).toBe("mixed");
   });
 
-  it("keeps explorer/threshold/regression informed even when the run is first-run", () => {
+  it("keeps explorer/regression informed even when the run is first-run", () => {
     const firstRun = sampleContract({ information: "first-run" });
     expect(effectiveInformation(firstRun, { mode: "first-run", lane: "explorer" })).toBe("informed");
-    expect(effectiveInformation(firstRun, { mode: "first-run", lane: "threshold" })).toBe("informed");
     expect(effectiveInformation(firstRun, { mode: "first-run", lane: "regression" })).toBe("informed");
   });
 
@@ -141,6 +145,23 @@ describe("personaInformation / effectiveInformation", () => {
     expect(effectiveInformation(firstRun, { mode: "informed", lane: "browser" })).toBe("informed");
     expect(effectiveInformation(firstRun, { mode: "mixed", lane: "browser" })).toBe("first-run");
     expect(effectiveInformation(informed, { mode: "mixed", lane: "browser" })).toBe("informed");
+  });
+});
+
+describe("boundary-pushing contract", () => {
+  it("round-trips and stays app-agnostic", () => {
+    expect(parsePersonaContract(BOUNDARY_PUSHING_CONTRACT)).toEqual(BOUNDARY_PUSHING_CONTRACT);
+    const exploration = BOUNDARY_PUSHING_CONTRACT.behavioralRules.exploration.toLowerCase();
+    expect(exploration).toContain(BOUNDARY_PUSHING_EXPLORATION_MARK);
+    expect(exploration).not.toMatch(/checkout|billing form|sku|this app's/);
+    expect(BOUNDARY_PUSHING_CONTRACT.traits).toMatch(/empty/);
+    expect(BOUNDARY_PUSHING_CONTRACT.traits).toMatch(/huge number/);
+    expect(isBoundaryPushingSeed(BOUNDARY_PUSHING_SEED)).toBe(true);
+    expect(isBoundaryPushingSeed("境界を押し込む人")).toBe(true);
+    expect(isBoundaryPushingSeed("first-time user")).toBe(false);
+    expect(isBoundaryPushingAgent({ contract: BOUNDARY_PUSHING_CONTRACT })).toBe(true);
+    expect(isBoundaryPushingAgent({ seed: BOUNDARY_PUSHING_SEED })).toBe(true);
+    expect(isBoundaryPushingAgent({ contract: sampleContract() })).toBe(false);
   });
 });
 

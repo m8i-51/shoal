@@ -716,13 +716,13 @@ describe("POST /api/runs/start", () => {
     expect(spawnRun).toHaveBeenCalledWith(expect.objectContaining({ baseUrl: "https://example.com" }));
   });
 
-  it("maxBrowsers/maxExplorers/maxThresholds を指定しても spawnRun に渡す", async () => {
+  it("maxBrowsers/maxExplorers を指定しても spawnRun に渡す", async () => {
     vi.mocked(spawnRun).mockReturnValue("run_999");
     const res = await request(app)
       .post("/api/runs/start")
-      .send({ baseUrl: "https://example.com", maxBrowsers: 3, maxExplorers: 0, maxThresholds: 8 });
+      .send({ baseUrl: "https://example.com", maxBrowsers: 3, maxExplorers: 0 });
     expect(res.status).toBe(200);
-    expect(spawnRun).toHaveBeenCalledWith(expect.objectContaining({ maxBrowsers: 3, maxExplorers: 0, maxThresholds: 8 }));
+    expect(spawnRun).toHaveBeenCalledWith(expect.objectContaining({ maxBrowsers: 3, maxExplorers: 0 }));
   });
 
   it("browserInformation を spawnRun に渡す", async () => {
@@ -754,12 +754,10 @@ describe("POST /api/runs/start", () => {
     { maxBrowsers: "3" },
     { maxExplorers: -1 },
     { maxExplorers: 100 },
-    { maxThresholds: -1 },
-    { maxThresholds: 9 },
   ])("agent count が範囲外/非整数/非数値なら 400 で spawnRun を呼ばない: %j", async (body) => {
     const res = await request(app).post("/api/runs/start").send(body);
     expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/maxBrowsers, maxExplorers, and maxThresholds/);
+    expect(res.body.error).toMatch(/maxBrowsers and maxExplorers/);
     expect(spawnRun).not.toHaveBeenCalled();
   });
 
@@ -767,7 +765,7 @@ describe("POST /api/runs/start", () => {
     vi.mocked(spawnRun).mockReturnValue("run_999");
     const res = await request(app)
       .post("/api/runs/start")
-      .send({ maxBrowsers: 0, maxExplorers: 8, maxThresholds: 0 });
+      .send({ maxBrowsers: 0, maxExplorers: 8 });
     expect(res.status).toBe(200);
     expect(spawnRun).toHaveBeenCalled();
   });
@@ -777,7 +775,7 @@ describe("POST /api/runs/start", () => {
     const res = await request(app).post("/api/runs/start").send({ baseUrl: "https://example.com" });
     expect(res.status).toBe(200);
     expect(spawnRun).toHaveBeenCalledWith(
-      expect.objectContaining({ maxBrowsers: undefined, maxExplorers: undefined, maxThresholds: undefined }),
+      expect.objectContaining({ maxBrowsers: undefined, maxExplorers: undefined }),
     );
   });
 

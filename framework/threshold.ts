@@ -1,3 +1,12 @@
+/**
+ * Candidate data for boundary probing — not an agent lane.
+ *
+ * Product Discovery stores `thresholdCandidates` on the product spec.
+ * This module normalizes and sorts that data. A boundary-pushing browser
+ * persona may visit `area` first. `signal` and `howToProbe` stay on the
+ * candidate so a cached ProductSpec still loads; they are not instructions.
+ */
+
 export type ThresholdKind = "input" | "business" | "experience";
 
 export interface ThresholdCandidate {
@@ -62,35 +71,31 @@ export function sortThresholdCandidates(candidates: ThresholdCandidate[]): Thres
 }
 
 /**
- * Distribute sorted candidates across agents (round-robin),
- * preferring not to give the same area to the same agent.
+ * Places the boundary-pushing persona should open first, in priority order.
+ * Duplicate areas collapse to the highest-priority occurrence.
+ * `signal` and `howToProbe` are not returned.
  */
-export function assignThresholdCandidates(
-  candidates: ThresholdCandidate[],
-  agentCount: number,
-): ThresholdCandidate[][] {
-  if (agentCount <= 0) return [];
-  const buckets: ThresholdCandidate[][] = Array.from({ length: agentCount }, () => []);
-  const areas: Set<string>[] = Array.from({ length: agentCount }, () => new Set());
-  let rr = 0;
-
-  for (const c of candidates) {
-    let placed = false;
-    for (let i = 0; i < agentCount; i++) {
-      const idx = (rr + i) % agentCount;
-      if (!areas[idx].has(c.area)) {
-        buckets[idx].push(c);
-        areas[idx].add(c.area);
-        rr = (idx + 1) % agentCount;
-        placed = true;
-        break;
-      }
-    }
-    if (!placed) {
-      buckets[rr].push(c);
-      areas[rr].add(c.area);
-      rr = (rr + 1) % agentCount;
-    }
+export function boundaryVisitAreas(candidates: ThresholdCandidate[]): string[] {
+  const seen = new Set<string>();
+  const areas: string[] = [];
+  for (const candidate of sortThresholdCandidates(candidates)) {
+    if (seen.has(candidate.area)) continue;
+    seen.add(candidate.area);
+    areas.push(candidate.area);
   }
-  return buckets;
+  return areas;
+}
+
+/**
+ * Hint for one browser persona. Names places only — never probe instructions.
+ */
+export function formatBoundaryAreaHint(personName: string, areas: string[]): string {
+  if (areas.length === 0) return "";
+  const list = areas.map((area) => `- ${area}`).join("\n");
+  return `
+[Where ${personName} looks first]
+If nobody gave you a specific task, open these places before you wander. They look like they might have a limit:
+${list}
+You are still ${personName}. When an input suggests a limit, try that limit once. Also send it empty, and try one huge number. Press a control that looks finished a second time.
+If the app breaks, stays silent, loses what you typed, or the message does not say what went wrong, call post_feedback as what happened to you ("I …"). That is your experience. If the limit is clear, do not invent a finding.`;
 }

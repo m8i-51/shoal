@@ -1,6 +1,6 @@
 /**
  * run.ts — Multi-agent runner
- * hr → product discovery → api agents + browser agents + threshold agents → triage
+ * hr → product discovery → api agents + browser agents → triage
  *
  * Usage:
  *   ANTHROPIC_API_KEY=xxx GITHUB_TOKEN=xxx GITHUB_REPO=owner/repo npx tsx run.ts
@@ -19,9 +19,9 @@ import { runToolSession } from "./framework/tool-session";
 import { ToolSessionNoOpError, type ToolResultContent } from "./framework/tool-types";
 import { collectedFindings, initRunLog, saveRunLog, saveFinding, getSwarmSignals, runLog } from "./framework/findings";
 import { loadAgents, addAgent, retireAgent, recordAgentMemories, formatAgentMemories, buildMemoryInputs, isFixedAgent, agentOrigin, resolveAgentAccountRole, type Agent } from "./framework/agent-store";
-import { formatPersonaContract, parsePersonaContract, parseBrowserInformationMode, effectiveInformation, PERSONA_CONTRACT_GENERATION_SPEC, type AgentLane, type PersonaInformation } from "./framework/persona-contract";
+import { formatPersonaContract, parsePersonaContract, parseBrowserInformationMode, effectiveInformation, PERSONA_CONTRACT_GENERATION_SPEC, isBoundaryPushingAgent, BOUNDARY_PUSHING_SEED, type AgentLane, type PersonaInformation } from "./framework/persona-contract";
 import { formatGoalsSection, formatAppOverview, formatFeatureReference, formatBrowserToolGuidance } from "./framework/browser-prompt";
-import { computeRosterSlots, buildRunRoster, splitRosterForDispatch, partitionActiveAgents } from "./framework/roster";
+import { computeRosterSlots, buildRunRoster, splitRosterForDispatch, partitionActiveAgents, ensureBoundaryPushingPersona, reserveBoundaryBrowserSeat } from "./framework/roster";
 import { updateCoverage, computeWeightedSummary, getLastRunPaths, getFindingHotspots } from "./framework/coverage";
 import {
   loadSiteMap,
@@ -71,12 +71,7 @@ import type { ClosedIssue } from "./framework/trackers/types";
 import { loadTarget, applyLoadedTarget } from "./targets";
 import { runAccountManager, resolveAccountSetup, persistAccountSessions, planBrowserAuth, authPrompt, describeAuthPlan, resolveLoginUrl, discoveryStorageState, loadTestAccounts, type TestAccount, type BrowserAuthPlan } from "./framework/account-manager";
 import { estimateCost, formatCostUSD } from "./framework/cost";
-import {
-  normalizeThresholdCandidates,
-  sortThresholdCandidates,
-  assignThresholdCandidates,
-  type ThresholdCandidate,
-} from "./framework/threshold";
+import { boundaryVisitAreas, formatBoundaryAreaHint, normalizeThresholdCandidates } from "./framework/threshold";
 import { formatToolCallLog, redactToolInput } from "./framework/redact";
 import {
   executeBrowserTool,
@@ -99,7 +94,6 @@ import {
   browserIterations,
   explorerConcurrency,
   resolveViewport,
-  thresholdIterations,
   DEFAULT_PERSONA_DESIGNER_ITERATIONS,
 } from "./framework/run-config";
 import {
@@ -151,7 +145,6 @@ let MAX_EXPLORERS = APP_TOOLS.length > 0
   ? parseInt(process.env.MAX_EXPLORERS ?? "4", 10)
   : 0;
 let MAX_BROWSERS = parseInt(process.env.MAX_BROWSERS ?? "2", 10);
-const MAX_THRESHOLDS = parseInt(process.env.MAX_THRESHOLDS ?? "1", 10);
 
 const { client, defaultModel, provider: llmProvider } = createLLMClient();
 
@@ -567,6 +560,7 @@ ${pathCoverageStep}
    — every add_agent MUST include a behavioral contract. ${PERSONA_CONTRACT_GENERATION_SPEC}
    — look at existing agents' contract traits. If the roster already has a tutorial-skipper, recruit a reader (or vice versa). Do not hire two people who would both read a 4-step tutorial carefully.
    — if no active agent is information: first-run, give one new-user recruit information: first-run. Never set first-run on accessibility or security specialists.
+   — one boundary-pushing person must be on the roster (seed "${BOUNDARY_PUSHING_SEED}"). If none is active, use one auto slot for them and copy their exploration rule verbatim from the organization guidelines. Do not rewrite it into a checklist for this app, and do not add a second one.
    — give 1–2 new recruits an "environment" (mobile device, dark mode, non-default locale, slow connection) that naturally fits their persona's life; leave the rest on desktop
 9. Do not retire fixed agents. Only retire autos when above the autoSlots target.`;
 
@@ -750,12 +744,6 @@ function applyAgentSummary(agentLog: AgentLog): void {
 
 function recordBrowserAgentRun(agent: Agent, browserLog: BrowserAgentLog): void {
   const agentLog = browserLogToAgentLog(agent, browserLog, "browser");
-  runLog.agents.push(agentLog);
-  applyAgentSummary(agentLog);
-}
-
-function recordThresholdAgentRun(agent: Agent, browserLog: BrowserAgentLog): void {
-  const agentLog = browserLogToAgentLog(agent, browserLog, "threshold");
   runLog.agents.push(agentLog);
   applyAgentSummary(agentLog);
 }
@@ -1075,19 +1063,6 @@ ${untrustedContentPrompt()}`;
   return agentLog;
 }
 
-function formatThresholdCandidatesForPrompt(candidates: ThresholdCandidate[]): string {
-  if (candidates.length === 0) return "(none assigned)";
-  return candidates
-    .map(
-      (c, i) =>
-        `${i + 1}. [${c.kind}/p${c.priority}] id=${c.id}\n` +
-        `   area: ${c.area}\n` +
-        `   signal: ${c.signal}\n` +
-        `   howToProbe: ${c.howToProbe}`,
-    )
-    .join("\n");
-}
-
 function makeRegressionProber(): Agent {
   return {
     id: `agent_regression_${Date.now()}`,
@@ -1102,197 +1077,8 @@ function makeRegressionProber(): Agent {
   };
 }
 
-function makeThresholdProbers(count: number): Agent[] {
-  const now = new Date().toISOString();
-  return Array.from({ length: count }, (_, i) => ({
-    id: `agent_threshold_${i + 1}`,
-    name: count === 1 ? "Threshold Prober" : `Threshold Prober ${i + 1}`,
-    role: "threshold-prober",
-    persona:
-      "A careful boundary probe who pushes limits the way a power user would — form maxima, plan quotas, permission edges, and moments where the experience falls apart — then reports what actually broke or felt ambiguous. Does not invent findings when the boundary behaves clearly.",
-    createdAt: now,
-  }));
-}
-
-function pickThresholdAuthRole(testAccounts: TestAccount[], fallbackRole: string): string {
+function pickAccountRole(testAccounts: TestAccount[], fallbackRole: string): string {
   return testAccounts[0]?.role ?? fallbackRole;
-}
-
-async function runThresholdAgent(
-  agent: Agent,
-  page: Page,
-  productSpec: ProductSpec,
-  candidates: ThresholdCandidate[],
-  authPlan: BrowserAuthPlan = { handoff: { kind: "guest" }, startPath: "/" },
-): Promise<BrowserAgentLog> {
-  log.info(`\n[threshold] ${agent.name} start (${candidates.length} candidate(s))`);
-
-  const agentLog: BrowserAgentLog = {
-    agentName: agent.name,
-    persona: agent.persona,
-    startedAt: new Date().toISOString(),
-    completedAt: null,
-    status: "completed",
-    iterations: 0,
-    actions: [],
-    visitedPaths: [],
-    feedbacksSaved: [],
-    regressionChecks: [],
-    error: null,
-  };
-
-  const observation = setupObservation(page);
-  const host = new URL(BASE_URL).host;
-  const cachedHashes = loadPageHashes(host);
-  const pageHashUpdates: Record<string, string> = {};
-  const MAX_ITERATIONS = thresholdIterations();
-
-  const systemPrompt = `You are "${agent.name}".
-Role: ${agent.role}
-Persona: ${agent.persona}
-
-You probe boundaries of "${productSpec.appName}" — not free exploration.
-Work through your assigned threshold candidates. Prefer evidence over speculation.
-
-[App Overview]
-${productSpec.appDescription}
-
-[Assigned Threshold Candidates]
-${formatThresholdCandidatesForPrompt(candidates)}
-
-[How to Proceed]
-1. Pick the highest-priority remaining candidate
-2. Navigate to its area; if needed, use [API check] tools to seed a near-limit state
-3. Follow howToProbe in the browser (fill/click/select as a real user would)
-4. If the boundary crashes, silently fails, loses data, or shows an unclear/wrong message — report with post_feedback
-5. If the boundary behaves clearly and safely, do NOT invent a finding — move to the next candidate
-6. If an area does not exist, skip that candidate
-7. Finish after probing your list (within ${MAX_ITERATIONS} actions)
-
-When writing the body, match the tone to the category:
-- bug: technical ("Submitting 501 chars returned 500 with no validation...", "Expected a 403 at the plan limit but the create succeeded")
-- ux: experiential ("I hit the seat limit and had no idea what to do next...", "The error appeared after I left the field and I could not tell which limit I crossed")
-- feature-request / goal-gap: only if a missing affordance at the boundary clearly blocks a user outcome
-
-[Using Observation Tools]
-- After probing, call diff_since_last_action / read_network_errors / read_console_logs when the UI reaction is unclear
-- Use check_swarm_signals once mid-session; if another agent reported something in your area, try to reproduce it as a threshold probe and report in your own words
-
-[Reference: Implemented Features]
-${productSpec.features}
-${productSpec.designContext ? `\n[Design Context]\n${productSpec.designContext}\n` : ""}${formatGoalsSection(productSpec)}${guardrailPrompt(SHOAL_MODE)}${authPrompt(authPlan.handoff)}
-
-${untrustedContentPrompt()}`;
-
-  const startUrl = resolveLoginUrl(BASE_URL, authPlan.startPath);
-  await page.goto(startUrl, { waitUntil: "load", timeout: 15000 });
-  await page.waitForTimeout(RUN_TIMINGS.agentStartupMs);
-  const initialScreenshot = await takeScreenshot(page, "initial");
-
-  const opening = (() => {
-    switch (authPlan.handoff.kind) {
-      case "credentials":
-        return "The login page is open. Sign in with the exact credentials in [Authentication], then probe your assigned thresholds. Do not invent other usernames or passwords.";
-      case "guest":
-        return "The app is open. Start probing your assigned thresholds. If you see a login form, do not guess usernames or passwords — probe only what is available without an account.";
-      case "session":
-        return "The app is open and you are already logged in. Start probing your assigned thresholds.";
-      default: {
-        const _exhaustive: never = authPlan.handoff;
-        return `The app is open. Start probing. (${String(_exhaustive)})`;
-      }
-    }
-  })();
-
-  const sessionTools = BROWSER_TOOLS.map((t) => ({
-    name: t.name,
-    description: t.description ?? t.name,
-    input_schema: t.input_schema as Record<string, unknown>,
-    execute: async (input: Record<string, unknown>): Promise<ToolResultContent> => {
-      const { text, screenshot, sendToClaude } = await executeBrowserTool(t.name, input, {
-        ...browserToolBaseContext(),
-        page,
-        agentId: agent.id,
-        agentLog,
-        observation,
-        scenarioOutcomes: [],
-        cachedHashes,
-        pageHashUpdates,
-        closedIssues: [],
-      });
-      log.info(`  → ${formatToolCallLog(t.name, input, 60)}`);
-
-      return sendToClaude && screenshot
-        ? [
-            { type: "text", text },
-            { type: "image", source: { type: "base64", media_type: "image/png", data: screenshot.base64 } },
-          ]
-        : text;
-    },
-  }));
-
-  try {
-    const result = await runToolSession({
-      provider: llmProvider,
-      client,
-      model: defaultModel,
-      system: systemPrompt,
-      userPrompt: [
-        { type: "image", source: { type: "base64", media_type: "image/png", data: initialScreenshot.base64 } },
-        { type: "text", text: opening },
-      ],
-      tools: sessionTools,
-      maxIterations: MAX_ITERATIONS,
-      maxTokens: 1024,
-      onAfterTools: ({ results, iteration, maxIterations }) => {
-        agentLog.iterations = iteration;
-        if (iteration >= maxIterations) agentLog.status = "iteration_limit";
-
-        const remaining = maxIterations - iteration;
-        let budgetHint = `[${remaining} turns remaining]`;
-        if (remaining <= 2) {
-          budgetHint += " Last turns. Post any remaining threshold findings with post_feedback, then finish.";
-        } else if (remaining <= 4) {
-          budgetHint += " Start wrapping up remaining candidates.";
-        }
-
-        const PROGRESS_TOOLS = new Set(["navigate", "fill", "post_feedback"]);
-        const recent = agentLog.actions.slice(-5).map((a) => a.tool);
-        if (recent.length >= 5 && !recent.some((t) => PROGRESS_TOOLS.has(t))) {
-          budgetHint += " You seem stuck. Move to the next threshold candidate or a different area.";
-        }
-
-        const observationWarning = buildObservationWarning(observation);
-        if (observationWarning) {
-          budgetHint += `\n\n${observationWarning}\nUse read_console_logs or read_network_errors for details.`;
-        }
-
-        const last = results[results.length - 1];
-        if (!last) return;
-        const lastContent = last.content;
-        results[results.length - 1] = {
-          ...last,
-          content:
-            typeof lastContent === "string"
-              ? `${lastContent}\n\n${budgetHint}`
-              : ([...(lastContent as unknown[]), { type: "text" as const, text: budgetHint }] as Anthropic.ToolResultBlockParam["content"]),
-        };
-      },
-    });
-    agentLog.iterations = result.iterations;
-    if (agentLog.status !== "iteration_limit") agentLog.status = "completed";
-    if (result.iterations >= MAX_ITERATIONS) agentLog.status = "iteration_limit";
-  } catch (e) {
-    agentLog.status = "error";
-    agentLog.error = String(e);
-    log.error(`[${agent.name}] error:`, e);
-  } finally {
-    agentLog.completedAt = new Date().toISOString();
-    updatePageHashes(host, pageHashUpdates);
-  }
-
-  log.info(`[threshold] ${agent.name} done (feedback: ${agentLog.feedbacksSaved.length})`);
-  return agentLog;
 }
 
 // ================================================================
@@ -1548,19 +1334,31 @@ export async function main() {
 
     // 6. Deterministic run roster (surplus autos excluded even if HR over-recruited)
     const { fixed, autos } = partitionActiveAgents(loadAgents());
-    const runRoster = buildRunRoster({ fixed, autos, autoSlots: slots.autoSlots });
-    if (runRoster.length === 0) {
+    const builtRoster = buildRunRoster({ fixed, autos, autoSlots: slots.autoSlots });
+    if (builtRoster.length === 0) {
       log.error("No agents found. Check agents.json or create fixed personas in the dashboard.");
       process.exit(1);
     }
+    const runRoster = ensureBoundaryPushingPersona(builtRoster);
+    const boundaryPerson = runRoster.find((agent) => isBoundaryPushingAgent(agent));
+    const dispatchCaps = reserveBoundaryBrowserSeat(runRoster, {
+      maxBrowsers: MAX_BROWSERS,
+      maxExplorers: MAX_EXPLORERS,
+    });
+    if (dispatchCaps.maxBrowsers !== MAX_BROWSERS) {
+      log.info(
+        `[roster] browser seat for ${boundaryPerson?.name ?? "boundary-pushing persona"}: ${MAX_BROWSERS}→${dispatchCaps.maxBrowsers}`,
+      );
+      MAX_BROWSERS = dispatchCaps.maxBrowsers;
+    }
 
     const { explorers: explorerAgents, browsers: browserAgents } =
-      splitRosterForDispatch(runRoster, { maxBrowsers: MAX_BROWSERS, maxExplorers: MAX_EXPLORERS });
+      splitRosterForDispatch(runRoster, dispatchCaps);
 
     // 6.5. roster サイズを記録（実際に走った agent 数は run 終了時に runLog.agents.length で確定）
     runLog.summary.totalAgents = runRoster.length;
     log.info(
-      `\nroster: ${runRoster.length} (fixed ${fixed.length} + auto ${Math.min(autos.length, slots.autoSlots)})`,
+      `\nroster: ${runRoster.length} (fixed ${fixed.length} + auto ${Math.min(autos.length, slots.autoSlots)}); ${boundaryPerson?.name ?? "boundary-pushing persona"} pushes boundaries`,
     );
     log.info(`explorers: ${explorerAgents.length} (max: ${MAX_EXPLORERS}) / browsers: ${browserAgents.length} (max: ${MAX_BROWSERS})`);
 
@@ -1636,30 +1434,15 @@ export async function main() {
     const budgetStopped = isBudgetExceeded();
     if (budgetStopped) log.info(`\n${budgetStopLine()}`);
 
-    const thresholdCandidates = sortThresholdCandidates(
+    const boundaryAreas = boundaryVisitAreas(
       normalizeThresholdCandidates(productSpec.thresholdCandidates),
     );
-    let thresholdAgents: Agent[] = [];
-    let thresholdSlices: ThresholdCandidate[][] = [];
-    if (budgetStopped) {
-      log.info("\n[threshold] skipped (spend cap reached)");
-    } else if (MAX_THRESHOLDS <= 0) {
-      log.info("\n[threshold] skipped (MAX_THRESHOLDS=0)");
-    } else if (thresholdCandidates.length === 0) {
-      log.info("\n[threshold] skipped (no thresholdCandidates — set REFRESH_SPEC=1 to rediscover)");
-    } else {
-      const m = Math.min(MAX_THRESHOLDS, thresholdCandidates.length);
-      thresholdAgents = makeThresholdProbers(m);
-      thresholdSlices = assignThresholdCandidates(thresholdCandidates, m);
-      log.info(`\nlaunching ${thresholdAgents.length} threshold agents in parallel with browsers (max: ${MAX_THRESHOLDS})`);
-      thresholdAgents.forEach((a, i) =>
-        log.info(`  - ${a.name} (${thresholdSlices[i]?.length ?? 0} candidate(s))`),
-      );
+    if (boundaryPerson && boundaryAreas.length > 0) {
+      log.info(`[browser] ${boundaryPerson.name} looks first at: ${boundaryAreas.join(", ")}`);
     }
 
     type LaneResult =
       | { kind: "browser"; agent: Agent; log: BrowserAgentLog }
-      | { kind: "threshold"; agent: Agent; log: BrowserAgentLog }
       | { kind: "regression"; agent: Agent; log: BrowserAgentLog };
 
     const laneContext = (agent: Agent, overrides: Partial<AgentContextOptions> & Pick<AgentContextOptions, "contextOptions">): AgentContextOptions => ({
@@ -1676,6 +1459,9 @@ export async function main() {
     const browserJobs = (budgetStopped ? [] : browserAgents).map(async (agent): Promise<LaneResult> => {
       const assignment = pairAssignments.get(agent.id) ?? pickAssignment(dispatchIdx++, dispatchScenarios, "browser");
       agentAssignments.set(agent.id, assignment);
+      const areaHint = isBoundaryPushingAgent(agent)
+        ? formatBoundaryAreaHint(agent.name, boundaryAreas)
+        : "";
 
       const accountRole = assignment.actor?.role ?? resolveAgentAccountRole(agent);
       const authPlan = planBrowserAuth({
@@ -1703,30 +1489,8 @@ export async function main() {
           onPage: (page) => applyNetworkThrottle(page, agent.environment?.networkThrottle),
         }),
         async (page) => {
-          const log = await runBrowserAgent(agent, page, productSpec, assignment, scenarioOutcomes, authPlan, sharedSiteMap, runLog.runId, discoverBudget, {}, sharedExploreGraph);
+          const log = await runBrowserAgent(agent, page, productSpec, assignment, scenarioOutcomes, authPlan, sharedSiteMap, runLog.runId, discoverBudget, { extraPrompt: areaHint }, sharedExploreGraph);
           return { kind: "browser", agent, log };
-        },
-      );
-    });
-
-    const thresholdJobs = thresholdAgents.map(async (agent, i): Promise<LaneResult> => {
-      const slice = thresholdSlices[i] ?? [];
-      const accountRole = pickThresholdAuthRole(testAccounts, agent.role);
-      const authPlan = planBrowserAuth({
-        testAccounts,
-        accountRole,
-        loginPath: resolveLoginPath(productSpec),
-        returningSessionPath: undefined,
-        preferAccountSession: false,
-      });
-      log.info(describeAuthPlan(agent.name, authPlan));
-
-      // ephemeral — セッションは保存しない
-      return withAgentContext(
-        laneContext(agent, { contextOptions: baseContextOptions(VIEWPORT, authPlan.storageStatePath) }),
-        async (page) => {
-          const log = await runThresholdAgent(agent, page, productSpec, slice, authPlan);
-          return { kind: "threshold", agent, log };
         },
       );
     });
@@ -1736,7 +1500,7 @@ export async function main() {
       const regressionAgent = makeRegressionProber();
       log.info(`\nlaunching regression in the browser lane (${closedIssues.length} closed issue(s), ${regressionMaxIterations(closedIssues.length)} turns)`);
       regressionJobs.push((async (): Promise<LaneResult> => {
-        const accountRole = pickThresholdAuthRole(testAccounts, regressionAgent.accountRole ?? "user");
+        const accountRole = pickAccountRole(testAccounts, regressionAgent.accountRole ?? "user");
         const authPlan = planBrowserAuth({
           testAccounts,
           accountRole,
@@ -1787,7 +1551,7 @@ Rules:
       })());
     }
 
-    const laneResults = await Promise.all([...browserJobs, ...thresholdJobs, ...regressionJobs]);
+    const laneResults = await Promise.all([...browserJobs, ...regressionJobs]);
     const allVisitedPaths = laneResults.flatMap((r) => r.log.visitedPaths);
     saveSiteMap(sharedSiteMap);
     log.info(`  ${formatSiteMapLogLine(sharedSiteMap)}`);
@@ -1797,9 +1561,6 @@ Rules:
       switch (result.kind) {
         case "browser":
           recordBrowserAgentRun(result.agent, result.log);
-          break;
-        case "threshold":
-          recordThresholdAgentRun(result.agent, result.log);
           break;
         case "regression":
           recordRegressionAgentRun(result.agent, result.log);
@@ -1816,7 +1577,7 @@ Rules:
     scenarioOutcomes.length = 0;
     scenarioOutcomes.push(...reconciled);
 
-    // 9. triage (API + browser + threshold findings)
+    // 9. triage (API + browser findings)
     await sleep(RUN_TIMINGS.beforeTriageMs);
     log.info(`\n[triage] collected findings: ${collectedFindings.length}`);
     let triageResult: TriageResult = {

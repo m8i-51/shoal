@@ -1,6 +1,56 @@
 import type { Agent } from "./agent-store";
 import { agentOrigin, isActiveAgent, isFixedAgent } from "./agent-store";
-import { personaInformation } from "./persona-contract";
+import {
+  BOUNDARY_PUSHING_CONTRACT,
+  BOUNDARY_PUSHING_SEED,
+  isBoundaryPushingAgent,
+  personaInformation,
+} from "./persona-contract";
+
+export const BOUNDARY_PUSHING_AGENT_ID = "agent_boundary_pusher";
+
+/** Ephemeral roster member. Not written to agents.json. */
+export function makeBoundaryPushingAgent(): Agent {
+  return {
+    id: BOUNDARY_PUSHING_AGENT_ID,
+    name: "Ren",
+    role: "presses every limit they can see",
+    persona:
+      "Fills a field to the limit it shows, sends it empty, types a huge number, and presses the same control again. Talks about what happened to them, and stays quiet when the limit is clear.",
+    createdAt: "2026-11-07T00:00:00.000Z",
+    origin: "auto",
+    status: "active",
+    seed: BOUNDARY_PUSHING_SEED,
+    accountRole: "user",
+    lenses: ["boundary behavior"],
+    contract: BOUNDARY_PUSHING_CONTRACT,
+  };
+}
+
+/**
+ * The run roster always includes one boundary-pushing person.
+ * If HR or a fixed persona already is that person, they are kept as-is.
+ */
+export function ensureBoundaryPushingPersona<T extends Agent>(roster: T[]): T[] {
+  if (roster.some((agent) => isBoundaryPushingAgent(agent))) return roster;
+  return [...roster, makeBoundaryPushingAgent() as T];
+}
+
+/**
+ * Fixed personas keep their browser seats. When they fill every seat, open
+ * one more so the boundary-pushing person still browses. No-op when browsers
+ * are off, or when that person is already a fixed member.
+ */
+export function reserveBoundaryBrowserSeat<T extends Agent>(roster: T[], caps: DispatchCaps): DispatchCaps {
+  if (caps.maxBrowsers <= 0) return caps;
+  const pusher = roster.find((agent) => isBoundaryPushingAgent(agent));
+  if (!pusher || isFixedAgent(pusher)) return caps;
+  const fixedCount = roster.filter((agent) => isFixedAgent(agent)).length;
+  if (fixedCount >= caps.maxBrowsers) {
+    return { ...caps, maxBrowsers: caps.maxBrowsers + 1 };
+  }
+  return caps;
+}
 
 export interface RosterSlotInput {
   maxBrowsers: number;
@@ -125,12 +175,16 @@ export function splitRosterForDispatch<T extends Agent>(
     if (hasFirstRun && hasInformed) {
       browsers.push(...takeMatching(1, (a) => isFirstRun(a) && agentOrigin(a) === "fixed"));
       if (!browsers.some(isFirstRun)) browsers.push(...takeMatching(1, isFirstRun));
-      browsers.push(...takeMatching(1, (a) => !isFirstRun(a) && agentOrigin(a) === "fixed"));
+      browsers.push(...takeMatching(1, (a) => isBoundaryPushingAgent(a) && !isFirstRun(a)));
+      if (!browsers.some((a) => !isFirstRun(a))) {
+        browsers.push(...takeMatching(1, (a) => !isFirstRun(a) && agentOrigin(a) === "fixed"));
+      }
       if (!browsers.some((a) => !isFirstRun(a))) browsers.push(...takeMatching(1, (a) => !isFirstRun(a)));
     }
   }
 
   browsers.push(...takeMatching(maxBrowsers - browsers.length, (a) => agentOrigin(a) === "fixed"));
+  browsers.push(...takeMatching(maxBrowsers - browsers.length, (a) => isBoundaryPushingAgent(a)));
   browsers.push(...takeMatching(maxBrowsers - browsers.length, isFirstRun));
   browsers.push(...takeAny(maxBrowsers - browsers.length));
 
