@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { makeBoundaryPushingAgent } from "../framework/roster";
+import { BOUNDARY_PUSHING_CONTRACT } from "../framework/persona-contract";
 
 /**
  * run.ts used to call `main().catch(...)` unconditionally at module scope,
@@ -13,6 +15,41 @@ describe("run.ts import safety", () => {
     const mod = await import("../run");
     expect(typeof mod.main).toBe("function");
   }, 5000);
+});
+
+describe("boundaryAreaHint", () => {
+  const areas = ["/billing", "/form"];
+  const informed = makeBoundaryPushingAgent();
+  const firstRunPerson = {
+    ...informed,
+    contract: { ...BOUNDARY_PUSHING_CONTRACT, information: "first-run" as const },
+  };
+
+  it("is empty when the browser lane is first-run, and the look-first log stays quiet", async () => {
+    const { boundaryAreaHint, boundaryLookFirstLine } = await import("../run");
+    expect(boundaryAreaHint(informed, areas, "first-run")).toBe("");
+    expect(boundaryLookFirstLine(informed, areas, "first-run")).toBeNull();
+  });
+
+  it("passes place names when the person is informed", async () => {
+    const { boundaryAreaHint, boundaryLookFirstLine } = await import("../run");
+    const hint = boundaryAreaHint(informed, areas, "informed");
+    expect(hint).toContain("/billing");
+    expect(hint).toContain("/form");
+    expect(hint).toContain("Ren");
+    expect(hint).not.toContain("howToProbe");
+    expect(boundaryLookFirstLine(informed, areas, "informed")).toBe(
+      "[browser] Ren looks first at: /billing, /form",
+    );
+    expect(boundaryAreaHint(informed, areas, "mixed")).toContain("/billing");
+  });
+
+  it("follows effective information, so a first-run contract stays screen-only in mixed mode", async () => {
+    const { boundaryAreaHint, boundaryLookFirstLine } = await import("../run");
+    expect(boundaryAreaHint(firstRunPerson, areas, "mixed")).toBe("");
+    expect(boundaryLookFirstLine(firstRunPerson, areas, "mixed")).toBeNull();
+    expect(boundaryAreaHint(firstRunPerson, areas, "informed")).toContain("/billing");
+  });
 });
 
 describe("handleFatalRunError", () => {
