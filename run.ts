@@ -1354,6 +1354,12 @@ export async function main() {
 
     const { explorers: explorerAgents, browsers: browserAgents } =
       splitRosterForDispatch(runRoster, dispatchCaps);
+    if (
+      boundaryPerson
+      && ![...explorerAgents, ...browserAgents].some((agent) => agent.id === boundaryPerson.id)
+    ) {
+      log.info(`[roster] ${boundaryPerson.name} is not dispatched — a fixed persona keeps their seat`);
+    }
 
     // 6.5. roster サイズを記録（実際に走った agent 数は run 終了時に runLog.agents.length で確定）
     runLog.summary.totalAgents = runRoster.length;
