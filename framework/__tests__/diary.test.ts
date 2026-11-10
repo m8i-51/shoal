@@ -145,6 +145,16 @@ describe("generateDiary", () => {
     expect(navCount).toBeLessThanOrEqual(25);
   });
 
+  it("日誌は browser をその人の名前で書き、閾値という種では呼ばない", async () => {
+    await generateDiary("run_123", ["[browser] Ren start"]);
+    const [params] = mockCreateMessage.mock.calls[0];
+    const content: string = params.messages[0].content;
+    expect(content).toContain("[browser] Ren start");
+    expect(content).toContain("その人の名前");
+    expect(content).not.toContain("限界探査係");
+    expect(content).not.toContain("threshold");
+  });
+
   it("agent start/done 行はすべて抽出する", async () => {
     const lines = [
       "[explorer] Alice start",

@@ -8,7 +8,7 @@
  * This module keeps a running estimate as responses come back and refuses to
  * start another LLM call once `SHOAL_MAX_USD` is reached. Every Messages-API
  * call in shoal goes through `createMessageWithRetry`, so guarding there covers
- * every lane (discovery, HR, explorers, browsers, thresholds, triage).
+ * every lane (discovery, HR, explorers, browsers, triage).
  *
  * Models with no known price contribute 0 to the estimate. That is deliberate —
  * the cap must never fire on a guess — but it means an unpriced model is

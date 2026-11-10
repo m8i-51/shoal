@@ -2,9 +2,11 @@ import { describe, it, expect } from "vitest";
 import {
   normalizeThresholdCandidates,
   sortThresholdCandidates,
-  assignThresholdCandidates,
+  boundaryVisitAreas,
+  formatBoundaryAreaHint,
   type ThresholdCandidate,
 } from "../threshold";
+import { makeBoundaryPushingAgent } from "../roster";
 
 function cand(overrides: Partial<ThresholdCandidate> & Pick<ThresholdCandidate, "id">): ThresholdCandidate {
   return {
@@ -64,38 +66,48 @@ describe("sortThresholdCandidates", () => {
   });
 });
 
-describe("assignThresholdCandidates", () => {
-  it("agentCount<=0 は空", () => {
-    expect(assignThresholdCandidates([cand({ id: "a" })], 0)).toEqual([]);
-    expect(assignThresholdCandidates([cand({ id: "a" })], -1)).toEqual([]);
-  });
-
-  it("優先順にラウンドロビンし同一 area の重複を避ける", () => {
-    const candidates = sortThresholdCandidates([
-      cand({ id: "b-a", kind: "business", area: "/billing", priority: 1 }),
-      cand({ id: "i-a", kind: "input", area: "/billing", priority: 1 }),
-      cand({ id: "b-b", kind: "business", area: "/team", priority: 1 }),
-      cand({ id: "e-c", kind: "experience", area: "/reports", priority: 2 }),
+describe("boundaryVisitAreas", () => {
+  it("優先順に area を並べ、同じ area は一度だけ", () => {
+    const areas = boundaryVisitAreas([
+      cand({ id: "e2", kind: "experience", area: "/reports", priority: 2, signal: "SECRET_SIGNAL", howToProbe: "SECRET_PROBE" }),
+      cand({ id: "i1", kind: "input", area: "/form", priority: 1 }),
+      cand({ id: "b1", kind: "business", area: "/billing", priority: 1, signal: "seat cap", howToProbe: "add one more seat" }),
+      cand({ id: "i-bill", kind: "input", area: "/billing", priority: 2 }),
     ]);
-    const assigned = assignThresholdCandidates(candidates, 2);
-    expect(assigned).toHaveLength(2);
-    expect(assigned[0].map((c) => c.id)).toContain("b-a");
-    expect(assigned[1].map((c) => c.id)).toContain("b-b");
-    // /billing は agent0 に既にあるので i-a は別 agent か後回しで同一 agent に重ねない
-    const areas0 = new Set(assigned[0].map((c) => c.area));
-    const areas1 = new Set(assigned[1].map((c) => c.area));
-    expect(areas0.size).toBe(assigned[0].length);
-    expect(areas1.size).toBe(assigned[1].length);
-    const allIds = assigned.flat().map((c) => c.id);
-    expect(allIds).toEqual(expect.arrayContaining(["b-a", "b-b", "i-a", "e-c"]));
-    expect(allIds).toHaveLength(4);
+    expect(areas).toEqual(["/billing", "/form", "/reports"]);
   });
 
-  it("候補が agent 数より少ないとき余った agent は空配列", () => {
-    const assigned = assignThresholdCandidates([cand({ id: "only", area: "/one" })], 3);
-    expect(assigned).toHaveLength(3);
-    expect(assigned[0]).toHaveLength(1);
-    expect(assigned[1]).toEqual([]);
-    expect(assigned[2]).toEqual([]);
+  it("候補が空ならヒントも空", () => {
+    expect(boundaryVisitAreas([])).toEqual([]);
+    expect(formatBoundaryAreaHint("Ren", [])).toBe("");
+  });
+});
+
+describe("formatBoundaryAreaHint", () => {
+  it("area だけを最初に見る場所として渡し、signal と howToProbe は指示にしない", () => {
+    const person = makeBoundaryPushingAgent();
+    const areas = boundaryVisitAreas([
+      cand({
+        id: "b1",
+        kind: "business",
+        area: "/billing",
+        priority: 1,
+        signal: "SECRET_SIGNAL_DO_NOT_LEAK",
+        howToProbe: "SECRET_PROBE_DO_NOT_LEAK",
+      }),
+      cand({ id: "i1", kind: "input", area: "/form", priority: 2, signal: "maxlength 40", howToProbe: "paste 40 chars" }),
+    ]);
+    const hint = formatBoundaryAreaHint(person.name, areas);
+    expect(hint).toContain("[Where Ren looks first]");
+    expect(hint).toContain("- /billing");
+    expect(hint).toContain("- /form");
+    expect(hint.indexOf("/billing")).toBeLessThan(hint.indexOf("/form"));
+    expect(hint).toContain("post_feedback");
+    expect(hint).toContain("I …");
+    expect(hint).not.toContain("SECRET_SIGNAL_DO_NOT_LEAK");
+    expect(hint).not.toContain("SECRET_PROBE_DO_NOT_LEAK");
+    expect(hint).not.toContain("maxlength 40");
+    expect(hint).not.toContain("paste 40 chars");
+    expect(hint).not.toMatch(/howToProbe|threshold agent/i);
   });
 });

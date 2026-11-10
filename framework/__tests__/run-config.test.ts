@@ -7,7 +7,6 @@ import {
   explorerConcurrency,
   positiveIntFromEnv,
   resolveViewport,
-  thresholdIterations,
 } from "../run-config";
 
 const env = (v: Record<string, string>) => v as unknown as NodeJS.ProcessEnv;
@@ -36,13 +35,11 @@ describe("positiveIntFromEnv", () => {
 describe("lane limits", () => {
   it("既定値は抽出前の run.ts のリテラルと同じ", () => {
     expect(browserIterations(env({}))).toBe(DEFAULT_BROWSER_ITERATIONS);
-    expect(thresholdIterations(env({}))).toBe(12);
     expect(explorerConcurrency(env({}))).toBe(DEFAULT_EXPLORER_CONCURRENCY);
   });
 
   it("環境変数で上書きできる", () => {
     expect(browserIterations(env({ SHOAL_BROWSER_ITERATIONS: "20" }))).toBe(20);
-    expect(thresholdIterations(env({ SHOAL_THRESHOLD_ITERATIONS: "6" }))).toBe(6);
     expect(explorerConcurrency(env({ SHOAL_EXPLORER_CONCURRENCY: "4" }))).toBe(4);
   });
 });

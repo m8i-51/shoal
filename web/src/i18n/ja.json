@@ -48,7 +48,6 @@
     "baseUrlPlaceholder": "http://localhost:3000",
     "maxBrowsers": "ブラウザエージェント数",
     "maxExplorers": "API エージェント数",
-    "maxThresholds": "閾値エージェント数",
     "start": "開始",
     "cancel": "キャンセル",
     "running": "実行中…",
@@ -74,7 +73,7 @@
     "browserInformationInformed": "全員探索者",
     "browserInformationHint": {
       "mixed": "各ブラウザペルソナの設定に従う。初見の人には仕様もログも渡さない。",
-      "first-run": "この run のブラウザは全員初見。仕様もコンソールも渡さない。API・しきい値は探索者のまま。",
+      "first-run": "この run のブラウザは全員初見。仕様もコンソールも渡さない。API 探索者はそのまま。",
       "informed": "この run のブラウザは全員探索者。ペルソナが初見でも仕様と診断ツールを渡す。"
     },
     "fixedRosterHint": "固定ペルソナがいる場合、全員が参加できるようエージェント数が自動で増えることがあります。"

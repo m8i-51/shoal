@@ -32,6 +32,7 @@ vi.mock("../select-target", () => ({
 }));
 
 import { executeBrowserTool, type BrowserAgentLog, type BrowserToolContext } from "../browser-tools";
+import { makeBoundaryPushingAgent } from "../roster";
 import { initRunLog, collectedFindings, runLog } from "../findings";
 import { UNTRUSTED_FENCE, NEUTRALIZED_FENCE } from "../untrusted";
 import { REDACTED_SECRET } from "../redact";
@@ -309,6 +310,32 @@ describe("post_feedback", () => {
   it("有効なカテゴリはそのまま通す", async () => {
     await executeBrowserTool("post_feedback", { title: "t", body: "b", category: "bug" }, makeContext());
     expect(collectedFindings[0].category).toBe("bug");
+  });
+
+  it("境界のバグは、境界を押し込む人の体験として post_feedback に残る", async () => {
+    const person = makeBoundaryPushingAgent();
+    const ctx = makeContext();
+    ctx.agentId = person.id;
+    ctx.agentLog.agentName = person.name;
+    ctx.agentLog.persona = person.persona;
+    const body = "I filled the field to the limit it showed and the page went blank. Nothing told me what was wrong.";
+    await executeBrowserTool(
+      "post_feedback",
+      { title: "The page went blank at the limit", body, category: "bug" },
+      ctx,
+    );
+
+    expect(collectedFindings).toHaveLength(1);
+    expect(collectedFindings[0]).toMatchObject({
+      agentId: person.id,
+      agentName: person.name,
+      role: person.persona,
+      category: "bug",
+      body,
+    });
+    expect(collectedFindings[0].body.startsWith("I ")).toBe(true);
+    expect(collectedFindings[0].agentName).not.toMatch(/threshold/i);
+    expect(collectedFindings[0].role).not.toMatch(/threshold/i);
   });
 
   it("first-run エージェントの finding に information を付ける", async () => {

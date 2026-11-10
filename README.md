@@ -74,21 +74,23 @@ Target App (any URL)
         ▼  creates and maintains the agent roster
   HR Agent
         │
-        ├──────────────────────────────────┬──────────────────┐
-        ▼                                  ▼                  ▼
-  API Agents  ×N                   Browser Agents  ×N   Threshold Agents ×M
-  explore via API                  browse the real UI   probe boundaries
-        │                                  │                  │
-        └──────────────────┬───────────────┴──────────────────┘
-                           ▼  deduplicates and files issue tickets
-                     Triage Agent
+        ├──────────────────────────┐
+        ▼                          ▼
+  API Agents  ×N            Browser Agents  ×N
+  explore via API           browse the real UI
+        │                          │
+        └────────────┬─────────────┘
+                     ▼  deduplicates and files issue tickets
+               Triage Agent
 ```
 
-Each agent carries a distinct perspective — accessibility, security, business logic, UI design, new user experience, and more. They operate on a shared understanding of the app's purpose and goals. Coverage is tracked across runs, so each session naturally focuses on areas that haven't been explored yet.
+Each agent carries a distinct perspective — accessibility, security, business logic, UI design, new user experience, and more. They operate on a shared understanding of the app's purpose and goals. Coverage is tracked across runs, so each session naturally focuses on areas that haven't been explored yet. Browser agents also remember which control they pressed on each screen and where it led. On a free exploration, with no assigned scenario, a turn points at a control that has not been used, or at a pressed control that still leads to an untried branch.
 
 **Persona contracts** — a persona is not a bio. Each recruit gets observable rules: how they scan a page, whether they skip a tutorial or read every step, what they do not know, when confusion rises, when they close the tab. Two people on the same four-step onboarding should fork. The dashboard seed, `personas.yaml`, and the persona designer all write this contract; browser and API agents follow it even when it conflicts with being a thorough tester.
 
-**First-run (screen only)** — a contract can also subtract what that person *knows*. First-run browser agents do not get the product brief, the feature list, console logs, or the accessibility tree: the screen is the product. Explorers keep today's briefing. Switch this per persona on the Personas panel, or for the whole browser lane in the Start dialog (mixed / all first-run / all explorers). API and threshold agents stay informed. Product Discovery, goals, and Product Edge do not turn off.
+One person on that roster pushes boundaries. When an input suggests a limit, they try that limit once — and also empty, and one huge number — and they press a control that looks finished a second time. That is how they use any app, not a checklist of this product's fields. Product Discovery still records `thresholdCandidates`; only each candidate's `area` hints where this person looks first. `signal` and `howToProbe` are not instructions. They file what happened to them with the same `post_feedback` path as every other browser persona. Cached specs without `thresholdCandidates` need `REFRESH_SPEC=1` if you want those area hints; without them, this person still pushes limits they can see.
+
+**First-run (screen only)** — a contract can also subtract what that person *knows*. First-run browser agents do not get the product brief, the feature list, console logs, or the accessibility tree: the screen is the product. Explorers keep today's briefing. Switch this per persona on the Personas panel, or for the whole browser lane in the Start dialog (mixed / all first-run / all explorers). API explorers stay informed. Product Discovery, goals, and Product Edge do not turn off.
 
 ---
 
@@ -367,7 +369,6 @@ shoal serve --env-file apps/shoal/.env
 | `BASE_URL` | `http://localhost:3000` | Target app URL |
 | `MAX_EXPLORERS` | `4` | API explorer agent count (0 to disable) |
 | `MAX_BROWSERS` | `2` | Browser agent count |
-| `MAX_THRESHOLDS` | `1` | Threshold agent count (0 to disable). Probes input/business/experience boundaries inferred by Product Discovery (browser-primary). Cached specs without `thresholdCandidates` need `REFRESH_SPEC=1` |
 | `ANTHROPIC_API_KEY` | — | Required |
 | `ISSUE_TRACKERS` | — | Comma-separated list of active trackers: `github`, `jira`, `notion`, `backlog`, `asana` |
 | `SHOAL_MODE` | `safe` | Safety mode: `read-only` \| `safe` \| `full` (see below) |
@@ -382,7 +383,6 @@ shoal serve --env-file apps/shoal/.env
 | `SHOAL_TOKEN` | — | Dashboard token. Required whenever `SHOAL_HOST` is not loopback or `SHOAL_ALLOWED_HOSTS` is set; generated and printed at startup if unset |
 | `SHOAL_ALLOWED_HOSTS` | — | Comma-separated public hostname(s) of a reverse proxy in front of the dashboard (see [Dashboard access](#dashboard-access)) |
 | `SHOAL_BROWSER_ITERATIONS` | `12` | Turns a browser agent may take |
-| `SHOAL_THRESHOLD_ITERATIONS` | `12` | Turns a threshold agent may take |
 | `SHOAL_EXPLORER_CONCURRENCY` | `2` | API explorer agents run in parallel batches of this size |
 | `SHOAL_VIEWPORT` | `1024x640` | Browser viewport for agent sessions (a persona's device emulation overrides it) |
 

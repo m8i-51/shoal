@@ -1,6 +1,6 @@
 /**
  * agent-context.ts
- * ブラウザ系レーン（browser / threshold / regression / verify）共通の
+ * ブラウザ系レーン（browser / regression / verify）共通の
  * Playwright コンテキストのライフサイクル。
  *
  * newContext → guardrails → tracing.start → newPage → 本体 → session 保存
