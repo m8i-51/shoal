@@ -18,6 +18,11 @@ const ANTHROPIC_PRICING: Record<string, { input: number; output: number }> = {
   "claude-sonnet-4-6":          { input: 3 / 1e6,   output: 15 / 1e6  },
   "claude-sonnet-4-5":          { input: 3 / 1e6,   output: 15 / 1e6  },
   "claude-sonnet-4":            { input: 3 / 1e6,   output: 15 / 1e6  },
+  // Claude Haiku 5.5. Anthropic list price for prompts up to 100,000 tokens
+  // (pricing page, checked 2026-11-11): $0.10 / $0.50 per MTok. Prompts over
+  // 100,000 tokens are $0.50 / $2.50. This table has no prompt-length tier,
+  // so the spend cap uses the up-to-100k rate.
+  "claude-haiku-5-5":           { input: 0.10 / 1e6, output: 0.50 / 1e6 },
   // Claude 4.x Haiku
   "claude-haiku-4-5-20251001":  { input: 0.8 / 1e6, output: 4 / 1e6   },
   "claude-haiku-4-5":           { input: 0.8 / 1e6, output: 4 / 1e6   },
@@ -52,6 +57,11 @@ const BEDROCK_PRICING: Record<string, { input: number; output: number }> = {
   "anthropic.claude-sonnet-4-6-v1:0":          { input: 3 / 1e6,   output: 15 / 1e6  },
   "anthropic.claude-sonnet-4-5-20250929-v1:0": { input: 3 / 1e6,   output: 15 / 1e6  },
   "anthropic.claude-sonnet-4-20250514-v1:0":   { input: 3 / 1e6,   output: 15 / 1e6  },
+  // Claude Haiku 5.5. Global ≤100k list price matches the Claude API
+  // ($0.10 / $0.50 per MTok; Anthropic rate card, 2026-10-07). In-region and
+  // geo are $0.11 / $0.55, and prompts over 100k tokens are 5× either rate.
+  // Flat entry, same as the other Claude 5 rows: the global ≤100k rate.
+  "anthropic.claude-haiku-5-5":                { input: 0.10 / 1e6, output: 0.50 / 1e6 },
   // Claude 4.x Haiku
   "anthropic.claude-haiku-4-5-20251001-v1:0":  { input: 0.8 / 1e6, output: 4 / 1e6   },
   // Claude 3.7

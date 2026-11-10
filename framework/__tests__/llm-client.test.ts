@@ -20,10 +20,10 @@ afterEach(() => {
 });
 
 describe("createLLMClient", () => {
-  it("デフォルト（LLM_PROVIDER 未設定）は anthropic、モデルは claude-haiku-4-5-20251001", () => {
+  it("デフォルト（LLM_PROVIDER 未設定）は anthropic、モデルは claude-haiku-5-5", () => {
     const result = createLLMClient();
     expect(result.provider).toBe("anthropic");
-    expect(result.defaultModel).toBe("claude-haiku-4-5-20251001");
+    expect(result.defaultModel).toBe("claude-haiku-5-5");
     expect(typeof result.client.createMessage).toBe("function");
   });
 
@@ -36,7 +36,7 @@ describe("createLLMClient", () => {
     process.env.LLM_PROVIDER = "bedrock";
     const result = createLLMClient();
     expect(result.provider).toBe("bedrock");
-    expect(result.defaultModel).toBe("anthropic.claude-haiku-4-5-20251001-v1:0");
+    expect(result.defaultModel).toBe("anthropic.claude-haiku-5-5");
   });
 
   it("bedrock でも LLM_MODEL で上書きできる", () => {

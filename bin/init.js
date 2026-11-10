@@ -11,8 +11,8 @@ const packageRoot = join(__dirname, "..");
 // directly by node (no tsx), so it cannot import that .ts module at runtime
 // and instead carries its own copy of the same default model ids.
 export const PROVIDERS = [
-  { value: "anthropic",   label: "Anthropic (Claude)",  hint: "recommended",        defaultModel: "claude-haiku-4-5-20251001" },
-  { value: "bedrock",     label: "Amazon Bedrock",      hint: "AWS credentials",    defaultModel: "anthropic.claude-haiku-4-5-20251001-v1:0" },
+  { value: "anthropic",   label: "Anthropic (Claude)",  hint: "recommended",        defaultModel: "claude-haiku-5-5" },
+  { value: "bedrock",     label: "Amazon Bedrock",      hint: "AWS credentials",    defaultModel: "anthropic.claude-haiku-5-5" },
   { value: "openai",      label: "OpenAI",                                           defaultModel: "gpt-4o-mini" },
   { value: "groq",        label: "Groq",                hint: "free tier available", defaultModel: "llama-3.3-70b-versatile" },
   { value: "gemini",      label: "Gemini",              hint: "free tier available", defaultModel: "gemini-2.0-flash" },

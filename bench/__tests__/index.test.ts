@@ -18,7 +18,7 @@ afterEach(() => {
 
 describe("resolveBenchModelLabel", () => {
   it("既定（LLM_PROVIDER 未設定）は anthropic とその既定モデルを返す", () => {
-    expect(resolveBenchModelLabel()).toBe("anthropic/claude-haiku-4-5-20251001");
+    expect(resolveBenchModelLabel()).toBe("anthropic/claude-haiku-5-5");
   });
 
   it("LLM_MODEL を設定すればそれを反映する — ANTHROPIC_MODEL / OPENAI_MODEL / SHOAL_MODEL は存在しない変数なので無視されるべき", () => {
@@ -32,7 +32,7 @@ describe("resolveBenchModelLabel", () => {
 
   it("LLM_PROVIDER=bedrock ならプロバイダ名とモデルの両方が反映される", () => {
     process.env.LLM_PROVIDER = "bedrock";
-    expect(resolveBenchModelLabel()).toBe("bedrock/anthropic.claude-haiku-4-5-20251001-v1:0");
+    expect(resolveBenchModelLabel()).toBe("bedrock/anthropic.claude-haiku-5-5");
   });
 
   it("常に 'unknown' ではない具体的な値を返す（過去の回帰の再発防止）", () => {

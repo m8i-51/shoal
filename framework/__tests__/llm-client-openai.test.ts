@@ -7,7 +7,7 @@ vi.mock("openai", () => ({
   }),
 }));
 vi.mock("@anthropic-ai/sdk", () => ({ default: vi.fn() }));
-vi.mock("@anthropic-ai/bedrock-sdk", () => ({ default: vi.fn() }));
+vi.mock("@anthropic-ai/bedrock-sdk", () => ({ AnthropicBedrockMantle: vi.fn() }));
 
 import OpenAI from "openai";
 import { createLLMClient } from "../llm-client";

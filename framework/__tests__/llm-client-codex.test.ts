@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 vi.mock("fs");
 vi.mock("openai", () => ({ default: vi.fn() }));
 vi.mock("@anthropic-ai/sdk", () => ({ default: vi.fn() }));
-vi.mock("@anthropic-ai/bedrock-sdk", () => ({ default: vi.fn() }));
+vi.mock("@anthropic-ai/bedrock-sdk", () => ({ AnthropicBedrockMantle: vi.fn() }));
 
 import * as fs from "fs";
 import { createLLMClient } from "../llm-client";

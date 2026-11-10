@@ -10,7 +10,7 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
-import AnthropicBedrock from "@anthropic-ai/bedrock-sdk";
+import { AnthropicBedrockMantle } from "@anthropic-ai/bedrock-sdk";
 import OpenAI from "openai";
 import * as fs from "fs";
 import * as os from "os";
@@ -56,12 +56,23 @@ class AnthropicClient {
 
 // ---- Amazon Bedrock クライアント ----
 
+/**
+ * Region for the bedrock-mantle endpoint. `AnthropicBedrockMantle` throws
+ * when none is set; the previous client treated a missing `AWS_REGION` as
+ * us-east-1, and the startup log still reports that same fallback.
+ */
+function bedrockRegion(): string {
+  return process.env.AWS_REGION || "us-east-1";
+}
+
 class BedrockClient {
-  private client: AnthropicBedrock;
+  private client: AnthropicBedrockMantle;
 
   constructor() {
-    // AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_REGION を自動読み取り
-    this.client = new AnthropicBedrock();
+    // Haiku 5.5 is served on bedrock-mantle with anthropic-version 2026-10-21.
+    // The classic InvokeModel client cannot call that model. AWS credentials
+    // still come from the default chain (env, shared file, SSO, instance role).
+    this.client = new AnthropicBedrockMantle({ awsRegion: bedrockRegion() });
   }
 
   async createMessage(params: CreateMessageParams): Promise<Message> {
@@ -553,7 +564,7 @@ export function createLLMClient(): { client: LLMClient; defaultModel: string; pr
     spec.kind === "openai-compat" && effectiveBaseURL
       ? ` (${effectiveBaseURL})`
       : spec.kind === "bedrock"
-        ? ` (region: ${process.env.AWS_REGION ?? "us-east-1"})`
+        ? ` (region: ${bedrockRegion()})`
         : "";
   log.info(`[LLM] provider: ${spec.label}${where}, model: ${effectiveModel}`);
 
