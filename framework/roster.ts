@@ -190,9 +190,12 @@ export function splitRosterForDispatch<T extends Agent>(
     if (hasFirstRun && hasInformed) {
       browsers.push(...takeMatching(1, (a) => isFirstRun(a) && agentOrigin(a) === "fixed"));
       if (!browsers.some(isFirstRun)) browsers.push(...takeMatching(1, isFirstRun));
-      // A fixed informed person keeps the informed seat. The boundary
-      // companion is seated only after every fixed persona has a lane.
+      // Informed seat: a fixed persona, then the boundary companion, then
+      // any other informed auto. A fixed persona is never displaced.
       browsers.push(...takeMatching(1, (a) => !isFirstRun(a) && agentOrigin(a) === "fixed"));
+      if (!browsers.some((a) => !isFirstRun(a))) {
+        browsers.push(...takeMatching(1, (a) => isBoundaryPushingAgent(a) && !isFirstRun(a)));
+      }
       if (!browsers.some((a) => !isFirstRun(a))) {
         browsers.push(...takeMatching(1, (a) => !isFirstRun(a) && !isBoundaryPushingAgent(a)));
       }

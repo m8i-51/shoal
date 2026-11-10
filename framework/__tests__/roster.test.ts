@@ -237,6 +237,28 @@ describe("boundary-pushing persona on the roster", () => {
     expect(browsers.map((a) => a.id)).toContain("f1");
     expect([...browsers, ...explorers].map((a) => a.id)).toContain("f1");
   });
+
+  it("seats the boundary persona before a non-fixed informed auto when nobody is fixed", () => {
+    const firstRun = agent({
+      id: "a-fr",
+      name: "FR",
+      origin: "auto",
+      contract: sampleContract({ information: "first-run" }),
+    });
+    const informed = agent({ id: "a-inf", name: "Inf", origin: "auto" });
+    const roster = ensureBoundaryPushingPersona([firstRun, informed]);
+    const requested = { maxBrowsers: 2, maxExplorers: 0 };
+    const caps = reserveBoundaryBrowserSeat(roster, requested);
+    expect(caps).toEqual(requested);
+
+    const { browsers, explorers } = splitRosterForDispatch(roster, caps);
+    const browserIds = browsers.map((a) => a.id);
+    const explorerIds = explorers.map((a) => a.id);
+    expect(browserIds).toContain("a-fr");
+    expect(browserIds).toContain(makeBoundaryPushingAgent().id);
+    expect(browserIds).not.toContain("a-inf");
+    expect(explorerIds).not.toContain("a-inf");
+  });
 });
 
 describe("partitionActiveAgents", () => {
