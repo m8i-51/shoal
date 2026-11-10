@@ -19,7 +19,7 @@ import { runToolSession } from "./framework/tool-session";
 import { ToolSessionNoOpError, type ToolResultContent } from "./framework/tool-types";
 import { collectedFindings, initRunLog, saveRunLog, saveFinding, getSwarmSignals, runLog } from "./framework/findings";
 import { loadAgents, addAgent, retireAgent, recordAgentMemories, formatAgentMemories, buildMemoryInputs, isFixedAgent, agentOrigin, resolveAgentAccountRole, type Agent } from "./framework/agent-store";
-import { formatPersonaContract, parsePersonaContract, parseBrowserInformationMode, effectiveInformation, PERSONA_CONTRACT_GENERATION_SPEC, isBoundaryPushingAgent, BOUNDARY_PUSHING_SEED, type AgentLane, type PersonaInformation } from "./framework/persona-contract";
+import { formatPersonaContract, parsePersonaContract, parseBrowserInformationMode, effectiveInformation, PERSONA_CONTRACT_GENERATION_SPEC, isBoundaryPushingAgent, BOUNDARY_PUSHING_SEED, type AgentLane, type BrowserInformationMode, type PersonaInformation } from "./framework/persona-contract";
 import { formatGoalsSection, formatAppOverview, formatFeatureReference, formatBrowserToolGuidance } from "./framework/browser-prompt";
 import { computeRosterSlots, buildRunRoster, splitRosterForDispatch, partitionActiveAgents, ensureBoundaryPushingPersona, reserveBoundaryBrowserSeat } from "./framework/roster";
 import { updateCoverage, computeWeightedSummary, getLastRunPaths, getFindingHotspots } from "./framework/coverage";
@@ -1354,6 +1354,12 @@ export async function main() {
 
     const { explorers: explorerAgents, browsers: browserAgents } =
       splitRosterForDispatch(runRoster, dispatchCaps);
+    if (
+      boundaryPerson
+      && ![...explorerAgents, ...browserAgents].some((agent) => agent.id === boundaryPerson.id)
+    ) {
+      log.info(`[roster] ${boundaryPerson.name} is not dispatched — a fixed persona keeps their seat`);
+    }
 
     // 6.5. roster サイズを記録（実際に走った agent 数は run 終了時に runLog.agents.length で確定）
     runLog.summary.totalAgents = runRoster.length;
@@ -1437,9 +1443,6 @@ export async function main() {
     const boundaryAreas = boundaryVisitAreas(
       normalizeThresholdCandidates(productSpec.thresholdCandidates),
     );
-    if (boundaryPerson && boundaryAreas.length > 0) {
-      log.info(`[browser] ${boundaryPerson.name} looks first at: ${boundaryAreas.join(", ")}`);
-    }
 
     type LaneResult =
       | { kind: "browser"; agent: Agent; log: BrowserAgentLog }
@@ -1459,9 +1462,9 @@ export async function main() {
     const browserJobs = (budgetStopped ? [] : browserAgents).map(async (agent): Promise<LaneResult> => {
       const assignment = pairAssignments.get(agent.id) ?? pickAssignment(dispatchIdx++, dispatchScenarios, "browser");
       agentAssignments.set(agent.id, assignment);
-      const areaHint = isBoundaryPushingAgent(agent)
-        ? formatBoundaryAreaHint(agent.name, boundaryAreas)
-        : "";
+      const areaHint = boundaryAreaHint(agent, boundaryAreas, BROWSER_INFORMATION_MODE);
+      const lookFirst = boundaryLookFirstLine(agent, boundaryAreas, BROWSER_INFORMATION_MODE);
+      if (lookFirst) log.info(lookFirst);
 
       const accountRole = assignment.actor?.role ?? resolveAgentAccountRole(agent);
       const authPlan = planBrowserAuth({
@@ -1658,6 +1661,34 @@ Rules:
       process.exitCode = 1;
     }
   }
+}
+
+/**
+ * Place names for a boundary-pushing browser persona.
+ * Empty when effective information is first-run — the same resolution that
+ * strips the product briefing (`browserInformation` composed with the
+ * persona's own information). Discovery areas are not prior knowledge for
+ * someone who only sees the screen.
+ */
+export function boundaryAreaHint(
+  agent: Pick<Agent, "name" | "contract" | "seed">,
+  areas: string[],
+  mode: BrowserInformationMode,
+): string {
+  const information = effectiveInformation(agent.contract, { mode, lane: "browser" });
+  if (information === "first-run") return "";
+  if (!isBoundaryPushingAgent(agent)) return "";
+  return formatBoundaryAreaHint(agent.name, areas);
+}
+
+/** Matches `boundaryAreaHint`: no line when no hint is passed. */
+export function boundaryLookFirstLine(
+  agent: Pick<Agent, "name" | "contract" | "seed">,
+  areas: string[],
+  mode: BrowserInformationMode,
+): string | null {
+  if (!boundaryAreaHint(agent, areas, mode) || areas.length === 0) return null;
+  return `[browser] ${agent.name} looks first at: ${areas.join(", ")}`;
 }
 
 /**

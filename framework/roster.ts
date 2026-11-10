@@ -37,19 +37,32 @@ export function ensureBoundaryPushingPersona<T extends Agent>(roster: T[]): T[] 
 }
 
 /**
- * Fixed personas keep their browser seats. When they fill every seat, open
- * one more so the boundary-pushing person still browses. No-op when browsers
- * are off, or when that person is already a fixed member.
+ * The boundary companion is added after auto-slot truncation, so they are
+ * one extra person on top of a roster that already fits the caps.
+ *
+ * Open browser seats until every dashboard-selected fixed persona still has
+ * one, even when a non-fixed first-run already holds a seat and the fixed
+ * count does not fill the cap. No-op when browsers are off, when no fixed
+ * persona needs protecting, or when this person is already fixed.
  */
 export function reserveBoundaryBrowserSeat<T extends Agent>(roster: T[], caps: DispatchCaps): DispatchCaps {
   if (caps.maxBrowsers <= 0) return caps;
   const pusher = roster.find((agent) => isBoundaryPushingAgent(agent));
   if (!pusher || isFixedAgent(pusher)) return caps;
+
   const fixedCount = roster.filter((agent) => isFixedAgent(agent)).length;
-  if (fixedCount >= caps.maxBrowsers) {
-    return { ...caps, maxBrowsers: caps.maxBrowsers + 1 };
-  }
-  return caps;
+  if (fixedCount === 0) return caps;
+
+  const nonFixedFirstRun = roster.some(
+    (agent) => !isFixedAgent(agent) && personaInformation(agent.contract) === "first-run",
+  );
+  const hasInformed = roster.some((agent) => personaInformation(agent.contract) !== "first-run");
+  // The mix keeps one browser seat for a non-fixed first-run when both kinds
+  // are present. That seat is not available to an informed fixed persona.
+  const firstRunSeat = caps.maxBrowsers >= 2 && nonFixedFirstRun && hasInformed ? 1 : 0;
+  const needed = fixedCount + firstRunSeat + 1;
+  if (needed <= caps.maxBrowsers) return caps;
+  return { ...caps, maxBrowsers: needed };
 }
 
 export interface RosterSlotInput {
@@ -135,6 +148,8 @@ export interface RosterDispatch<T extends Agent> {
  * When there are at least two browser slots and the roster has both first-run
  * and informed people, put one of each in the browser lane so mixed runs mix.
  * First-run agents prefer browser slots (they are useless as API explorers).
+ * The boundary companion is seated after fixed personas, so they never take
+ * the last seat from a dashboard-selected member.
  * Regression is an extra browser job, not taken from the explorer pool.
  */
 export function splitRosterForDispatch<T extends Agent>(
@@ -175,9 +190,14 @@ export function splitRosterForDispatch<T extends Agent>(
     if (hasFirstRun && hasInformed) {
       browsers.push(...takeMatching(1, (a) => isFirstRun(a) && agentOrigin(a) === "fixed"));
       if (!browsers.some(isFirstRun)) browsers.push(...takeMatching(1, isFirstRun));
-      browsers.push(...takeMatching(1, (a) => isBoundaryPushingAgent(a) && !isFirstRun(a)));
+      // Informed seat: a fixed persona, then the boundary companion, then
+      // any other informed auto. A fixed persona is never displaced.
+      browsers.push(...takeMatching(1, (a) => !isFirstRun(a) && agentOrigin(a) === "fixed"));
       if (!browsers.some((a) => !isFirstRun(a))) {
-        browsers.push(...takeMatching(1, (a) => !isFirstRun(a) && agentOrigin(a) === "fixed"));
+        browsers.push(...takeMatching(1, (a) => isBoundaryPushingAgent(a) && !isFirstRun(a)));
+      }
+      if (!browsers.some((a) => !isFirstRun(a))) {
+        browsers.push(...takeMatching(1, (a) => !isFirstRun(a) && !isBoundaryPushingAgent(a)));
       }
       if (!browsers.some((a) => !isFirstRun(a))) browsers.push(...takeMatching(1, (a) => !isFirstRun(a)));
     }
