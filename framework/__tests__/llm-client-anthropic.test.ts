@@ -9,15 +9,16 @@ vi.mock("@anthropic-ai/sdk", () => ({
   }),
 }));
 vi.mock("@anthropic-ai/bedrock-sdk", () => ({
-  default: vi.fn().mockImplementation(function () {
+  AnthropicBedrockMantle: vi.fn().mockImplementation(function () {
     return { messages: { create: mockBedrockCreate } };
   }),
 }));
 vi.mock("openai", () => ({ default: vi.fn() }));
 
+import { AnthropicBedrockMantle } from "@anthropic-ai/bedrock-sdk";
 import { createLLMClient } from "../llm-client";
 
-const ENV_KEYS = ["LLM_PROVIDER", "ANTHROPIC_API_KEY"] as const;
+const ENV_KEYS = ["LLM_PROVIDER", "ANTHROPIC_API_KEY", "AWS_REGION"] as const;
 let saved: Record<string, string | undefined>;
 
 beforeEach(() => {
@@ -47,14 +48,22 @@ describe("AnthropicClient.createMessage", () => {
 });
 
 describe("BedrockClient.createMessage", () => {
-  it("Bedrock SDK の messages.create にパラメータをそのまま渡す", async () => {
+  it("Mantle クライアントの messages.create にパラメータをそのまま渡す", async () => {
     process.env.LLM_PROVIDER = "bedrock";
     const fakeMessage = { id: "m2", content: [], stop_reason: "end_turn" };
     mockBedrockCreate.mockResolvedValue(fakeMessage);
     const { client } = createLLMClient();
-    const params = { model: "anthropic.claude-3-5-haiku-20241022-v1:0", max_tokens: 100, system: "s", tools: [], messages: [] };
+    const params = { model: "custom-bedrock-model", max_tokens: 100, system: "s", tools: [], messages: [] };
     const result = await client.createMessage(params);
     expect(result).toBe(fakeMessage);
     expect(mockBedrockCreate).toHaveBeenCalledWith(params);
+    expect(AnthropicBedrockMantle).toHaveBeenCalledWith({ awsRegion: "us-east-1" });
+  });
+
+  it("AWS_REGION を Mantle クライアントに渡す", () => {
+    process.env.LLM_PROVIDER = "bedrock";
+    process.env.AWS_REGION = "ap-northeast-1";
+    createLLMClient();
+    expect(AnthropicBedrockMantle).toHaveBeenCalledWith({ awsRegion: "ap-northeast-1" });
   });
 });

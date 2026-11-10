@@ -62,8 +62,8 @@ export const PROVIDERS: ProviderSpec[] = [
     id: "anthropic",
     label: "Anthropic",
     kind: "anthropic",
-    // anthropic.claude-3-5-haiku-20241022-v1:0 (a previous default) is retired.
-    defaultModel: "claude-haiku-4-5-20251001",
+    // claude-haiku-4-5-20251001 (a previous default) stays in the cost table.
+    defaultModel: "claude-haiku-5-5",
     credentialEnv: ["ANTHROPIC_API_KEY"],
     free: false,
   },
@@ -71,7 +71,9 @@ export const PROVIDERS: ProviderSpec[] = [
     id: "bedrock",
     label: "Amazon Bedrock",
     kind: "bedrock",
-    defaultModel: "anthropic.claude-haiku-4-5-20251001-v1:0",
+    // Dateless id on Claude in Amazon Bedrock (bedrock-mantle). The dated
+    // Haiku 4.5 ARN does not accept that endpoint's API version.
+    defaultModel: "anthropic.claude-haiku-5-5",
     // Empty rather than the AWS_* names: Bedrock falls back to the default
     // AWS credential chain (instance role, SSO, ~/.aws/credentials), so a
     // missing AWS_ACCESS_KEY_ID is not a misconfiguration.

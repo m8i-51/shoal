@@ -55,6 +55,12 @@ describe("estimateCost — free providers", () => {
 });
 
 describe("estimateCost — Anthropic", () => {
+  it("claude-haiku-5-5 の料金を計算する（100k トークンまでのリスト価格）", async () => {
+    const cost = await estimateCost("claude-haiku-5-5", "anthropic", 1_000_000, 500_000);
+    // input: 0.10/1M × 1M = 0.10, output: 0.50/1M × 500k = 0.25 → 0.35
+    expect(cost).toBeCloseTo(0.35, 5);
+  });
+
   it("claude-haiku-4-5-20251001 の料金を計算する", async () => {
     const cost = await estimateCost("claude-haiku-4-5-20251001", "anthropic", 1_000_000, 500_000);
     // input: 0.8/1M × 1M = 0.8, output: 4/1M × 500k = 2.0 → 2.8
@@ -89,6 +95,17 @@ describe("estimateCost — Anthropic", () => {
 });
 
 describe("estimateCost — Bedrock", () => {
+  it("anthropic.claude-haiku-5-5 の料金を計算する", async () => {
+    const cost = await estimateCost("anthropic.claude-haiku-5-5", "bedrock", 1_000_000, 500_000);
+    // global ≤100k: input 0.10 + output 0.25 = 0.35
+    expect(cost).toBeCloseTo(0.35, 5);
+  });
+
+  it("jp. プレフィックス付き Claude Haiku 5.5 の料金を計算する", async () => {
+    const cost = await estimateCost("jp.anthropic.claude-haiku-5-5", "bedrock", 1_000_000, 0);
+    expect(cost).toBeCloseTo(0.10, 5);
+  });
+
   it("anthropic.claude-3-5-haiku-20241022-v1:0 の料金を計算する", async () => {
     const cost = await estimateCost("anthropic.claude-3-5-haiku-20241022-v1:0", "bedrock", 1_000_000, 1_000_000);
     // input: 0.8/1M + output: 4/1M = 4.8

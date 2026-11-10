@@ -684,19 +684,15 @@ Anthropic は、サードパーティが Claude.ai ログインや Free/Pro/Max 
 
 `.env` に空の `AWS_ACCESS_KEY_ID=` / `AWS_SECRET_ACCESS_KEY=` を書かないでください。空文字が入ると認証チェーンが壊れます。shoal は起動時に空の AWS キーを無視し、警告を出します。
 
-`LLM_MODEL` には基盤モデル ID か推論プロファイル ID を指定します。作業リージョンでは、リージョン内呼び出しや地域限定プロファイルに未対応の世代があります。データ所在を国内に閉じたい場合は、その地域プロファイルが存在する世代を選んで組み合わせてください:
+Bedrock への呼び出しは Claude in Amazon Bedrock（`bedrock-mantle`）に向かい、クライアントは `AnthropicBedrockMantle` です。リクエストの `anthropic-version` は `2026-10-21` です。`LLM_MODEL` を省略するとモデルは `anthropic.claude-haiku-5-5` になります。明示した `LLM_MODEL` はそのまま送られるので、そのエンドポイントが受け付ける ID を指定してください。日付入りの InvokeModel ID（`…-v1:0`）は別の API です。Haiku 5.5 はすべてのアカウントで使えるわけではありません。shoal は起動時にアクセス権を調べません。`AWS_REGION` が無いときはこれまでどおり `us-east-1` です。
 
 | スコープ | `LLM_MODEL` の例 | 典型的な `AWS_REGION` |
 |---|---|---|
-| 基盤モデル（オンデマンド、リージョンが提供している場合） | `anthropic.claude-haiku-4-5-20251001-v1:0`（既定値） | モデルがあるリージョン |
-| US クロスリージョン | `us.anthropic.claude-sonnet-4-5-20250929-v1:0` | `us-east-1` |
-| EU クロスリージョン | `eu.anthropic.claude-sonnet-4-5-20250929-v1:0` | `eu-central-1` |
-| APAC クロスリージョン | `apac.anthropic.claude-sonnet-4-5-20250929-v1:0` | `ap-northeast-1` |
-| 日本（東京 + 大阪のみ） | `jp.anthropic.claude-sonnet-4-5-20250929-v1:0` | `ap-northeast-1` |
-| 日本 | `jp.anthropic.claude-haiku-4-5-20251001-v1:0` | `ap-northeast-1` |
-| 日本 | `jp.anthropic.claude-sonnet-4-6` | `ap-northeast-1` |
+| 既定値 | `anthropic.claude-haiku-5-5` | 未設定なら `us-east-1` |
+| 同じエンドポイントの Haiku 4.5 | `anthropic.claude-haiku-4-5` | モデルがあるリージョン |
+| 同じエンドポイントの Sonnet 5 | `anthropic.claude-sonnet-5` | モデルがあるリージョン |
 
-アカウントで使えるプロファイルは `aws bedrock list-inference-profiles` で確認できます。コピー用の例は `.env.example` にあります。
+コピー用の例は `.env.example` にあります。
 
 ---
 

@@ -718,19 +718,15 @@ Leave `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` **unset** to use the default
 
 **Do not** put empty `AWS_ACCESS_KEY_ID=` / `AWS_SECRET_ACCESS_KEY=` lines in `.env`. An empty value overrides the credential chain and authentication fails. shoal strips empty AWS keys at startup and logs a warning.
 
-Set `LLM_MODEL` to a Bedrock model ID **or** an inference profile ID. Not every model generation is available for in-region invoke or for every geographic profile. If you need data to stay in-country, pick a generation that exists as a geo profile in that region:
+Bedrock calls go to Claude in Amazon Bedrock (`bedrock-mantle`) through `AnthropicBedrockMantle`, which sends `anthropic-version: 2026-10-21`. When `LLM_MODEL` is unset the model is `anthropic.claude-haiku-5-5`. An explicit `LLM_MODEL` is sent unchanged, so set it to an id that endpoint serves. Dated InvokeModel ids (`…-v1:0`) are a different API. Haiku 5.5 is not open on every account; shoal does not check access at startup. A missing `AWS_REGION` still means `us-east-1`.
 
 | Scope | Example `LLM_MODEL` | Typical `AWS_REGION` |
 |---|---|---|
-| Foundation model (on-demand, when offered) | `anthropic.claude-haiku-4-5-20251001-v1:0` (default) | region that hosts the model |
-| US cross-region | `us.anthropic.claude-sonnet-4-5-20250929-v1:0` | `us-east-1` |
-| EU cross-region | `eu.anthropic.claude-sonnet-4-5-20250929-v1:0` | `eu-central-1` |
-| APAC cross-region | `apac.anthropic.claude-sonnet-4-5-20250929-v1:0` | `ap-northeast-1` |
-| Japan (Tokyo + Osaka only) | `jp.anthropic.claude-sonnet-4-5-20250929-v1:0` | `ap-northeast-1` |
-| Japan | `jp.anthropic.claude-haiku-4-5-20251001-v1:0` | `ap-northeast-1` |
-| Japan | `jp.anthropic.claude-sonnet-4-6` | `ap-northeast-1` |
+| Default | `anthropic.claude-haiku-5-5` | `us-east-1` when unset |
+| Haiku 4.5 on the same endpoint | `anthropic.claude-haiku-4-5` | region that hosts the model |
+| Sonnet 5 on the same endpoint | `anthropic.claude-sonnet-5` | region that hosts the model |
 
-List profiles in your account with `aws bedrock list-inference-profiles`. Copy-paste examples live in `.env.example`.
+Copy-paste examples live in `.env.example`.
 
 ---
 
